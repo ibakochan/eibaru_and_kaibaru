@@ -50,17 +50,46 @@ class Club(models.Model):
     owner = models.ForeignKey(CustomUser, on_delete=models.PROTECT, related_name="owned_clubs")
 
     trial_start_date = models.DateField(null=True, blank=True)
-    expiration_date = models.DateField(null=True, blank=True)
+    expiration_date = models.DateTimeField(null=True, blank=True)
     stripe_customer_id = models.CharField(max_length=255, null=True, blank=True)
     stripe_subscription_id = models.CharField(max_length=255, null=True, blank=True)
+
+    has_paid_joining_fee = models.BooleanField(default=False)
     subscription_active = models.BooleanField(default=False)
     last_paid_invoice_id = models.CharField(max_length=255, blank=True, null=True)
+    subscription_cancel_at_period_end = models.BooleanField(default=False)
+    subscription_current_period_end = models.DateTimeField(null=True, blank=True)
+
+    stripe_anchor_date = models.PositiveSmallIntegerField(
+        default=25,
+        help_text="If set, subscriptions will align to this day of the month (2-27)"
+    )
+
+    # Subscription mode
+    SUBSCRIPTION_MODE_CHOICES = [
+        ("monthly", "月謝 (fixed monthly)"),
+        ("regular", "Regular subscription"),
+    ]
+    subscription_mode = models.CharField(
+        max_length=20,
+        choices=SUBSCRIPTION_MODE_CHOICES,
+        default="regular",
+        help_text="Whether the club uses fixed monthly billing or regular subscription mode"
+    )
+
+    joining_fee = models.IntegerField(
+        default=0,
+        help_text="入会金 (one-time fee charged when a member joins)"
+    )
 
 
     system = models.JSONField(null=True, blank=True)
     trial = models.JSONField(null=True, blank=True)
     contact = models.JSONField(null=True, blank=True)
     home = models.JSONField(null=True, blank=True)
+
+    page_content = models.JSONField(null=True, blank=True)
+
 
 
     picture = models.ImageField(upload_to=club_picture_upload_to, null=True, blank=True)
@@ -76,7 +105,6 @@ class Club(models.Model):
     line_url = models.URLField(null=True, blank=True)
     line_qr_code = models.ImageField(upload_to=line_qr_upload_to, null=True, blank=True)
 
-    join_key = models.CharField(max_length=50, null=True, blank=True)
 
     has_levels = models.BooleanField(default=False)
     has_attendance = models.BooleanField(default=False)
@@ -99,7 +127,35 @@ class Club(models.Model):
     stripe_onboarding_completed = models.BooleanField(default=False)
     stripe_details_submitted = models.BooleanField(default=False)
 
+    def clean(self):
+        super().clean()
 
+        # Enforce 2-27 range for all modes
+        if self.stripe_anchor_date:
+            if self.stripe_anchor_date < 2 or self.stripe_anchor_date > 27:
+                raise ValidationError(
+                    {"stripe_anchor_date": "請求日は2日から27日の間で設定してください。"}
+                )
+
+        # For monthly mode, anchor is required
+        if self.subscription_mode == "monthly" and not self.stripe_anchor_date:
+            raise ValidationError(
+                {"stripe_anchor_date": "月謝モードの場合、請求日は必須です。"}
+            )
+
+    def save(self, *args, **kwargs):
+        # Set default to 25 if monthly and not set
+        if not self.stripe_anchor_date:
+            self.stripe_anchor_date = 25
+
+        # Clamp the value between 2 and 27
+        if self.stripe_anchor_date:
+            if self.stripe_anchor_date < 2:
+                self.stripe_anchor_date = 2
+            elif self.stripe_anchor_date > 27:
+                self.stripe_anchor_date = 27
+
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.subdomain
@@ -107,11 +163,11 @@ class Club(models.Model):
 
 
 class MembershipPlan(models.Model):
-    club = models.ForeignKey(Club, on_delete=models.CASCADE)
+    club = models.ForeignKey(Club, related_name="membership_plans", on_delete=models.CASCADE)
     name = models.CharField(max_length=100)   
     description = models.TextField(blank=True)
 
-    price_cents = models.IntegerField()
+    price = models.IntegerField()
     currency = models.CharField(max_length=10, default="jpy")
     interval = models.CharField(
         max_length=10,
@@ -119,6 +175,8 @@ class MembershipPlan(models.Model):
     )
 
     stripe_price_id = models.CharField(max_length=255)
+    stripe_product_id = models.CharField(max_length=255, blank=True, null=True)
+    
     active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -132,9 +190,7 @@ class MembershipPlan(models.Model):
     age_max = models.PositiveIntegerField(null=True, blank=True)
 
     class Meta:
-        ordering = ["price_cents"]
-
-    class Meta:
+        ordering = ["price"]
         unique_together = ("club", "name")
 
 
@@ -165,9 +221,19 @@ class SlateImage(models.Model):
         return f"{self.club.subdomain} - Image {self.id}"
 
 class Member(models.Model):
-    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="memberships")
+    user = models.ForeignKey(CustomUser, null=True, blank=True, on_delete=models.SET_NULL, related_name="memberships")
     club = models.ForeignKey("Club", on_delete=models.CASCADE, null=True, blank=True, related_name="members")
+    owner = models.ForeignKey(CustomUser, null=True, blank=True, on_delete=models.SET_NULL, related_name="managed_members")
+    
+    gender = models.CharField(
+        max_length=10,
+        choices=[("male", "Male"), ("female", "Female")],
+        default="male"
+    )
 
+    birth_date = models.DateField(
+        default=datetime.date(2000, 5, 4)
+    )
     is_instructor = models.BooleanField(default=False)   
     is_manager = models.BooleanField(default=False)
     introduction = models.TextField(null=True, blank=True)  
@@ -177,8 +243,8 @@ class Member(models.Model):
     phone_number = models.CharField(max_length=20, null=True, blank=True)
     emergency_number = models.CharField(max_length=20, null=True, blank=True)
     
-    member_type = models.TextField(null=True, blank=True)  
-    contract = models.TextField(null=True, blank=True)
+
+
 
     other_information = models.TextField(null=True, blank=True)
 
@@ -194,6 +260,8 @@ class Member(models.Model):
     is_kyukai = models.BooleanField(default=False)
     is_kyukai_paid = models.BooleanField(default=False)
     kyukai_since = models.DateField(null=True, blank=True)
+    stripe_customer_id = models.CharField(max_length=255, null=True, blank=True)
+
 
 
     class Meta:
@@ -205,7 +273,7 @@ class Member(models.Model):
 class OneTimeProduct(models.Model):
     club = models.ForeignKey(Club, on_delete=models.CASCADE)
     name = models.CharField(max_length=100)
-    price_cents = models.IntegerField()
+    price = models.IntegerField()
     currency = models.CharField(max_length=10, default="jpy")
     stripe_price_id = models.CharField(max_length=255)
     active = models.BooleanField(default=True)
@@ -231,30 +299,227 @@ class OneTimePayment(models.Model):
     paid_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
-class MemberSubscription(models.Model):
-    member = models.OneToOneField(Member, on_delete=models.CASCADE)
-    plan = models.ForeignKey(MembershipPlan, on_delete=models.SET_NULL, null=True)
 
-    stripe_subscription_id = models.CharField(max_length=255)
+
+class Subscription(models.Model):
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="subscriptions")
+
+    stripe_subscription_id = models.CharField(max_length=255, unique=True)
+
+    BILLING_MODE_CHOICES = [
+        ("monthly", "Fixed monthly"),
+        ("regular", "Regular"),
+    ]
+
+    billing_mode = models.CharField(
+        max_length=20,
+        choices=BILLING_MODE_CHOICES,
+        default="regular",
+    )
+
+    billing_anchor_day = models.PositiveSmallIntegerField(
+        help_text="Anchor day used for this subscription (1-28)",
+        default="25"
+    )
+
     STATUS_CHOICES = [
         ("active", "Active"),
         ("past_due", "Past due"),
         ("canceled", "Canceled"),
         ("unpaid", "Unpaid"),
+        ("trialing", "Trialing"),
+        ("pending", "Pending"),
     ]
 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES)
+
     current_period_end = models.DateTimeField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    stripe_customer_id = models.CharField(max_length=255, null=True, blank=True)
+
+    access_until = models.DateTimeField(null=True, blank=True)
+
     cancel_at_period_end = models.BooleanField(default=False)
 
+    last_invoice_id = models.CharField(max_length=255, null=True, blank=True)
+
+    
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["member"],
+                condition=models.Q(status__in=["active", "trialing", "pending"]),
+                name="one_active_subscription_per_member",
+            )
+        ]
+
+
+class SubscriptionItem(models.Model):
+    subscription = models.ForeignKey(
+        Subscription,
+        on_delete=models.CASCADE,
+        related_name="items"
+    )
+
+    plan = models.ForeignKey(
+        MembershipPlan,
+        on_delete=models.SET_NULL,
+        null=True
+    )
+
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    stripe_subscription_item_id = models.CharField(max_length=255, null=True, blank=True)
+    cancel_at_period_end = models.BooleanField(default=False)
+    access_until = models.DateTimeField(null=True, blank=True)
+    monthly_double_resume_charge_prevention = models.BooleanField(default=False)
+
+    quantity = models.PositiveIntegerField(default=1)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class Invoice(models.Model):
+
+    member = models.ForeignKey(Member, on_delete=models.CASCADE)
+    club = models.ForeignKey(Club, on_delete=models.CASCADE)
+
+    subscription = models.ForeignKey(
+        Subscription,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True
+    )
+
+    STATUS_CHOICES = [
+        ("draft","Draft"),
+        ("open","Open"),
+        ("paid","Paid"),
+        ("void","Void"),
+    ]
+
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES)
+    
+    amount_due = models.IntegerField()
+    amount_paid = models.IntegerField(default=0)
+
+    number = models.CharField(max_length=50, unique=True, blank=True)
+
+    currency = models.CharField(max_length=10, default="jpy")
+
+    due_date = models.DateTimeField(null=True, blank=True)
+
+    stripe_invoice_id = models.CharField(max_length=255, null=True, blank=True)
+
+    issued_at = models.DateTimeField(auto_now_add=True)
+
+class InvoiceItem(models.Model):
+
+    invoice = models.ForeignKey(
+        Invoice,
+        on_delete=models.CASCADE,
+        related_name="items"
+    )
+
+    description = models.CharField(max_length=255)
+
+    amount = models.IntegerField()
+
+    quantity = models.PositiveIntegerField(default=1)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+class Payment(models.Model):
+
+    PAYMENT_METHODS = [
+        ("stripe","Stripe"),
+        ("cash","Cash"),
+        ("bank_transfer","Bank transfer"),
+        ("manual","Manual"),
+    ]
+
+    STATUS_CHOICES = [
+        ("pending","Pending"),
+        ("succeeded","Succeeded"),
+        ("failed","Failed"),
+        ("refunded","Refunded"),
+    ]
+
+    member = models.ForeignKey(Member, on_delete=models.CASCADE)
+    club = models.ForeignKey(Club, on_delete=models.CASCADE)
+
+    invoice = models.ForeignKey(
+        Invoice,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True
+    )
+
+    method = models.CharField(max_length=20, choices=PAYMENT_METHODS)
+
+    amount = models.IntegerField()
+    currency = models.CharField(max_length=10, default="jpy")
+
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES)
+
+    stripe_payment_intent_id = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        unique=True,
+    )
+
+    paid_at = models.DateTimeField(null=True, blank=True)
+
+    issued_at = models.DateTimeField(auto_now_add=True)
+
+    
+
+class PaymentMethod(models.Model):
+
+    METHOD_TYPES = [
+        ("stripe_card","Stripe Card"),
+        ("bank_transfer","Bank Transfer"),
+        ("cash","Cash"),
+    ]
+
+    member = models.ForeignKey(
+        Member,
+        on_delete=models.CASCADE,
+        related_name="payment_methods"
+    )
+
+    method_type = models.CharField(max_length=20, choices=METHOD_TYPES)
+
+    stripe_payment_method_id = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True
+    )
+
+    is_default = models.BooleanField(default=False)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["member"],
+                condition=models.Q(is_default=True),
+                name="one_default_payment_method_per_member"
+            )
+        ]
 
 class Lesson(models.Model):
     club = models.ForeignKey('Club', on_delete=models.CASCADE, related_name='lessons')
     instructor = models.ForeignKey('Member', on_delete=models.SET_NULL, null=True, blank=True,
                                    limit_choices_to={'is_instructor': True})
+    section_id = models.IntegerField(
+        null=True,
+        blank=True,
+        db_index=True
+    )
     title = models.CharField(max_length=200, blank=True)
 
     weekday = models.IntegerField(choices=[(0,"月曜日"),(1,"火曜日"),(2,"水曜日"),
@@ -287,3 +552,88 @@ class Participation(models.Model):
     def __str__(self):
         lesson_title = self.lesson.title if self.lesson else "Deleted Lesson"
         return f"{self.member.full_name} - {lesson_title}"
+
+
+class JoinRequest(models.Model):
+    user = models.ForeignKey(CustomUser, null=True, blank=True, on_delete=models.SET_NULL, related_name="join_requests")
+    club = models.ForeignKey(Club, on_delete=models.CASCADE, related_name="join_requests")
+    owner = models.ForeignKey(CustomUser, null=True, blank=True, on_delete=models.SET_NULL, related_name="managed_join_requests")
+    
+
+    full_name = models.CharField(max_length=200, blank=True)
+    furigana = models.CharField(max_length=200, blank=True)
+    gender = models.CharField(
+        max_length=10,
+        choices=[("male", "Male"), ("female", "Female")],
+        default="male"
+    )
+
+    birth_date = models.DateField(
+        default=datetime.date(2000, 5, 4)
+    )
+    phone_number = models.CharField(max_length=20, blank=True)
+    emergency_number = models.CharField(max_length=20, blank=True)
+    picture = models.ImageField(upload_to=club_member_pictures_upload_to, null=True, blank=True)
+    level = models.PositiveIntegerField(default=1)
+    other_information = models.TextField(blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("user", "club")
+        indexes = [
+            models.Index(fields=["club"]),
+            models.Index(fields=["created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.user.username} → {self.club.subdomain}"
+
+
+class StripeWebhookEvent(models.Model):
+    event_id = models.CharField(max_length=255, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+
+
+
+class Discount(models.Model):
+    club = models.ForeignKey(Club, on_delete=models.CASCADE)
+
+    name = models.CharField(max_length=100)
+
+    discount_type = models.CharField(
+        max_length=20,
+        choices=[("percentage", "%"), ("fixed", "¥")]
+    )
+    value = models.IntegerField()
+
+    active = models.BooleanField(default=True)
+
+    # stacking / priority (important later)
+    priority = models.IntegerField(default=0)
+
+    valid_from = models.DateTimeField(null=True, blank=True)
+    valid_until = models.DateTimeField(null=True, blank=True)
+
+
+
+class DiscountCondition(models.Model):
+    discount = models.ForeignKey(
+        Discount,
+        related_name="conditions",
+        on_delete=models.CASCADE
+    )
+
+    CONDITION_TYPE_CHOICES = [
+        ("gender", "Gender"),
+        ("age_lt", "Age <"),
+        ("age_gt", "Age >"),
+        ("plan_count_gte", "Plan count >="),
+        ("is_family", "Family group"),
+    ]
+
+    type = models.CharField(max_length=50, choices=CONDITION_TYPE_CHOICES)
+
+    value = models.CharField(max_length=100)

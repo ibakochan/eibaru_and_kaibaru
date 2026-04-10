@@ -6,6 +6,11 @@ from django.db import models
 
 
 class CustomUser(AbstractUser):
+    email = models.EmailField(unique=True, null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+
+
+
     total_max_scores = models.FloatField(default=0)
     total_japanese_score = models.FloatField(default=0.0)
     total_english_5_score = models.FloatField(default=0.0)

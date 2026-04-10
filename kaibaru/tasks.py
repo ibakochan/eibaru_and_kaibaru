@@ -5,13 +5,14 @@ import stripe
 import logging
 
 from .models import Club
+from datetime import datetime
 
 from .tasks_emails import send_subscription_activated_emails, send_club_deleted_emails
 
 logger = logging.getLogger(__name__)
 
 from .models import Participation
-from .utils import add_one_month, sync_member_quantity
+from .utils import sync_member_quantity
 
 
 
@@ -45,11 +46,16 @@ def reconcile_single_club_subscription(club_id):
 
     invoice = invoices.data[0]
 
-    if invoice.status == "paid" and not invoice.paid is False and invoice.id != club.last_paid_invoice_id:
+    if invoice.status == "paid" and invoice.id != club.last_paid_invoice_id:
         club.last_paid_invoice_id = invoice.id
-        club.expiration_date = add_one_month(
-            club.expiration_date or today
-        )
+        if invoice.get("lines") and invoice["lines"]["data"]:
+            period_end_ts = invoice["lines"]["data"][0]["period"]["end"]
+
+            if period_end_ts:
+                period_end_dt = datetime.fromtimestamp(period_end_ts, tz=timezone.utc)
+
+                club.subscription_current_period_end = period_end_dt
+                club.expiration_date = period_end_dt
         club.subscription_active = True
         club.save()
 
@@ -127,7 +133,8 @@ def reconcile_stripe_subscriptions():
 
 
                 if club.expiration_date:
-                    days_expired = max((today - club.expiration_date).days, 0)
+                    expiration_date = timezone.localtime(club.expiration_date).date()
+                    days_expired = max((today - expiration_date).days, 0)
                 else:
                     days_expired = 0
                 if days_expired >= 28:
@@ -191,11 +198,15 @@ def reconcile_stripe_subscriptions():
                 if invoices.data:
                     invoice = invoices.data[0]
 
-                    if invoice.status == "paid" and not invoice.paid is False and invoice.id != club.last_paid_invoice_id:
+                    if invoice.status == "paid" and invoice.id != club.last_paid_invoice_id:
                         club.last_paid_invoice_id = invoice.id
-                        club.expiration_date = add_one_month(
-                            club.expiration_date or today
-                        )
+                        if invoice.get("lines") and invoice["lines"]["data"]:
+                            period_end_ts = invoice["lines"]["data"][0]["period"]["end"]
+                            if period_end_ts:
+                                club.subscription_current_period_end = datetime.fromtimestamp(
+                                    period_end_ts, tz=timezone.utc
+                                )
+                                club.expiration_date = club.subscription_current_period_end
                         club.subscription_active = True
                         club.save()
 
@@ -207,7 +218,8 @@ def reconcile_stripe_subscriptions():
  
             else:
                 if club.expiration_date:
-                    days_expired = max((today - club.expiration_date).days, 0)
+                    expiration_date = timezone.localtime(club.expiration_date).date()
+                    days_expired = max((today - expiration_date).days, 0)
 
                     if days_expired >= 1 and club.subscription_active:
                         club.subscription_active = False

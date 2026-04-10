@@ -12,6 +12,7 @@ urlpatterns = [
     path('accounts/', include('accounts.urls')),    
     path('', include('kaibaru.urls')),   
     re_path(r'^oauth/', include('social_django.urls', namespace='social')),
+    path('', include('kaibaru.urls_spa')),
 ]
  
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

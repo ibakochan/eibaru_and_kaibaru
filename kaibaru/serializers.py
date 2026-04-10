@@ -1,8 +1,8 @@
 from rest_framework import serializers
-from .models import Member, Club, Lesson, Participation, SlateImage
+from .models import Member, Club, Lesson, Participation, SlateImage, JoinRequest, Subscription, SubscriptionItem
 
 from google.cloud import storage
-
+from django.db.models import Q
 from .permissions import IsSuperuser
 from django.utils import timezone
 
@@ -11,10 +11,116 @@ from collections import defaultdict
 import json
 from django.db.models import Sum
 from django.db import models
+from datetime import date
 
-from .models import MemberSubscription
 
 
+from .models import MembershipPlan
+
+class SubscriptionItemSerializer(serializers.ModelSerializer):
+    plan_id = serializers.IntegerField(source="plan.id", read_only=True)
+    plan_name = serializers.SerializerMethodField()
+
+
+    class Meta:
+        model = SubscriptionItem
+        fields = [
+            "plan_id",
+            "plan_name",
+            "quantity",
+            "deleted_at",
+            "access_until",
+            "id",
+        ]
+
+    def get_plan_name(self, obj):
+        return obj.plan.name if obj.plan else None
+
+
+class SubscriptionSerializer(serializers.ModelSerializer):
+    items = SubscriptionItemSerializer(many=True, read_only=True)
+    anchor_day = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Subscription
+        fields = [
+            "id",
+            "status",
+            "current_period_end",
+            "access_until",
+            "cancel_at_period_end",
+
+            # 👇 ADD THESE
+            "billing_anchor_day",
+            "anchor_day",
+            "billing_mode",
+
+            "items",
+        ]
+
+    def get_anchor_day(self, obj):
+        if obj.billing_anchor_day:
+            return obj.billing_anchor_day
+        return None
+
+class MembershipPlanSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MembershipPlan
+        fields = [
+            "id",
+            "club",
+            "name",
+            "description",
+            "price",
+            "currency",
+            "interval",
+            "max_lessons_per_month",
+            "member_category",
+            "age_min",
+            "age_max",
+            "active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "club",
+            "created_at",
+            "updated_at",
+        ]
+    
+
+class MyJoinRequestSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = JoinRequest
+        fields = [
+            "id",
+            "full_name",
+            "created_at",
+            "owner",
+            "user",
+        ]
+
+
+class JoinRequestSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = JoinRequest
+        fields = [
+            "id",
+            "full_name",
+            "furigana",
+            "phone_number",
+            "owner",
+            "user",
+            "emergency_number",
+            "other_information",
+            "picture",
+            "level",
+            "created_at",
+            "birth_date",
+            "gender",
+        ]
+        read_only_fields = ["id", "status", "created_at"]
 
 class SlateImageSerializer(serializers.ModelSerializer):
 
@@ -56,6 +162,7 @@ class MemberSerializer(serializers.ModelSerializer):
     this_month_participation = serializers.SerializerMethodField()
     level_participation = serializers.SerializerMethodField()
     subscription = serializers.SerializerMethodField()
+    age = serializers.SerializerMethodField()
 
     class Meta:
         model = Member
@@ -63,15 +170,12 @@ class MemberSerializer(serializers.ModelSerializer):
             "id",
             "level",
             "user",
-            "is_instructor",
-            "is_manager",
+            "owner",
             "introduction",
             "full_name",
             "furigana",
             "phone_number",
             "emergency_number",
-            "member_type",
-            "contract",
             "other_information",
             "picture",
             "participations",
@@ -85,18 +189,35 @@ class MemberSerializer(serializers.ModelSerializer):
             "is_kyukai_paid",
             "kyukai_since",
             "subscription",
+            "is_manager",
+            "is_instructor",
+            "birth_date",
+            "gender",
+            "age",
         ]
-        read_only_fields = ["id", "user"]
+        read_only_fields = ["id", "user", "is_manager", "is_instructor",]
 
-    def get_subscription(self, obj):
-        sub = getattr(obj, "subscription", None)
-        if not sub:
-            sub = MemberSubscription.objects.filter(member=obj).first()
-        if not sub:
+    def get_age(self, obj):
+        if not obj.birth_date:
             return None
-        from .serializers import MemberSubscriptionSerializer
-        return MemberSubscriptionSerializer(sub).data
 
+        today = date.today()
+        return (
+            today.year
+            - obj.birth_date.year
+            - (
+                (today.month, today.day)
+                < (obj.birth_date.month, obj.birth_date.day)
+            )
+        )
+
+
+
+  
+    def get_subscription(self, obj):
+        sub = obj.subscriptions.first()
+        return SubscriptionSerializer(sub).data if sub else None
+    
     def to_representation(self, instance):
         data = super().to_representation(instance)
         request = self.context.get("request")
@@ -175,6 +296,7 @@ class LessonSerializer(serializers.ModelSerializer):
             "id",
             "club",
             "instructor",
+            "section_id",
             "instructor_id",
             "title",
             "weekday",
@@ -222,6 +344,9 @@ class ClubSerializer(serializers.ModelSerializer):
     warning_message = serializers.SerializerMethodField()
     frozen = serializers.SerializerMethodField()
     slate_images = SlateImageSerializer(many=True, read_only=True)
+    join_requests = serializers.SerializerMethodField()
+    my_join_requests = serializers.SerializerMethodField()
+    membership_plans = MembershipPlanSerializer(many=True, read_only=True)
 
 
 
@@ -233,15 +358,13 @@ class ClubSerializer(serializers.ModelSerializer):
             "title",
             "subdomain",
             "members",
+            "join_requests",
+            "my_join_requests",
             "lessons",
             "home",
             "system",
             "trial",
             "contact",
-            "facebook_url",    
-            "instagram_url",   
-            "line_url",
-            "line_qr_code",
             "picture",
             "favicon",           
             "og_image", 
@@ -255,22 +378,54 @@ class ClubSerializer(serializers.ModelSerializer):
             "level_milestones",
             "trial_start_date",
             "expiration_date",
-            "stripe_customer_id",
-            "stripe_subscription_id",
+
+            #gym to me stripe
+         
             "subscription_active",
+            "subscription_cancel_at_period_end",
+            "subscription_current_period_end", 
+
+            "subscription_mode",
+            "stripe_anchor_date",
+            "joining_fee",
+
+            #member to gym stripe
+            "stripe_charges_enabled",
+            "stripe_payouts_enabled",
+            "stripe_onboarding_completed",
+            "stripe_details_submitted",
+            "stripe_account_id",
+
             "warning_message",
             "frozen",
             "slate_images",
+            "page_content",
+            "membership_plans",
+            "stripe_subscription_id",
+            
         ]
-        read_only_fields = ["id"]
+        read_only_fields = [
+            "id",
+            "stripe_charges_enabled",
+            "stripe_payouts_enabled",
+            "stripe_onboarding_completed",
+            "stripe_details_submitted",
+
+            "subscription_active",
+            "subscription_cancel_at_period_end",
+            "subscription_current_period_end",
+            "stripe_account_id",
+            "stripe_subscription_id",
+        ]
 
     def get_frozen(self, club):  
         if not club.expiration_date:
             return False
-
+        
         today = timezone.localdate()
+        expiration_date = timezone.localtime(club.expiration_date).date()
 
-        days_after_exp = max((today - club.expiration_date).days, 0)
+        days_after_exp = max((today - expiration_date).days, 0)
         
  
 
@@ -287,8 +442,9 @@ class ClubSerializer(serializers.ModelSerializer):
         if not request or not request.user.is_authenticated:
             return None
         today = timezone.localdate()
+        expiration_date = timezone.localtime(club.expiration_date).date()
 
-        days_after_exp = max((today - club.expiration_date).days, 0)
+        days_after_exp = max((today - expiration_date).days, 0)
 
  
 
@@ -348,19 +504,13 @@ class ClubSerializer(serializers.ModelSerializer):
 
         request = self.context.get("request")
 
-        if not request or not request.user.is_authenticated:
-            data.pop("stripe_customer_id", None)
-            data.pop("stripe_subscription_id", None)
-            return data
-
-        user = request.user
-
-        if instance.owner_id != user.id:
-            data.pop("stripe_customer_id", None)
-            data.pop("stripe_subscription_id", None)
 
 
-        if not request or not request.user.is_authenticated:
+        user = getattr(request, "user", None)
+
+
+
+        if not user or not user.is_authenticated:
             members_qs = instance.members.filter(
                 models.Q(is_instructor=True) |
                 models.Q(is_manager=True) |
@@ -383,7 +533,8 @@ class ClubSerializer(serializers.ModelSerializer):
             models.Q(is_instructor=True) | 
             models.Q(is_manager=True) | 
             models.Q(user=instance.owner) |
-            models.Q(user=user)
+            models.Q(user=user) |
+            models.Q(owner=user)
         ))
         data["members"] = MemberSerializer(data["members"], many=True, context=self.context).data
 
@@ -403,3 +554,36 @@ class ClubSerializer(serializers.ModelSerializer):
 
     def get_today(self, obj):
         return timezone.localdate().isoformat()
+
+    
+
+    def get_my_join_requests(self, club):
+        request = self.context.get("request")
+
+        if not request or not request.user.is_authenticated:
+            return []
+
+        qs = club.join_requests.filter(
+            Q(user=request.user) | Q(owner=request.user)
+        ).order_by("-created_at")
+
+        return MyJoinRequestSerializer(qs, many=True).data
+
+    def get_join_requests(self, club):
+        request = self.context.get("request")
+
+        if not request or not request.user.is_authenticated:
+            return []
+
+        if request.user.id != club.owner_id:
+            return []
+
+        qs = club.join_requests.order_by("-created_at")
+
+        return JoinRequestSerializer(
+            qs,
+            many=True,
+            context=self.context
+        ).data
+
+ 

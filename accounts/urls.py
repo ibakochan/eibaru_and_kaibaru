@@ -14,4 +14,11 @@ urlpatterns = [
     path('signup/', views.SignUpView.as_view(template_name='accounts/signup.html'), name='signup'),
     path('signup/ar/', views.SignUpView.as_view(template_name='accounts/signup.html'), name='signup_ar'),
     path('update/password/<int:pk>', views.StudentUpdateView.as_view(), name='update_profile'),
+    path("saas/login/", views.SaaSLoginView.as_view(), name="saas-login"),
+    path("saas/signup/", views.SaaSSignUpView.as_view(), name="saas-signup"),
+    path(
+        "verify/<uidb64>/<token>/",
+        views.VerifyEmailView.as_view(),
+        name="verify_email",
+    ),
 ]

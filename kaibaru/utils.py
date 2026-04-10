@@ -5,6 +5,21 @@ from django.conf import settings
 from .models import Member
 
 
+def is_valid_billing_day(today):
+    return 2 <= today.day <= 27
+
+def is_near_anchor(today, anchor_day):
+    if not anchor_day:
+        return False
+
+    try:
+        anchor_date = today.replace(day=anchor_day)
+    except ValueError:
+        last_day = calendar.monthrange(today.year, today.month)[1]
+        anchor_date = today.replace(day=min(anchor_day, last_day))
+
+    return abs((today - anchor_date).days) <= 1
+
 def add_one_month(d):
     year = d.year
     month = d.month + 1

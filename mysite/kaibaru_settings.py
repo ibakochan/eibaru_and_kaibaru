@@ -72,6 +72,7 @@ INSTALLED_APPS = [
     "django_cleanup.apps.CleanupConfig",
     "django_celery_beat",
     'django_vite',
+    "csp",
 ]
 
 
@@ -98,6 +99,7 @@ MIDDLEWARE = [
     'accounts.middleware.DomainRedirectMiddleware',
     
     'django_hosts.middleware.HostsResponseMiddleware',
+    "csp.middleware.CSPMiddleware",
 ]
 
 
@@ -109,8 +111,29 @@ DJANGO_VITE = {
     }
 }
 
+# REQUIRED for YouTube iframes
+CSP_FRAME_SRC = (
+    "'self'",
+    "https://www.youtube.com",
+    "https://www.youtube-nocookie.com",
+)
 
+# Safari / fallback
+CSP_CHILD_SRC = (
+    "'self'",
+    "https://www.youtube.com",
+    "https://www.youtube-nocookie.com",
+)
 
+CSP_SCRIPT_SRC = (
+    "'self'",
+    "'unsafe-inline'",
+    "https://www.youtube.com",
+    "https://www.youtube-nocookie.com",
+    "https://www.youtube.com/iframe_api",
+)
+
+# Prevent XFrameOptions conflicts
 
 
 
@@ -131,8 +154,6 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
                 'main.context_processors.settings',       
-                'social_django.context_processors.backends',  
-                'social_django.context_processors.login_redirect', 
             ],
         },
     },
@@ -192,6 +213,8 @@ STRIPE_SECRET_KEY = env('STRIPE_SECRET_KEY')
 STRIPE_PUBLISHABLE_KEY = env('STRIPE_PUBLISHABLE_KEY')
 
 STRIPE_WEBHOOK_SECRET = env('STRIPE_WEBHOOK_SECRET')
+STRIPE_CONNECTED_WEBHOOK_SECRET = env('STRIPE_CONNECTED_WEBHOOK_SECRET')
+STRIPE_CLIENT_ID = env('STRIPE_CLIENT_ID')
 
 STRIPE_BASE_PRICE_ID = "price_1SeNvyEuyKDnirof2pUdCR0v"
 STRIPE_MEMBER_PRICE_ID = "price_1SeRBPEuyKDnirof40RPZZnw"
@@ -320,7 +343,7 @@ SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 
 SECURE_BROWSER_XSS_FILTER = True
-X_FRAME_OPTIONS = 'DENY'
+X_FRAME_OPTIONS = "SAMEORIGIN"
 SECURE_CONTENT_TYPE_NOSNIFF = True
 
 SECURE_HSTS_SECONDS = 31536000  # 1 year
@@ -338,9 +361,9 @@ AUTHENTICATION_BACKENDS = [
     'allauth.account.auth_backends.AuthenticationBackend',
 ]
 
-
+SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
 SESSION_COOKIE_DOMAIN = ".kaibaru.jp"
-SESSION_COOKIE_NAME = "csrftoken"
+SESSION_COOKIE_NAME = "sessionid"
 SESSION_COOKIE_SAMESITE = "None"
 SESSION_COOKIE_SECURE = True
 

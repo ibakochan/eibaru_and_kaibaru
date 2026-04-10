@@ -6,7 +6,7 @@ from .models import CustomUser
 from main.models import Student, Teacher, Classroom
 from django.contrib.auth import authenticate, login
 from allauth.account.views import LoginView
-from .forms import CustomAuthenticationForm, SignUpForm
+from .forms import CustomAuthenticationForm, SignUpForm, SaaSSignUpForm
 from django.views.decorators.cache import never_cache
 from django.utils.decorators import method_decorator
 from django.contrib.auth.forms import AuthenticationForm
@@ -15,9 +15,64 @@ from django.shortcuts import redirect
 from django.conf import settings
 import requests
 
+from django.utils.http import urlsafe_base64_decode
+from django.utils.encoding import force_str
+from django.http import HttpResponse
+from .tokens import email_verification_token
+from .tasks_emails import send_verification_email
+
 import logging
 logger = logging.getLogger(__name__)
 
+
+
+
+class SaaSLoginView(View):
+    def post(self, request):
+        try:
+            data = json.loads(request.body)
+        except json.JSONDecodeError:
+            return JsonResponse(
+                {"detail": "Invalid JSON"},
+                status=400
+            )
+
+        email = data.get("email")
+        password = data.get("password")
+
+        if not email or not password:
+            return JsonResponse(
+                {"detail": "Email and password required"},
+                status=400
+            )
+
+        email = email.lower()
+
+        try:
+            user = CustomUser.objects.get(email=email)
+        except CustomUser.DoesNotExist:
+            return JsonResponse(
+                {"detail": "Invalid credentials"},
+                status=401
+            )
+
+        if not user.is_active:
+            return JsonResponse(
+                {"detail": "Please verify your email before logging in."},
+                status=403
+            )
+
+        user = authenticate(request, username=user.username, password=password)
+
+        if user is None:
+            return JsonResponse(
+                {"detail": "Invalid credentials"},
+                status=401
+            )
+
+        login(request, user)
+
+        return JsonResponse({"detail": "Login successful"})
 
 @method_decorator(never_cache, name='dispatch')
 class CustomLoginView(View):
@@ -116,3 +171,50 @@ class StudentUpdateView(View):
         user.save()
 
         return JsonResponse({'message': 'Password reset successful'})
+
+
+
+class SaaSSignUpView(View):
+    def post(self, request):
+        try:
+            data = json.loads(request.body)
+        except json.JSONDecodeError:
+            return JsonResponse(
+                {"detail": "Invalid JSON"},
+                status=400
+            )
+
+        form = SaaSSignUpForm(data)
+
+        if form.is_valid():
+            user = form.save()
+            send_verification_email.delay(user.id)
+
+            return JsonResponse(
+                {"detail": "Verification email sent."},
+                status=201
+            )
+
+        return JsonResponse(form.errors, status=400)
+
+class VerifyEmailView(View):
+    def get(self, request, uidb64, token):
+        try:
+            uid = force_str(urlsafe_base64_decode(uidb64))
+            user = CustomUser.objects.get(pk=uid)
+        except Exception:
+            user = None
+
+        if not user or not email_verification_token.check_token(user, token):
+            return redirect("https://kaibaru.jp/verification-failed")
+
+        user.is_active = True
+        user.save()
+
+        login(
+            request,
+            user,
+            backend="allauth.account.auth_backends.AuthenticationBackend"
+        )
+
+        return redirect("https://kaibaru.jp/?verified=true")

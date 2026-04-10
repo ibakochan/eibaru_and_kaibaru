@@ -120,3 +120,30 @@ class StudentSignUpForm(forms.ModelForm):
     def clean(self):
         cleaned_data = super().clean()
         return cleaned_data
+
+
+class SaaSSignUpForm(forms.ModelForm):
+    password = forms.CharField(
+        widget=forms.PasswordInput(attrs={'class': 'form-control'})
+    )
+
+    class Meta:
+        model = CustomUser
+        fields = ("username", "email", "password")
+
+    def clean_email(self):
+        email = self.cleaned_data["email"].lower()
+
+        if CustomUser.objects.filter(email=email).exists():
+            raise forms.ValidationError("このメールアドレスは既に登録されています。")
+
+        return email
+
+    def save(self, commit=True):
+        user = super().save(commit=False)
+        user.email = self.cleaned_data["email"].lower()
+        user.set_password(self.cleaned_data["password"])
+        user.is_active = False  # critical
+        if commit:
+            user.save()
+        return user

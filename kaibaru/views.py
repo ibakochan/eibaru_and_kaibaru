@@ -3,7 +3,7 @@ from django.views import View
 from allauth.socialaccount.models import SocialAccount
 from django.http import HttpResponseForbidden  
 from django.shortcuts import get_object_or_404
-from .models import Club, Participation, Member
+from .models import Club, Participation, Member, JoinRequest
 from django.shortcuts import redirect
 from urllib.parse import urlencode
 from urllib.parse import quote
@@ -16,189 +16,128 @@ from django.conf import settings
 from django.http import JsonResponse, HttpResponse
 from datetime import date
 from django.utils import timezone
-from .tasks import cancel_stripe_subscription
 
-from .tasks_emails import send_subscription_activated_emails, send_subscription_canceled_emails
+from .tasks_emails import send_subscription_activated_emails
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_POST
 from django.http import HttpResponseForbidden
 
 from django.views.decorators.csrf import csrf_exempt
 
-from django.utils import timezone
 from .utils import add_one_month
-
+from django.views.decorators.http import require_http_methods
+from django.views.decorators.csrf import csrf_exempt
+import json
 
 logger = logging.getLogger(__name__)
  
 
-
-@csrf_exempt
-def stripe_webhook(request):
-    stripe.api_key = settings.STRIPE_SECRET_KEY
-    payload = request.body
-    sig_header = request.META.get("HTTP_STRIPE_SIGNATURE")
-
-    try:
-        event = stripe.Webhook.construct_event(
-            payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
-        )
-    except Exception as e:
-        logger.error(f"[WEBHOOK ERROR] {e}")
-        return HttpResponse(status=400)
- 
-    if event["type"] == "checkout.session.completed":
-        session = event["data"]["object"]
-        club_id = session["metadata"].get("club_id")
-        subscription_id = session.get("subscription")
-
-        club = Club.objects.filter(id=club_id, is_deleted=False).first()
-        if not club:
-            return HttpResponse(status=200)
- 
-        if not club.stripe_subscription_id:
-            club.stripe_subscription_id = subscription_id
-            club.save()
-
-        logger.info(f"[CHECKOUT COMPLETE] club={club.id}, sub={subscription_id}")
- 
-    elif event["type"] in ("invoice.paid", "invoice.payment_succeeded"):
-        invoice = event["data"]["object"]
-
-
-
-        invoice_id = invoice["id"]
-        customer_id = invoice["customer"]
-
-        club = Club.objects.filter(stripe_customer_id=customer_id, is_deleted=False).first()
-        if not club:
-            return HttpResponse(status=200)
- 
-        if club.last_paid_invoice_id == invoice_id:
-            return HttpResponse(status=200)
-
-        club.last_paid_invoice_id = invoice_id
- 
-        base = club.expiration_date or timezone.localdate()
-        club.expiration_date = add_one_month(base)
-        club.subscription_active = True
-        club.save()
-
-        send_subscription_activated_emails.delay(
-            club.id,
-            invoice_id,
-        )
-
-
-        logger.info(
-            f"[PAYMENT OK] club={club.id}, invoice={invoice_id}, new_expiration={club.expiration_date}"
-        )
-
-    return HttpResponse(status=200)
-
-
-
-
-
-
-@require_POST
 @login_required
-def create_checkout_session(request, club_id):
-    stripe.api_key = settings.STRIPE_SECRET_KEY
+@require_http_methods(["PATCH"])
+def update_club_billing_settings(request, club_id):
+    """
+    Updates the club's subscription_mode or stripe_anchor_date.
+    Only visible/usable by the club owner and if Stripe is connected.
+    Enforces an anchor day for monthly mode (defaults to 25 if not set).
+    """
     club = get_object_or_404(Club, id=club_id, is_deleted=False)
 
     if club.owner != request.user:
         return HttpResponseForbidden("You do not own this club")
- 
-    if not club.stripe_customer_id:
-        customer = stripe.Customer.create(
-            name=club.title or club.subdomain,
-            metadata={"club_id": str(club.id)},
-        )
-        club.stripe_customer_id = customer.id
-        club.save()
-    else:
-        customer = stripe.Customer.retrieve(club.stripe_customer_id)
 
-    active_members = Member.objects.filter(
-        club=club
-    ).exclude(is_kyukai=True, is_kyukai_paid=True).count()
+    if not club.stripe_onboarding_completed:
+        return JsonResponse({"error": "Stripeアカウントが接続されていません"}, status=400)
 
-    billable_members = max(active_members, 1)  
-
-    session = stripe.checkout.Session.create(
-        customer=customer.id,
-        mode="subscription",
-        payment_method_types=["card"],
-        line_items=[
-            {"price": settings.STRIPE_BASE_PRICE_ID, "quantity": 1},
-            {"price": settings.STRIPE_MEMBER_PRICE_ID, "quantity": billable_members},
-        ],
-        metadata={"club_id": club.id},
-        success_url=f"https://{club.subdomain}.kaibaru.jp/?payment=success",
-        cancel_url=f"https://{club.subdomain}.kaibaru.jp/?payment=cancel",
-    )
-
-    return JsonResponse({"id": session.id})
-
-
-
-
- 
-
-
-
-
-
-
-
-
-
-
-
-@require_POST
-@login_required
-def unsubscribe(request, club_id):
-    stripe.api_key = settings.STRIPE_SECRET_KEY
-    today = timezone.localdate()
     try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "無効なリクエスト"}, status=400)
 
-        club = get_object_or_404(Club, id=club_id, is_deleted=False)
+    updated_fields = []
 
-        if club.owner != request.user:
-            return HttpResponseForbidden("You do not own this club")
+    # -------------------------
+    # Update subscription_mode
+    # -------------------------
+    if "subscription_mode" in data:
+        subscription_mode = data["subscription_mode"]
+        if subscription_mode in ["regular", "monthly"]:
+            club.subscription_mode = subscription_mode
+            updated_fields.append("subscription_mode")
+            # Ensure monthly mode always has an anchor
+            if subscription_mode == "monthly" and not club.stripe_anchor_date:
+                club.stripe_anchor_date = 25
+                updated_fields.append("stripe_anchor_date")
+        else:
+            return JsonResponse({"error": "無効な課金モード"}, status=400)
 
-        subdomain = request.POST.get("subdomain")
-        join_key = request.POST.get("join_key")
+    # -------------------------
+    # Update stripe_anchor_date
+    # -------------------------
+    if "stripe_anchor_date" in data:
+        anchor_date = data["stripe_anchor_date"]
+        if anchor_date in [None, "", "null"]:
+            # Prevent clearing anchor if monthly mode
+            if club.subscription_mode == "monthly":
+                return JsonResponse(
+                    {"error": "月謝モードの場合、請求日は必須です"},
+                    status=400
+                )
+            club.stripe_anchor_date = None
+            updated_fields.append("stripe_anchor_date")
+        else:
+            try:
+                anchor_day = int(anchor_date)
+                if 1 <= anchor_day <= 28:
+                    club.stripe_anchor_date = anchor_day
+                    updated_fields.append("stripe_anchor_date")
+                else:
+                    return JsonResponse(
+                        {"error": "請求日は1〜28の数字で指定してください"},
+                        status=400
+                    )
+            except (ValueError, TypeError):
+                return JsonResponse({"error": "無効な数字形式"}, status=400)
 
-        if subdomain != club.subdomain or join_key != club.join_key:
-            return JsonResponse(
-                {"error": "Confirmation failed"},
-                status=400
-           )
+    if "joining_fee" in data:
+        try:
+            fee = int(data["joining_fee"])
+            if fee < 0:
+                return JsonResponse({"error": "入会金は0以上で入力してください"}, status=400)
+    
+            club.joining_fee = fee
+            updated_fields.append("joining_fee")
+    
+        except (ValueError, TypeError):
+            return JsonResponse({"error": "無効な入会金の形式"}, status=400)
 
-        subscription_id = club.stripe_subscription_id
 
-        club_data = {
-            "subdomain": club.subdomain,
-            "owner_name": club.owner.get_full_name() if club.owner else "",
-            "owner_email": club.owner.email if club.owner else None,
-        }
 
-        if club.stripe_subscription_id:
-            cancel_stripe_subscription.delay(subscription_id)
+    if updated_fields:
+        club.save(update_fields=updated_fields)
 
-        send_subscription_canceled_emails.delay(club_data)
+    return JsonResponse({
+        "success": True,
+        "subscription_mode": club.subscription_mode,
+        "stripe_anchor_date": club.stripe_anchor_date,
+        "joining_fee": club.joining_fee,
+    })
 
-        club.is_deleted = True
-        club.deleted_at = today
-        club.save()
-
-        return JsonResponse({"success": True, "message": "Subscription canceled"})
-    except Club.DoesNotExist:
-        return JsonResponse({"error": "Club not found"}, status=404)
-    except Exception as e:
-        return JsonResponse({"error": str(e)}, status=500)
+@login_required
+@require_POST
+def create_join_request(request, club_subdomain):
+    club = get_object_or_404(Club, subdomain=club_subdomain, is_deleted=False)
+    
+    join_request, created = JoinRequest.objects.get_or_create(
+        user=request.user,
+        club=club,
+        defaults={"status": JoinRequest.Status.PENDING},
+    )
+    
+    return JsonResponse({
+        "id": join_request.id,
+        "status": join_request.status,
+        "created": created
+    })
 
 
 
@@ -216,7 +155,7 @@ def start_google_login(request):
 class KaibaruPageView(View):
     template_name = 'kaibaru/kaibaru.html'
 
-    def get(self, request):
+    def get(self, request, *args, **kwargs):
         user = ""
         has_google = False
 
@@ -243,6 +182,8 @@ class KaibaruPageView(View):
             'club_data': club_data,
             'stripe_publishable_key': settings.STRIPE_PUBLISHABLE_KEY,
         })
+
+
 
 
 

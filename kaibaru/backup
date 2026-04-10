@@ -1,0 +1,259 @@
+@login_required
+@require_POST
+def create_member_checkout_session(request, club_id, plan_id):
+
+    club = get_object_or_404(Club, id=club_id, is_deleted=False)
+    if club.subscription_mode not in ["regular", "monthly"]:
+        return JsonResponse({"error": "Invalid billing configuration"}, status=400)
+
+    if club.subscription_mode == "monthly" and not club.stripe_anchor_date:
+        return JsonResponse({"error": "Billing anchor not configured"}, status=400)
+
+    if not club.stripe_account_id:
+        return JsonResponse({"error": "Club has no Stripe account"}, status=400)
+
+    member = get_object_or_404(Member, user=request.user, club=club)
+
+    plan = get_object_or_404(MembershipPlan, id=plan_id, club=club, active=True)
+    if not plan.stripe_price_id:
+        return JsonResponse({"error": "Plan not configured correctly"}, status=400)
+
+    # -------------------------
+    # Prevent duplicate plan
+    # -------------------------
+    existing = SubscriptionItem.objects.filter(
+        subscription__member=member,
+        plan=plan,
+        subscription__status__in=["active", "trialing", "past_due", "incomplete", "pending"],
+    ).exists()
+
+    if existing:
+        return JsonResponse({"error": "Already subscribed to this plan"}, status=400)
+
+    # -------------------------
+    # Check for existing subscription
+    # -------------------------
+    sub = Subscription.objects.filter(
+        member=member,
+        status__in=["active", "trialing", "past_due", "incomplete", "pending"]
+    ).first()
+
+    # -------------------------
+    # CASE 1: Subscription exists → add item
+    # -------------------------
+    if sub:
+
+        if not member.stripe_customer_id:
+            customer = stripe.Customer.create(
+                email=member.user.email,
+                metadata={"member_id": member.id, "club_id": club.id},
+                stripe_account=club.stripe_account_id
+            )
+            member.stripe_customer_id = customer.id
+            member.save(update_fields=["stripe_customer_id"])
+    
+        # -------------------------
+        # REGULAR MODE
+        # -------------------------
+        if sub.billing_mode == "regular":
+    
+            sub_item = stripe.Subscription.modify(
+                sub.stripe_subscription_id,
+                items=[{
+                    "price": plan.stripe_price_id,
+                    "quantity": 1,
+                }],
+                proration_behavior="create_prorations",
+                stripe_account=club.stripe_account_id,
+            )
+            stripe_item_id = sub_item["items"]["data"][0]["id"]
+    
+        # -------------------------
+        # MONTHLY MODE
+        # -------------------------
+        else:
+    
+            # Disable Stripe proration
+            sub_data = stripe.Subscription.retrieve(
+                sub.stripe_subscription_id,
+                expand=["items.data"],
+                stripe_account=club.stripe_account_id
+            )
+        
+            # --- Check if the price already exists ---
+            existing_item = next(
+                (item for item in sub_data["items"]["data"] if item["price"]["id"] == plan.stripe_price_id),
+                None
+            )
+        
+            # --- If exists, modify (or increment quantity), else create new ---
+            if existing_item:
+                sub_item = stripe.Subscription.modify(
+                    sub.stripe_subscription_id,
+                    items=[{
+                        "id": existing_item["id"],  # Use the item id, not "price"
+                        # optionally modify quantity if you want
+                        "quantity": existing_item["quantity"] + 1
+                    }],
+                    proration_behavior="none",
+                    stripe_account=club.stripe_account_id
+                )
+                stripe_item_id = existing_item["id"]
+            else:
+                # Create a new subscription item
+                stripe_item = stripe.SubscriptionItem.create(
+                    subscription=sub.stripe_subscription_id,
+                    price_data={
+                        "currency": "jpy",
+                        "unit_amount": plan.price,  # or plan.stripe_price_amount if stored
+                        "product": plan.stripe_product_id
+                    },
+                    quantity=1,
+                    proration_behavior="none",
+                    stripe_account=club.stripe_account_id
+                )
+                stripe_item_id = stripe_item.id
+
+
+
+
+    
+            today = timezone.localtime()
+    
+            days_in_month = calendar.monthrange(today.year, today.month)[1]
+            remaining_days = days_in_month - today.day + 1
+    
+            monthly_price = plan.price
+            prorated_amount = int(monthly_price * remaining_days / days_in_month)
+    
+            # Charge remaining days of this month
+            if prorated_amount > 0:
+                stripe.InvoiceItem.create(
+                    customer=sub.member.stripe_customer_id,
+                    amount=prorated_amount,
+                    currency="jpy",
+                    description=f"Prorated membership ({remaining_days} days)",
+                    stripe_account=club.stripe_account_id
+                )
+    
+            anchor_day = sub.billing_anchor_day
+    
+            # If joining AFTER anchor, also charge next month upfront
+            if today.day > anchor_day:
+            
+                stripe.InvoiceItem.create(
+                    customer=sub.member.stripe_customer_id,
+                    price_data={
+                        "currency": "jpy",
+                        "unit_amount": plan.price,  # your plan amount in yen
+                        "product": plan.stripe_product_id,  # must store Product ID in your plan model
+                    },
+                    quantity=1,
+                    stripe_account=club.stripe_account_id
+                )
+    
+            invoice = stripe.Invoice.create(
+                customer=sub.member.stripe_customer_id,
+                subscription=sub.stripe_subscription_id,
+                auto_advance=True,
+                stripe_account=club.stripe_account_id
+            )
+    
+            stripe.Invoice.pay(
+                invoice.id,
+                stripe_account=club.stripe_account_id
+            )
+    
+        # For MONTHLY mode, after creating the SubscriptionItem:
+
+        SubscriptionItem.objects.create(
+            subscription=sub,
+            plan=plan,
+            stripe_subscription_item_id=stripe_item_id,
+            quantity=1
+        )
+    
+        return JsonResponse({
+            "success": True,
+            "message": "Plan added to existing subscription"
+        })
+
+    # -------------------------
+    # CASE 2: No subscription yet → Checkout
+    # -------------------------
+    billing_cycle_anchor = None
+
+    if club.stripe_anchor_date:
+        today = timezone.localtime()
+        anchor_day = club.stripe_anchor_date
+
+    # Decide the next anchor month
+        if today.day <= anchor_day:
+            month = today.month
+            year = today.year
+        else:
+            month = today.month + 1
+            year = today.year
+            if month > 12:
+                month = 1
+                year += 1
+    
+        last_day = calendar.monthrange(year, month)[1]
+        day = min(anchor_day, last_day)
+    
+        anchor_date = datetime(year, month, day, tzinfo=dt_timezone.utc)
+    
+        billing_cycle_anchor = int(anchor_date.timestamp())    
+        
+    subscription_data = {
+        "metadata": {
+            "member_id": member.id,
+            "club_id": club.id,
+            "plan_id": plan.id,
+        },
+    }
+    if billing_cycle_anchor:
+        subscription_data["billing_cycle_anchor"] = billing_cycle_anchor
+        if club.subscription_mode == "regular":
+            subscription_data["proration_behavior"] = "create_prorations"
+
+        else:  # monthly
+            subscription_data["proration_behavior"] = "none"
+
+
+    if not member.stripe_customer_id:
+        customer = stripe.Customer.create(
+            email=member.user.email,
+            metadata={"member_id": member.id, "club_id": club.id},
+            stripe_account=club.stripe_account_id
+        )
+        member.stripe_customer_id = customer.id
+        member.save(update_fields=["stripe_customer_id"]) 
+    
+    line_items = [
+        {
+            "price": plan.stripe_price_id,
+            "quantity": 1,
+        }
+    ]
+
+    
+
+
+    session = stripe.checkout.Session.create(
+        customer=member.stripe_customer_id,
+        mode="subscription",
+        payment_method_types=["card"],
+        line_items=line_items,
+        metadata={
+            "member_id": member.id,
+            "club_id": club.id,
+            "plan_id": plan.id,
+        },
+        subscription_data=subscription_data,
+        success_url=f"https://{club.subdomain}.kaibaru.jp/?subscription=success",
+        cancel_url=f"https://{club.subdomain}.kaibaru.jp/?subscription=cancel",
+        stripe_account=club.stripe_account_id,
+    )
+
+    return JsonResponse({"id": session.id})
