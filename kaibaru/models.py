@@ -5,6 +5,8 @@ from .storage_backends import PrivateMediaStorage
 import datetime
 import hashlib
 
+from django.db.models import Q
+
 def club_folder_upload_to(subfolder=None):
 
     def upload(instance, filename):
@@ -54,7 +56,7 @@ class Club(models.Model):
     stripe_customer_id = models.CharField(max_length=255, null=True, blank=True)
     stripe_subscription_id = models.CharField(max_length=255, null=True, blank=True)
 
-    has_paid_joining_fee = models.BooleanField(default=False)
+    
     subscription_active = models.BooleanField(default=False)
     last_paid_invoice_id = models.CharField(max_length=255, blank=True, null=True)
     subscription_cancel_at_period_end = models.BooleanField(default=False)
@@ -121,7 +123,7 @@ class Club(models.Model):
     objects = ActiveClubManager()  
     all_objects = models.Manager()
 
-    stripe_account_id = models.CharField(max_length=255, null=True, blank=True)
+    stripe_account_id = models.CharField(max_length=255, null=True, blank=True, unique=True)
     stripe_charges_enabled = models.BooleanField(default=False)
     stripe_payouts_enabled = models.BooleanField(default=False)
     stripe_onboarding_completed = models.BooleanField(default=False)
@@ -224,7 +226,8 @@ class Member(models.Model):
     user = models.ForeignKey(CustomUser, null=True, blank=True, on_delete=models.SET_NULL, related_name="memberships")
     club = models.ForeignKey("Club", on_delete=models.CASCADE, null=True, blank=True, related_name="members")
     owner = models.ForeignKey(CustomUser, null=True, blank=True, on_delete=models.SET_NULL, related_name="managed_members")
-    
+    has_paid_joining_fee = models.BooleanField(default=False)
+    has_been_charged_joining_fee = models.BooleanField(default=False)
     gender = models.CharField(
         max_length=10,
         choices=[("male", "Male"), ("female", "Female")],
@@ -260,12 +263,26 @@ class Member(models.Model):
     is_kyukai = models.BooleanField(default=False)
     is_kyukai_paid = models.BooleanField(default=False)
     kyukai_since = models.DateField(null=True, blank=True)
-    stripe_customer_id = models.CharField(max_length=255, null=True, blank=True)
+    legacy_stripe_customer_id = models.CharField(max_length=255, null=True, blank=True)
+
+
 
 
 
     class Meta:
-        unique_together = ('user', 'club')  
+        constraints = [
+            # 1️⃣ User can only join a club once
+            models.UniqueConstraint(
+                fields=["user", "club"],
+                name="unique_user_per_club"
+            ),
+
+            # 2️⃣ Owner-level identity uniqueness
+            models.UniqueConstraint(
+                fields=["club", "owner", "full_name", "birth_date"],
+                name="unique_owner_member_identity"
+            ),
+        ]
 
     def __str__(self):
         return f"{self.full_name} ({self.club.subdomain})"
@@ -302,7 +319,8 @@ class OneTimePayment(models.Model):
 
 
 class Subscription(models.Model):
-    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="subscriptions")
+    owner = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="subscriptions")
+    club = models.ForeignKey(Club, on_delete=models.CASCADE)
 
     stripe_subscription_id = models.CharField(max_length=255, unique=True)
 
@@ -338,22 +356,27 @@ class Subscription(models.Model):
     access_until = models.DateTimeField(null=True, blank=True)
 
     cancel_at_period_end = models.BooleanField(default=False)
-
     last_invoice_id = models.CharField(max_length=255, null=True, blank=True)
+
+    
 
     
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    
+
 
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=["member"],
+                fields=["owner", "club"],
                 condition=models.Q(status__in=["active", "trialing", "pending"]),
-                name="one_active_subscription_per_member",
+                name="one_active_subscription_per_owner_club",
             )
         ]
+
+    
 
 
 class SubscriptionItem(models.Model):
@@ -362,6 +385,8 @@ class SubscriptionItem(models.Model):
         on_delete=models.CASCADE,
         related_name="items"
     )
+
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="subscription_items")
 
     plan = models.ForeignKey(
         MembershipPlan,
@@ -379,6 +404,14 @@ class SubscriptionItem(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["subscription", "member", "plan"],
+                condition=Q(plan__isnull=False),
+                name="unique_member_plan_per_subscription"
+            )
+        ]
 
 class Invoice(models.Model):
 
@@ -587,7 +620,7 @@ class JoinRequest(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.user.username} → {self.club.subdomain}"
+        return f"{self.full_name} → {self.club.subdomain}"
 
 
 class StripeWebhookEvent(models.Model):
@@ -637,3 +670,19 @@ class DiscountCondition(models.Model):
     type = models.CharField(max_length=50, choices=CONDITION_TYPE_CHOICES)
 
     value = models.CharField(max_length=100)
+
+
+class StripeCustomer(models.Model):
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE)
+    club = models.ForeignKey(Club, on_delete=models.CASCADE)
+    stripe_customer_id = models.CharField(max_length=255)
+
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "club"],
+                name="unique_stripe_customer_per_user_club"
+            )
+        ]

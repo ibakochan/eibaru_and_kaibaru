@@ -12,16 +12,17 @@ from datetime import datetime, timezone as dt_timezone
 from django.utils import timezone
 import calendar
 import logging
+from django.core.cache import cache
 
 from .utils import is_near_anchor, is_valid_billing_day
-
+from django.db import transaction
 logger = logging.getLogger(__name__)
 
-from .models import Club, Member, MembershipPlan, SubscriptionItem, Subscription
+from .models import Club, Member, MembershipPlan, SubscriptionItem, Subscription, StripeCustomer
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
-
+from .stripe_service import get_or_create_stripe_customer
 
 
 
@@ -134,10 +135,10 @@ def cancel_member_subscription(request, item_id):
     item = get_object_or_404(
         SubscriptionItem,
         id=item_id,
-        subscription__member__user=request.user
+        subscription__owner=request.user
     )
     subscription = item.subscription
-    club = subscription.member.club
+    club = subscription.club
 
     today = timezone.localtime().date()
     if is_near_anchor(today, subscription.billing_anchor_day) or not is_valid_billing_day(today):
@@ -152,37 +153,40 @@ def cancel_member_subscription(request, item_id):
             stripe_account=club.stripe_account_id,
             expand=["items.data"]
         )
-
-        stripe_items = stripe_sub["items"]["data"]
-
-        # 🔍 Find correct Stripe item by price (SAFE)
-        # 🔥 Find ALL Stripe items for this plan (NOT just one)
-        stripe_items_to_delete = [
-            i for i in stripe_items
-            if i["price"]["id"] == item.plan.stripe_price_id
-        ]
         
-        if not stripe_items_to_delete:
-            logger.warning(f"No Stripe items found for item {item.id}")
+        stripe_item = next(
+            (i for i in stripe_sub["items"]["data"]
+             if i["price"]["id"] == item.plan.stripe_price_id),
+            None
+        )
         
-        # 🔥 Delete ALL of them (prevents duplicates)
-        for si in stripe_items_to_delete:
-            try:
-                stripe.SubscriptionItem.delete(
-                    si["id"],
-                    stripe_account=club.stripe_account_id,
-                    proration_behavior="none"
-                )
-            except Exception as e:
-                logger.warning(f"Failed to delete Stripe item {si['id']}: {e}")
+        if not stripe_item:
+            return JsonResponse(
+                {"error": "Stripe item not found"},
+                status=400
+            )
         
-        # ✅ Clear DB state
-        item.stripe_subscription_item_id = None
+        # 🔥 SAFE decrement (re-fetch quantity from Stripe object, not local math)
+        current_qty = stripe_item["quantity"]
+        
+        if current_qty <= 1:
+            stripe.SubscriptionItem.delete(
+                stripe_item["id"],
+                stripe_account=club.stripe_account_id
+            )
+        else:
+            stripe.SubscriptionItem.modify(
+                stripe_item["id"],
+                quantity=current_qty - 1,
+                proration_behavior="none",
+                stripe_account=club.stripe_account_id
+            )
+                
         item.deleted_at = timezone.now()
 
         item.access_until = subscription.access_until
 
-        item.save(update_fields=["deleted_at", "stripe_subscription_item_id", "access_until"])
+        item.save(update_fields=["deleted_at", "access_until"])
         
     except Exception as e:
         logger.error(f"Stripe delete failed for item {item.id}: {e}")
@@ -219,11 +223,13 @@ def resume_member_subscription(request, item_id):
     item = get_object_or_404(
         SubscriptionItem,
         id=item_id,
-        subscription__member__user=request.user
+        subscription__owner=request.user
     )
 
     subscription = item.subscription
-    club = subscription.member.club
+    club = subscription.club
+
+    stripe_customer_obj = get_or_create_stripe_customer(subscription.owner, club)
 
     today = timezone.localtime().date()
     if is_near_anchor(today, subscription.billing_anchor_day) or not is_valid_billing_day(today):
@@ -246,43 +252,42 @@ def resume_member_subscription(request, item_id):
             expand=["items.data"]
         )
 
-        stripe_items = stripe_sub["items"]["data"]
 
         # 🔍 Check if the plan already exists in Stripe
         existing_item = None
 
         # First, try to retrieve the Stripe item by its ID
-        if item.stripe_subscription_item_id:
-            try:
-                existing_item = stripe.SubscriptionItem.retrieve(
-                    item.stripe_subscription_item_id,
-                    stripe_account=club.stripe_account_id
-                )
-            except stripe.error.InvalidRequestError:
-                existing_item = None  # Stripe item is gone
+        stripe_items = stripe_sub["items"]["data"]
+
+        existing_item = next(
+            (i for i in stripe_items
+             if i["price"]["id"] == item.plan.stripe_price_id),
+            None
+        )
         
-        # Fallback: check by price if the DB ID doesn’t exist or was deleted in Stripe
-        if not existing_item:
-            existing_item = next(
-                (i for i in stripe_items
-                 if i["price"]["id"] == item.plan.stripe_price_id),
-                None
-            )
+
         
         if existing_item:
-            # ✅ Already exists in Stripe → just update DB
-            item.stripe_subscription_item_id = existing_item["id"]
-        else:
-            # 🔄 Create new subscription item in Stripe
-            stripe_item = stripe.SubscriptionItem.create(
-                subscription=stripe_sub["id"],
-                price=item.plan.stripe_price_id,
-                quantity=item.quantity,
+            # 🔥 Increment quantity (THIS is your real "resume")
+            stripe.SubscriptionItem.modify(
+                existing_item["id"],
+                quantity=existing_item["quantity"] + 1,
                 proration_behavior="none",
                 stripe_account=club.stripe_account_id
             )
-            item.stripe_subscription_item_id = stripe_item["id"]
-
+            stripe_item_id = existing_item["id"]
+        
+        else:
+            # 🔥 Only create if Stripe truly has no item for this plan
+            new_item = stripe.SubscriptionItem.create(
+                subscription=stripe_sub["id"],
+                price=item.plan.stripe_price_id,
+                quantity=1,
+                proration_behavior="none",
+                stripe_account=club.stripe_account_id
+            )
+            stripe_item_id = new_item["id"]
+        
         
         today = timezone.localtime().date()
 
@@ -292,7 +297,7 @@ def resume_member_subscription(request, item_id):
             if today.day > anchor_day and not item.monthly_double_resume_charge_prevention:
                 # 🔥 Charge ONE extra month (next invoice)
                 stripe.InvoiceItem.create(
-                    customer=subscription.member.stripe_customer_id,
+                    customer=stripe_customer_obj.stripe_customer_id,
                     amount=item.plan.price,
                     currency="jpy",
                     description=f"{item.plan.name} 再開による翌月分請求",
@@ -304,6 +309,7 @@ def resume_member_subscription(request, item_id):
         # ✅ Clear deleted flag and save
         item.deleted_at = None
         item.access_until = None
+        item.stripe_subscription_item_id = stripe_item_id
 
         item.save(update_fields=["stripe_subscription_item_id", "deleted_at", "access_until", "monthly_double_resume_charge_prevention"])
 
@@ -352,10 +358,10 @@ def create_stripe_account_link(request, club_id):
 
     return JsonResponse({"url": stripe_oauth_url})
 
-
 @login_required
 @require_POST
 def create_member_checkout_session(request, club_id, plan_id):
+    
 
     club = get_object_or_404(Club, id=club_id, is_deleted=False)
     if club.subscription_mode not in ["regular", "monthly"]:
@@ -368,7 +374,21 @@ def create_member_checkout_session(request, club_id, plan_id):
     if not club.stripe_account_id:
         return JsonResponse({"error": "Club has no Stripe account"}, status=400)
 
-    member = get_object_or_404(Member, user=request.user, club=club)
+    member_id = request.POST.get("member_id")
+    member = get_object_or_404(Member, id=member_id, club=club)
+
+    if member.owner != request.user:
+        return JsonResponse({"error": "Not allowed"}, status=403)
+
+    billing_user = member.owner
+
+    stripe_customer_obj = get_or_create_stripe_customer(billing_user, club)
+
+    if not billing_user:
+        return JsonResponse(
+            {"error": "No billing owner set for this member"},
+            status=400
+        )
 
     plan = get_object_or_404(MembershipPlan, id=plan_id, club=club, active=True)
     if not plan.stripe_price_id:
@@ -378,8 +398,10 @@ def create_member_checkout_session(request, club_id, plan_id):
     # Prevent duplicate plan
     # -------------------------
     existing = SubscriptionItem.objects.filter(
-        subscription__member=member,
+        subscription__owner=member.owner,
+        subscription__club=member.club,
         plan=plan,
+        member=member,
         deleted_at__isnull=True,
         subscription__status__in=["active", "trialing", "past_due", "incomplete", "pending"],
     ).exists()
@@ -388,8 +410,10 @@ def create_member_checkout_session(request, club_id, plan_id):
         return JsonResponse({"error": "Already subscribed to this plan"}, status=400)
 
     expired_item = SubscriptionItem.objects.filter(
-        subscription__member=member,
+        subscription__owner=member.owner,
+        subscription__club=member.club,
         plan=plan,
+        member=member,
         deleted_at__isnull=False,
         access_until__lt=timezone.now()
     ).order_by("-access_until").first()
@@ -397,8 +421,10 @@ def create_member_checkout_session(request, club_id, plan_id):
     # -------------------------
     # Check for existing subscription
     # -------------------------
+    
     sub = Subscription.objects.filter(
-        member=member,
+        owner=member.owner,
+        club=member.club,
         status__in=["active", "trialing", "past_due", "incomplete", "pending"]
     ).first()
 
@@ -418,15 +444,12 @@ def create_member_checkout_session(request, club_id, plan_id):
     # CASE 1: Subscription exists → add item
     # -------------------------
     if sub:
-
-        if not member.stripe_customer_id:
-            customer = stripe.Customer.create(
-                email=member.user.email,
-                metadata={"member_id": member.id, "club_id": club.id},
-                stripe_account=club.stripe_account_id
-            )
-            member.stripe_customer_id = customer.id
-            member.save(update_fields=["stripe_customer_id"])
+        lock_key = f"add_item:{member.id}:{plan.id}"
+        if not cache.add(lock_key, True, timeout=15):
+            return JsonResponse({"error": "Please wait"}, status=429)
+        
+        
+        stripe_customer_obj = get_or_create_stripe_customer(billing_user, club)
     
         # -------------------------
         # REGULAR MODE
@@ -452,6 +475,14 @@ def create_member_checkout_session(request, club_id, plan_id):
             # --- If exists, modify (or increment quantity), else create new ---
             if existing_item:
                 stripe_item_id = existing_item["id"]
+
+                stripe.SubscriptionItem.modify(
+                    stripe_item_id,
+                    quantity=existing_item["quantity"] + 1,
+                    proration_behavior="none",
+                    stripe_account=club.stripe_account_id
+                )
+
             else:
                 # Create a new subscription item
                 stripe_item = stripe.SubscriptionItem.create(
@@ -462,6 +493,18 @@ def create_member_checkout_session(request, club_id, plan_id):
                     stripe_account=club.stripe_account_id
                 )
                 stripe_item_id = stripe_item.id
+
+            if club.joining_fee > 0 and not member.has_been_charged_joining_fee:
+                stripe.InvoiceItem.create(
+                    customer=stripe_customer_obj.stripe_customer_id,
+                    amount=club.joining_fee,
+                    currency="jpy",
+                    description=f"{member.full_name} 入会金",
+                    stripe_account=club.stripe_account_id
+                )
+
+                member.has_been_charged_joining_fee = True
+                member.save(update_fields=["has_been_charged_joining_fee"])
 
 
 
@@ -520,7 +563,7 @@ def create_member_checkout_session(request, club_id, plan_id):
             # Charge for the remaining days until next anchor
             if prorated_amount > 0:
                 stripe.InvoiceItem.create(
-                    customer=sub.member.stripe_customer_id,
+                    customer=stripe_customer_obj.stripe_customer_id,
                     amount=prorated_amount,
                     currency="jpy",
                     description=f"Prorated membership ({remaining_days} days until next anchor)",
@@ -536,6 +579,8 @@ def create_member_checkout_session(request, club_id, plan_id):
         # MONTHLY MODE
         # -------------------------
         else:
+
+            anchor_day = sub.billing_anchor_day
     
             # Disable Stripe proration
             sub_data = stripe.Subscription.retrieve(
@@ -553,6 +598,14 @@ def create_member_checkout_session(request, club_id, plan_id):
             # --- If exists, modify (or increment quantity), else create new ---
             if existing_item:
                 stripe_item_id = existing_item["id"]
+
+                stripe.SubscriptionItem.modify(
+                    stripe_item_id,
+                    quantity=existing_item["quantity"] + 1,
+                    proration_behavior="none",
+                    stripe_account=club.stripe_account_id
+                )
+            
             else:
                 # Create a new subscription item
                 stripe_item = stripe.SubscriptionItem.create(
@@ -564,6 +617,19 @@ def create_member_checkout_session(request, club_id, plan_id):
                 )
                 stripe_item_id = stripe_item.id
 
+            if club.joining_fee > 0 and not member.has_been_charged_joining_fee:
+                stripe.InvoiceItem.create(
+                    customer=stripe_customer_obj.stripe_customer_id,
+                    amount=club.joining_fee,
+                    currency="jpy",
+                    description=f"{member.full_name} 入会金",
+                    stripe_account=club.stripe_account_id
+                )
+
+                member.has_been_charged_joining_fee = True
+                member.save(update_fields=["has_been_charged_joining_fee"])
+
+            
 
 
 
@@ -579,7 +645,7 @@ def create_member_checkout_session(request, club_id, plan_id):
             # Charge remaining days of this month
             if prorated_amount > 0:
                 stripe.InvoiceItem.create(
-                    customer=sub.member.stripe_customer_id,
+                    customer=stripe_customer_obj.stripe_customer_id,
                     amount=prorated_amount,
                     currency="jpy",
                     description=f"Prorated membership ({remaining_days} days)",
@@ -590,12 +656,14 @@ def create_member_checkout_session(request, club_id, plan_id):
     
             if today.day > anchor_day:
                 stripe.InvoiceItem.create(
-                    customer=sub.member.stripe_customer_id,
+                    customer=stripe_customer_obj.stripe_customer_id,
                     amount=plan.price,
                     currency="jpy",
                     description=f"{plan.name} 翌月分前払い",
                     stripe_account=club.stripe_account_id
                 )
+
+                        
 
         if expired_item:
     # ✅ REUSE old item
@@ -612,6 +680,7 @@ def create_member_checkout_session(request, club_id, plan_id):
         else:
             # ✅ Create new item (normal case)
             SubscriptionItem.objects.create(
+                member=member,
                 subscription=sub,
                 plan=plan,
                 stripe_subscription_item_id=stripe_item_id,
@@ -626,7 +695,10 @@ def create_member_checkout_session(request, club_id, plan_id):
     # -------------------------
     # CASE 2: No subscription yet → Checkout
     # -------------------------
+    
     billing_cycle_anchor = None
+    
+    now_ts = int(timezone.now().timestamp())
 
     if club.stripe_anchor_date:
         today = timezone.localtime().date()
@@ -658,19 +730,16 @@ def create_member_checkout_session(request, club_id, plan_id):
         },
     }
     if billing_cycle_anchor:
+        now = int(timezone.now().timestamp())
+
+        if billing_cycle_anchor <= now:
+            billing_cycle_anchor = now + 60
         subscription_data["billing_cycle_anchor"] = billing_cycle_anchor
         
         subscription_data["proration_behavior"] = "none"
 
 
-    if not member.stripe_customer_id:
-        customer = stripe.Customer.create(
-            email=member.user.email,
-            metadata={"member_id": member.id, "club_id": club.id},
-            stripe_account=club.stripe_account_id
-        )
-        member.stripe_customer_id = customer.id
-        member.save(update_fields=["stripe_customer_id"]) 
+    stripe_customer_obj = get_or_create_stripe_customer(billing_user, club)
     
     line_items = [
         {
@@ -682,10 +751,10 @@ def create_member_checkout_session(request, club_id, plan_id):
     
 
     
-
-
+    
+    
     session = stripe.checkout.Session.create(
-        customer=member.stripe_customer_id,
+        customer=stripe_customer_obj.stripe_customer_id,
         mode="subscription",
         payment_method_types=["card"],
         custom_text={
@@ -727,6 +796,11 @@ def stripe_oauth_callback(request):
     if club.owner != request.user:
         return JsonResponse({"error": "Not allowed"}, status=403)
 
+    if club.stripe_account_id and club.stripe_onboarding_completed:
+        return JsonResponse({"message": "Stripe already connected"})
+
+    
+
     try:
         # Exchange code for access token
         resp = stripe.OAuth.token(
@@ -735,13 +809,20 @@ def stripe_oauth_callback(request):
         )
         stripe_account_id = resp["stripe_user_id"]
 
+        if not stripe_account_id:
+            return JsonResponse({"error": "Invalid Stripe account"}, status=400)
+
+        if Club.objects.filter(stripe_account_id=stripe_account_id).exclude(id=club.id).exists():
+            return JsonResponse(
+                {"error": "This Stripe account is already connected to another club."},
+                status=400
+            )
+
         # Save to Club
         club.stripe_account_id = stripe_account_id
-        club.save()
 
         account = stripe.Account.retrieve(stripe_account_id)
 
-# Save raw Stripe fields
         club.stripe_charges_enabled = account.get("charges_enabled", False)
         club.stripe_payouts_enabled = account.get("payouts_enabled", False)
         club.stripe_details_submitted = account.get("details_submitted", False)

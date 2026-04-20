@@ -130,6 +130,7 @@ const Test = () => {
   const { fetchData } = useFetch('', 'GET', null, setLoading, setError);
 
   const isEikenCategory = activeCategory === 'eiken' || activeCategory === 'eiken4';
+  const isRealStoryTest = (activeTestName || '').includes('実話');
   const isGrammarOrLongDashTest = (activeTestName || '').includes('ー') || (activeTestName || '').includes('文法的語彙');
   const shouldShowEikenPracticeSection = isEikenCategory && isGrammarOrLongDashTest;
   const yourScore = gameState.scoreCounter * scoreMultiplier;
@@ -539,6 +540,8 @@ const Test = () => {
     setActivity(!activeIbaruCharacters ? "ibaru" : "");
   };
 
+  const excludedFinalsCategories = ['jr_1', 'jr_2', 'jr_3', 'eiken_pre2', 'eiken2'];
+
   return (
     <div>
       <div className="flex-center-column">
@@ -603,7 +606,7 @@ const Test = () => {
                 {activeCategory && currentUser?.teacher && !activeFinals && activeTestId === null && (opponentA === "") &&
                   <MusicVideoButton setActiveMusicVideos={setActiveMusicVideos} activeMusicVideos={activeMusicVideos} />
                 }
-                {activeCategory && !activeMusicVideos && !activeFinals && activeTestId === null && (opponentA === "") &&
+                {activeCategory && !excludedFinalsCategories.includes(activeCategory) && !activeMusicVideos && !activeFinals && activeTestId === null && (opponentA === "") &&
                   <FinalsButton setActiveFinals={setActiveFinals} />
                 }
                 {activeFinals && (opponentA === "" || inviter) &&
@@ -695,7 +698,7 @@ const Test = () => {
                 {activeTestId !== null && (
                   <>
                   <div className="test-details flex-center-column" >
-                  {isPractice && questions && ((shouldShowEikenPracticeSection) || activeCategory !== 'eiken') && (
+                  {!isRealStoryTest && isPractice && questions && ((shouldShowEikenPracticeSection) || activeCategory !== 'eiken') && (
                     <Practice questions={questions} handlePlay={handlePlay} isPlayDisabled={isPlayDisabled} activeTestDescription={activeTestDescription} activeTestDescriptionSound={activeTestDescriptionSound} />
                   )}
                   {!isPractice && questions && (questions.sound3 || questions.display_all) && (

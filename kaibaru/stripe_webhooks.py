@@ -5,9 +5,9 @@ from django.conf import settings
 from django.http import HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 
-from .models import Club, Member, Subscription, SubscriptionItem, MembershipPlan, StripeWebhookEvent
+from .models import Club, Member, Subscription, SubscriptionItem, MembershipPlan, StripeWebhookEvent, StripeCustomer
 from .tasks_emails import send_subscription_activated_emails
-
+from django.db import transaction
 
 from datetime import datetime, timezone as dt_timezone
 from django.utils import timezone
@@ -15,7 +15,7 @@ from django.utils import timezone
 import calendar
 from django.db import IntegrityError
 
-
+from .stripe_service import get_or_create_stripe_customer
 logger = logging.getLogger(__name__)
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
@@ -82,14 +82,17 @@ def stripe_connected_webhook(request):
 
         invoice_id = session.get("invoice")
 
-        if not member.stripe_customer_id:
-            member.stripe_customer_id = sub.customer
-            member.save(update_fields=["stripe_customer_id"])
+        stripe_customer_obj = get_or_create_stripe_customer(member.owner, club)
+
+        if stripe_customer_obj.stripe_customer_id != sub.customer:
+            stripe_customer_obj.stripe_customer_id = sub.customer
+            stripe_customer_obj.save(update_fields=["stripe_customer_id"])
 
         sub_obj, created = Subscription.objects.get_or_create(
             stripe_subscription_id=sub.id,
             defaults={
-                "member": member,
+                "owner": member.owner,
+                "club": club,
                 "status": sub.status,
                 "current_period_end": None,
                 "last_invoice_id": invoice_id,
@@ -98,14 +101,34 @@ def stripe_connected_webhook(request):
             }
         )
 
-        if created and club.joining_fee > 0:
-            stripe.InvoiceItem.create(
-                customer=sub.customer,
-                amount=club.joining_fee,
-                currency="jpy",
-                description="入会金",
-                stripe_account=account_id
-            )
+        if created:
+            for item in sub["items"]["data"]:
+        
+                stripe_item_id = item["id"]
+                price_id = item["price"]["id"]
+    
+                if price_id == plan.stripe_price_id:
+        
+                    sub_item, item_created = SubscriptionItem.objects.get_or_create(
+                        stripe_subscription_item_id=stripe_item_id,
+                        defaults={
+                            "member": member,
+                            "subscription": sub_obj,
+                            "plan": plan,
+                            "quantity": item.get("quantity", 1)
+                        }
+                    )
+                    
+                    # 🔥 JOINING FEE LOGIC (PER MEMBER)
+                    if item_created and club.joining_fee > 0 and not member.has_paid_joining_fee:
+                        stripe.InvoiceItem.create(
+                            customer=sub.customer,
+                            amount=club.joining_fee,
+                            currency="jpy",
+                            description=f"{member.full_name} 入会金",
+                            stripe_account=account_id
+                        )
+
 
         if created and club.subscription_mode == "regular":
 
@@ -235,15 +258,7 @@ def stripe_connected_webhook(request):
         
             
         
-            invoice = stripe.Invoice.create(
-                customer=sub.customer,
-                subscription=sub.id,
-                auto_advance=True,
-                stripe_account=account_id
-            )
-        
-            if invoice.amount_due > 0:
-                stripe.Invoice.pay(invoice.id, stripe_account=account_id)
+            
             
             if today.day > club.stripe_anchor_date:
                 stripe.InvoiceItem.create(
@@ -254,6 +269,18 @@ def stripe_connected_webhook(request):
                     stripe_account=account_id
                 )
 
+            invoice = stripe.Invoice.create(
+                customer=sub.customer,
+                subscription=sub.id,
+                auto_advance=True,
+                stripe_account=account_id
+            )
+        
+            if invoice.amount_due > 0:
+                stripe.Invoice.pay(invoice.id, stripe_account=account_id)
+
+            
+
 
             
             
@@ -264,22 +291,7 @@ def stripe_connected_webhook(request):
         
 
 
-        if created:
-            for item in sub["items"]["data"]:
         
-                stripe_item_id = item["id"]
-                price_id = item["price"]["id"]
-    
-                if price_id == plan.stripe_price_id:
-        
-                    SubscriptionItem.objects.get_or_create(
-                        stripe_subscription_item_id=stripe_item_id,
-                        defaults={
-                            "subscription": sub_obj,
-                            "plan": plan,
-                            "quantity": item.get("quantity", 1)
-                        }
-                    )
 
 
             
@@ -313,7 +325,7 @@ def stripe_connected_webhook(request):
             return HttpResponse(status=200)
 
         # -------- Find local subscription --------
-        sub = Subscription.objects.filter(stripe_subscription_id=subscription_id).first()
+        sub = Subscription.objects.filter(stripe_subscription_id=subscription_id, club__stripe_account_id=account_id).first()
         if not sub:
             logger.warning(
                 "[invoice.paid] Subscription not found for invoice %s (subscription=%s)",
@@ -385,12 +397,16 @@ def stripe_connected_webhook(request):
         sub.status = "active"
         sub.save()
 
-        member = sub.member
+        members = Member.objects.filter(
+            subscription_items__subscription=sub
+        ).distinct()
 
-        if not member.has_paid_joining_fee:
-            member.has_paid_joining_fee = True
-            member.save(update_fields=["has_paid_joining_fee"])
-            logger.info(f"[invoice.paid] Marked member {member.id} as having paid joining fee")
+        for member in members:
+            if not member.has_paid_joining_fee:
+                member.has_paid_joining_fee = True
+                member.has_been_charged_joining_fee = True
+                member.save(update_fields=["has_paid_joining_fee", "has_been_charged_joining_fee"])
+                logger.info(f"[invoice.paid] Marked member {member.id} as having paid joining fee")
 
         logger.info(
             "[invoice.paid] Processed invoice %s for subscription %s (status=%s)",
@@ -406,7 +422,7 @@ def stripe_connected_webhook(request):
     elif event["type"] == "invoice.payment_failed":
         invoice = event["data"]["object"]
         sub = Subscription.objects.filter(
-            stripe_subscription_id=invoice.get("subscription")
+            stripe_subscription_id=invoice.get("subscription"), club__stripe_account_id=account_id
         ).first()
         if sub:
             sub.status = "past_due"
@@ -414,7 +430,7 @@ def stripe_connected_webhook(request):
 
     elif event["type"] == "customer.subscription.deleted":
         stripe_sub = event["data"]["object"]
-        sub = Subscription.objects.filter(stripe_subscription_id=stripe_sub["id"]).first()
+        sub = Subscription.objects.filter(stripe_subscription_id=stripe_sub["id"], club__stripe_account_id=account_id).first()
         if sub:
             sub.status = "canceled"
             sub.save()
@@ -423,7 +439,7 @@ def stripe_connected_webhook(request):
         stripe_sub = event["data"]["object"]
     
         sub = Subscription.objects.filter(
-            stripe_subscription_id=stripe_sub["id"]
+            stripe_subscription_id=stripe_sub["id"], club__stripe_account_id=account_id
         ).first()
     
         if sub:

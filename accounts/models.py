@@ -8,6 +8,7 @@ from django.db import models
 class CustomUser(AbstractUser):
     email = models.EmailField(unique=True, null=True, blank=True)
     is_active = models.BooleanField(default=True)
+    stripe_customer_id = models.CharField(max_length=255, null=True, blank=True)
 
 
 

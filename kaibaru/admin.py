@@ -15,6 +15,7 @@ from .models import (
     InvoiceItem,
     Payment,
     PaymentMethod,
+    StripeCustomer,
 )
 
 admin.site.register([
@@ -33,4 +34,5 @@ admin.site.register([
     InvoiceItem,
     Payment,
     PaymentMethod,
+    StripeCustomer,
 ])

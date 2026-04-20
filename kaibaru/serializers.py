@@ -20,6 +20,7 @@ from .models import MembershipPlan
 class SubscriptionItemSerializer(serializers.ModelSerializer):
     plan_id = serializers.IntegerField(source="plan.id", read_only=True)
     plan_name = serializers.SerializerMethodField()
+    member_id = serializers.IntegerField(source="member.id", read_only=True)
 
 
     class Meta:
@@ -30,6 +31,7 @@ class SubscriptionItemSerializer(serializers.ModelSerializer):
             "quantity",
             "deleted_at",
             "access_until",
+            "member_id",
             "id",
         ]
 
@@ -161,8 +163,8 @@ class MemberSerializer(serializers.ModelSerializer):
     total_participation = serializers.SerializerMethodField()
     this_month_participation = serializers.SerializerMethodField()
     level_participation = serializers.SerializerMethodField()
-    subscription = serializers.SerializerMethodField()
     age = serializers.SerializerMethodField()
+    subscription_items = SubscriptionItemSerializer(many=True, read_only=True)
 
     class Meta:
         model = Member
@@ -188,12 +190,14 @@ class MemberSerializer(serializers.ModelSerializer):
             "is_kyukai",
             "is_kyukai_paid",
             "kyukai_since",
-            "subscription",
+            "subscription_items",
             "is_manager",
             "is_instructor",
             "birth_date",
             "gender",
             "age",
+            "has_paid_joining_fee",
+            "has_been_charged_joining_fee",
         ]
         read_only_fields = ["id", "user", "is_manager", "is_instructor",]
 
@@ -213,10 +217,6 @@ class MemberSerializer(serializers.ModelSerializer):
 
 
 
-  
-    def get_subscription(self, obj):
-        sub = obj.subscriptions.first()
-        return SubscriptionSerializer(sub).data if sub else None
     
     def to_representation(self, instance):
         data = super().to_representation(instance)
@@ -347,6 +347,8 @@ class ClubSerializer(serializers.ModelSerializer):
     join_requests = serializers.SerializerMethodField()
     my_join_requests = serializers.SerializerMethodField()
     membership_plans = MembershipPlanSerializer(many=True, read_only=True)
+    current_subscription = serializers.SerializerMethodField()
+
 
 
 
@@ -402,7 +404,7 @@ class ClubSerializer(serializers.ModelSerializer):
             "page_content",
             "membership_plans",
             "stripe_subscription_id",
-            
+            "current_subscription",
         ]
         read_only_fields = [
             "id",
@@ -417,6 +419,23 @@ class ClubSerializer(serializers.ModelSerializer):
             "stripe_account_id",
             "stripe_subscription_id",
         ]
+    
+    def get_current_subscription(self, obj):
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            return None
+    
+        sub = Subscription.objects.filter(
+            owner=request.user,
+            club=obj,
+            status__in=["active", "trialing", "pending"]
+        ).first()
+    
+        if not sub:
+            return None
+    
+        return SubscriptionSerializer(sub).data
+
 
     def get_frozen(self, club):  
         if not club.expiration_date:

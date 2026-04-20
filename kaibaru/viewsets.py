@@ -2,7 +2,7 @@ from django.utils import timezone
 from rest_framework import viewsets, serializers, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from .models import Member, Club, Lesson, Participation, SlateImage, JoinRequest, MembershipPlan, Subscription
+from .models import SubscriptionItem, Member, Club, Lesson, Participation, SlateImage, JoinRequest, MembershipPlan, Subscription
 from accounts.models import CustomUser
 from django.contrib.auth import login
 import re
@@ -260,6 +260,7 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
             # Only restrict normal users
             existing = JoinRequest.objects.filter(
                 user=self.request.user,
+                owner=self.request.user,
                 club=club,
             ).first()
     
@@ -267,10 +268,11 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
                 raise serializers.ValidationError(
                     {"detail": "You already have a pending request."}
                 )
-    
+
+            
         serializer.save(
             user=None if is_family else self.request.user,
-            owner=self.request.user if is_family else None,
+            owner=self.request.user,
             club=club,
         )
 
@@ -301,7 +303,7 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
         member = Member.objects.create(
             club=join_request.club,
             user=join_request.user,
-            owner=join_request.owner if join_request.owner else None,
+            owner=join_request.owner,
             full_name=join_request.full_name,
             furigana=join_request.furigana,
             birth_date=join_request.birth_date,
@@ -316,7 +318,6 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
         # ---- Delete join request AFTER copy ----
         join_request.delete()
     
-        from .serializers import MemberSerializer
         return Response(
             MemberSerializer(member, context={"request": request}).data,
             status=status.HTTP_201_CREATED
@@ -381,7 +382,7 @@ class MemberViewSet(viewsets.ModelViewSet):
         existing_member = Member.objects.filter(club=club, user=self.request.user).first()
 
 
-        member = serializer.save(club=club, user=self.request.user)
+        member = serializer.save(club=club, user=self.request.user, owner=self.request.user)
         sync_member_quantity(member.club)
 
 
@@ -555,8 +556,13 @@ class ClubViewSet(viewsets.ModelViewSet):
                     queryset=Member.objects.prefetch_related(
                         "participations",
                         Prefetch(
-                            "subscriptions",
-                            queryset=Subscription.objects.filter(status="active").prefetch_related("items__plan"),
+                            "subscription_items",
+                            queryset=SubscriptionItem.objects.select_related(
+                                "subscription",
+                                "plan"
+                            ).filter(
+                                subscription__status="active"
+                            ),
                         ),
                     ),
                 ),

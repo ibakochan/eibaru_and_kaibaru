@@ -33,8 +33,13 @@ class SignUpForm(forms.ModelForm):
 
     def save(self, commit=True):
         user = super().save(commit=False)
+
         password = self.cleaned_data.get('password')
         user.set_password(password)
+
+        if not user.email:
+            user.email = None
+
         if commit:
             user.save()
         return user
