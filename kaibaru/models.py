@@ -265,6 +265,11 @@ class Member(models.Model):
     kyukai_since = models.DateField(null=True, blank=True)
     legacy_stripe_customer_id = models.CharField(max_length=255, null=True, blank=True)
 
+    counts_for_family_discount = models.BooleanField(
+        default=True,
+        help_text="Whether this member counts toward family discount calculations"
+    )
+
 
 
 
@@ -393,6 +398,9 @@ class SubscriptionItem(models.Model):
         on_delete=models.SET_NULL,
         null=True
     )
+    
+    price_at_subscription = models.IntegerField(null=True, blank=True)
+    stripe_price_id_at_subscription = models.CharField(max_length=255, null=True, blank=True)
 
     deleted_at = models.DateTimeField(null=True, blank=True)
     stripe_subscription_item_id = models.CharField(max_length=255, null=True, blank=True)
@@ -632,7 +640,18 @@ class StripeWebhookEvent(models.Model):
 
 
 class Discount(models.Model):
-    club = models.ForeignKey(Club, on_delete=models.CASCADE)
+    club = models.ForeignKey(Club, on_delete=models.CASCADE, related_name="discounts")
+
+    APPLY_TO_CHOICES = [
+        ("subscription", "Monthly subscription"),
+        ("joining_fee", "Joining fee"),
+    ]
+
+    apply_to = models.CharField(
+        max_length=20,
+        choices=APPLY_TO_CHOICES,
+        default="subscription"
+    )
 
     name = models.CharField(max_length=100)
 
@@ -650,6 +669,12 @@ class Discount(models.Model):
     valid_from = models.DateTimeField(null=True, blank=True)
     valid_until = models.DateTimeField(null=True, blank=True)
 
+    plans = models.ManyToManyField(
+        "MembershipPlan",
+        blank=True,
+        related_name="discounts"
+    )
+
 
 
 class DiscountCondition(models.Model):
@@ -663,13 +688,42 @@ class DiscountCondition(models.Model):
         ("gender", "Gender"),
         ("age_lt", "Age <"),
         ("age_gt", "Age >"),
-        ("plan_count_gte", "Plan count >="),
         ("is_family", "Family group"),
     ]
 
     type = models.CharField(max_length=50, choices=CONDITION_TYPE_CHOICES)
 
     value = models.CharField(max_length=100)
+
+class MemberPricingAdjustment(models.Model):
+    member = models.ForeignKey(
+        Member,
+        on_delete=models.CASCADE,
+        related_name="pricing_adjustments"
+    )
+
+    club = models.ForeignKey(
+        Club,
+        on_delete=models.CASCADE,
+        related_name="member_pricing_adjustments"
+    )
+
+
+    discount_type = models.CharField(
+        max_length=20,
+        choices=[("percentage", "%"), ("fixed", "¥")]
+    )
+
+    value = models.IntegerField()
+
+    reason = models.TextField(blank=True)  # 👈 your "note"
+
+    active = models.BooleanField(default=True)
+
+    valid_from = models.DateTimeField(null=True, blank=True)
+    valid_until = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
 
 
 class StripeCustomer(models.Model):

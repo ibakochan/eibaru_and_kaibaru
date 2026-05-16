@@ -20,6 +20,26 @@ logger = logging.getLogger(__name__)
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
+
+
+from .billing import (
+    resolve_and_apply_subscription_period,
+    extract_subscription_id_from_invoice,
+    get_next_billing_cycle_anchor,
+    is_near_anchor, is_valid_billing_day,
+    validate_plan_change_window,
+    get_cancel_quantity_action,
+    should_set_monthly_resume_prevention,
+    should_cancel_subscription,
+    get_cancel_success_message,
+    can_resume_subscription,
+    get_resume_item_action,
+    should_charge_resume_next_month,
+    get_resume_charge_amount,
+    get_resume_success_message,
+)
+
+from .pricing import calculate_joining_fee, calculate_subscription_pricing
 # ---------------------------
 # Connected account / member webhook
 # ---------------------------
@@ -27,6 +47,9 @@ stripe.api_key = settings.STRIPE_SECRET_KEY
 def stripe_connected_webhook(request):
     payload = request.body
     sig_header = request.META.get("HTTP_STRIPE_SIGNATURE", "")
+
+    today = timezone.localtime().date()
+
 
     try:
         event = stripe.Webhook.construct_event(
@@ -101,6 +124,7 @@ def stripe_connected_webhook(request):
             }
         )
 
+
         if created:
             for item in sub["items"]["data"]:
         
@@ -115,15 +139,19 @@ def stripe_connected_webhook(request):
                             "member": member,
                             "subscription": sub_obj,
                             "plan": plan,
-                            "quantity": item.get("quantity", 1)
+                            "quantity": item.get("quantity", 1),
+
+                            "price_at_subscription": plan.price,
+                            "stripe_price_id_at_subscription": plan.stripe_price_id,
                         }
                     )
-                    
+
+                    final_amount = calculate_joining_fee(club, member)
                     # 🔥 JOINING FEE LOGIC (PER MEMBER)
                     if item_created and club.joining_fee > 0 and not member.has_paid_joining_fee:
                         stripe.InvoiceItem.create(
                             customer=sub.customer,
-                            amount=club.joining_fee,
+                            amount=final_amount,
                             currency="jpy",
                             description=f"{member.full_name} 入会金",
                             stripe_account=account_id
@@ -132,69 +160,22 @@ def stripe_connected_webhook(request):
 
         if created and club.subscription_mode == "regular":
 
-            today = timezone.localtime().date()
-            anchor_day = club.stripe_anchor_date  
             
-            # Determine previous anchor date
-            if today.day >= anchor_day:
-                prev_anchor_month = today.month
-                prev_anchor_year = today.year
-            else:
-                if today.month == 1:
-                    prev_anchor_month = 12
-                    prev_anchor_year = today.year - 1
-                else:
-                    prev_anchor_month = today.month - 1
-                    prev_anchor_year = today.year
-            
-            last_day_prev_month = calendar.monthrange(prev_anchor_year, prev_anchor_month)[1]
-            prev_anchor_date = datetime(
-                prev_anchor_year,
-                prev_anchor_month,
-                min(anchor_day, last_day_prev_month),
-                tzinfo=dt_timezone.utc
-            ).date()
-            
-            # Determine next anchor date
-            next_anchor_month = prev_anchor_month + 1
-            next_anchor_year = prev_anchor_year
-            if next_anchor_month > 12:
-                next_anchor_month = 1
-                next_anchor_year += 1
-            
-            last_day_next_month = calendar.monthrange(next_anchor_year, next_anchor_month)[1]
-            next_anchor_date = datetime(
-                next_anchor_year,
-                next_anchor_month,
-                min(anchor_day, last_day_next_month),
-                tzinfo=dt_timezone.utc
-            ).date()
-            
-            # Days from today until next anchor
-            remaining_days = (next_anchor_date - today).days
-            
-            # Total days in the billing period
-            billing_period_days = (next_anchor_date - prev_anchor_date).days
-            
-            # Calculate prorated amount based on actual billing period
-            monthly_price = plan.price
-            prorated_amount = int(monthly_price * remaining_days / billing_period_days)
+            pricing = calculate_subscription_pricing(
+                club=club,
+                member=member,
+                plan=plan,
+                plan_price=plan.price,
+                today=today,
+                mode="regular",
+                anchor_day=club.stripe_anchor_date,
+            )
+
+            proration = pricing["proration"]
+            prorated_amount = pricing["final_amount"]
+            remaining_days = proration["remaining_days"]
             
 
-            if today.day <= anchor_day:
-                period_end_month = today.month
-                period_end_year = today.year
-            else:
-                period_end_month = today.month + 1
-                period_end_year = today.year
-                if period_end_month > 12:
-                    period_end_month = 1
-                    period_end_year += 1
-            
-            last_day = calendar.monthrange(period_end_year, period_end_month)[1]
-            day = min(anchor_day, last_day)
-            
-            period_end = datetime(period_end_year, period_end_month, day, tzinfo=dt_timezone.utc)
         
             # Charge for the remaining days until next anchor
             if prorated_amount > 0:
@@ -217,49 +198,39 @@ def stripe_connected_webhook(request):
             )
             if invoice.amount_due > 0:
                 stripe.Invoice.pay(invoice.id, stripe_account=account_id)
+
+
                 
         if created and club.subscription_mode == "monthly":
 
-            today = timezone.localtime().date()
-
-
-            anchor_day = club.stripe_anchor_date
-
-                # Compute next anchor-based period end
-            if today.day <= anchor_day:
-                month = today.month
-                year = today.year
-            else:
-                month = today.month + 1
-                year = today.year
-                if month > 12:
-                    month = 1
-                    year += 1
-
-            last_day = calendar.monthrange(year, month)[1]
-            day = min(anchor_day, last_day)
-            
-            period_end = datetime(year, month, day, tzinfo=dt_timezone.utc)
-            
                     
-            days_in_month = calendar.monthrange(today.year, today.month)[1]
-            remaining_days = days_in_month - today.day + 1    
-        
-            monthly_price = plan.price
-            prorated_amount = int(monthly_price * remaining_days / days_in_month)
-    
-            stripe.InvoiceItem.create(
-                customer=sub.customer,
-                amount=prorated_amount,                    
-                currency="jpy",
-                description=f"Prorated membership ({remaining_days} days)",
-                stripe_account=account_id
+            pricing = calculate_subscription_pricing(
+                club=club,
+                member=member,
+                plan=plan,
+                plan_price=plan.price,
+                today=today,
+                mode="monthly",
+                anchor_day=club.stripe_anchor_date,
             )
+
+            proration = pricing["proration"]
+            prorated_amount = pricing["final_amount"]
+            remaining_days = proration["remaining_days"]
+            
+            if prorated_amount > 0:
+                stripe.InvoiceItem.create(
+                    customer=sub.customer,
+                    amount=prorated_amount,                    
+                    currency="jpy",
+                    description=f"Prorated membership ({remaining_days} days)",
+                    stripe_account=account_id
+                )
         
             
         
             
-            
+            charged_next_month = False
             if today.day > club.stripe_anchor_date:
                 stripe.InvoiceItem.create(
                     customer=sub.customer,
@@ -268,6 +239,7 @@ def stripe_connected_webhook(request):
                     description=f"{plan.name} 翌月分前払い",
                     stripe_account=account_id
                 )
+                charged_next_month = True
 
             invoice = stripe.Invoice.create(
                 customer=sub.customer,
@@ -278,6 +250,10 @@ def stripe_connected_webhook(request):
         
             if invoice.amount_due > 0:
                 stripe.Invoice.pay(invoice.id, stripe_account=account_id)
+
+            if charged_next_month:
+                sub_item.monthly_double_resume_charge_prevention = True
+                sub_item.save(update_fields=["monthly_double_resume_charge_prevention"])
 
             
 
@@ -299,26 +275,13 @@ def stripe_connected_webhook(request):
         invoice = event["data"]["object"]
         logger.info(f"[invoice.paid] Received invoice: {invoice.get('id')}")
 
-        # -------- Extract subscription ID (robust for new Stripe structure) --------
-        subscription_id = invoice.get("subscription")
+        
+        
+        is_cycle = invoice.get("billing_reason") == "subscription_cycle"
+        
 
-        if not subscription_id:
-            subscription_id = (
-                invoice.get("parent", {})
-                .get("subscription_details", {})
-                .get("subscription")
-            )
 
-        if not subscription_id:
-            for line in invoice.get("lines", {}).get("data", []):
-                subscription_id = (
-                    line.get("parent", {})
-                    .get("subscription_item_details", {})
-                    .get("subscription")
-                )
-                if subscription_id:
-                    logger.info(f"[invoice.paid] Found subscription {subscription_id} from invoice line")
-                    break
+        subscription_id = extract_subscription_id_from_invoice(invoice)
 
         if not subscription_id:
             logger.warning(f"[invoice.paid] No subscription found on invoice {invoice.get('id')}")
@@ -326,6 +289,8 @@ def stripe_connected_webhook(request):
 
         # -------- Find local subscription --------
         sub = Subscription.objects.filter(stripe_subscription_id=subscription_id, club__stripe_account_id=account_id).first()
+        
+        
         if not sub:
             logger.warning(
                 "[invoice.paid] Subscription not found for invoice %s (subscription=%s)",
@@ -333,6 +298,9 @@ def stripe_connected_webhook(request):
                 subscription_id
             )
             return HttpResponse(status=200)
+        
+        is_first_invoice = sub.last_invoice_id is None
+        should_update_period = is_first_invoice or is_cycle
 
         logger.info(f"[invoice.paid] Found subscription {sub.id} for invoice {invoice['id']}")
 
@@ -341,7 +309,43 @@ def stripe_connected_webhook(request):
             logger.info(f"[invoice.paid] Invoice {invoice['id']} already processed, skipping")
             return HttpResponse(status=200)
 
-        sub.last_invoice_id = invoice["id"]
+        for line in invoice.get("lines", {}).get("data", []):
+            metadata = line.get("metadata", {})
+
+            charge_type = metadata.get("type")
+            member_id = metadata.get("member_id")
+            plan_id = metadata.get("plan_id")
+
+            if charge_type == "joining_fee":
+                member = Member.objects.filter(id=member_id).first()
+                if member and not member.has_paid_joining_fee:
+                    member.has_paid_joining_fee = True
+                    member.has_been_charged_joining_fee = True
+                    member.save(update_fields=["has_paid_joining_fee", "has_been_charged_joining_fee"])
+    
+            if charge_type in ["proration", "next_month_fee"]:
+                SubscriptionItem.objects.get_or_create(
+                    subscription=sub,
+                    member_id=member_id,
+                    plan_id=plan_id,
+                    defaults={
+                        "quantity": 1,
+                        "price_at_subscription": line["amount"],
+                        "stripe_price_id_at_subscription": None,
+                        "deleted_at": None,
+                    }
+                )
+            
+            if charge_type == "resume_charge":
+                item = SubscriptionItem.objects.filter(
+                    subscription=sub,
+                    member_id=member_id,
+                    plan_id=plan_id
+                ).first()
+        
+                if item:
+                    item.monthly_double_resume_charge_prevention = True
+                    item.save(update_fields=["monthly_double_resume_charge_prevention"])
 
         # -------- Extract period end from invoice lines --------
         periods = [
@@ -353,48 +357,15 @@ def stripe_connected_webhook(request):
         period_end_ts = max(periods) if periods else None
         logger.info(f"[invoice.paid] Calculated period_end_ts: {period_end_ts}")
 
-        if period_end_ts:
-            period_end = datetime.fromtimestamp(period_end_ts, tz=dt_timezone.utc)
-            today = timezone.localtime().date()
-
-            # If period_end is essentially today (±1 day), override with next anchor
-            if abs((period_end.date() - today).days) <= 1:
-                anchor_day = sub.billing_anchor_day  # club anchor
-                # Determine next anchor month/year
-                if today.day <= anchor_day:
-                    month, year = today.month, today.year
-                else:
-                    month, year = today.month + 1, today.year
-                    if month > 12:
-                        month = 1
-                        year += 1
-                last_day = calendar.monthrange(year, month)[1]                    
-                day = min(anchor_day, last_day)
-                period_end = datetime(year, month, day, tzinfo=dt_timezone.utc)
-                logger.info(f"[invoice.paid] Overriding period_end to next anchor: {period_end}")
-
-            sub.current_period_end = period_end
-            logger.info(f"[invoice.paid] Updated current_period_end to {sub.current_period_end}")
-            if sub.billing_mode == "regular":
-                sub.access_until = period_end
-                logger.info(f"[invoice.paid] Updated access_until to {sub.access_until}")
-            
-
-            if sub.billing_mode == "monthly":
-                year = sub.current_period_end.year
-                month = sub.current_period_end.month
-                last_day = calendar.monthrange(year, month)[1]
-
-                sub.access_until = datetime(
-                    year, month, last_day, 23, 59, 59, tzinfo=dt_timezone.utc
-                )
-                logger.info(f"[invoice.paid] Updated access_until to {sub.access_until}")
-
+        if period_end_ts and should_update_period:
+            resolve_and_apply_subscription_period(sub, period_end_ts, today)
         else:
-            logger.warning(f"[invoice.paid] No valid period_end found on invoice {invoice['id']}")
+            logger.warning(f"No valid period_end found on invoice {invoice['id']}")
 
         # -------- Finalize --------
+
         sub.status = "active"
+        sub.last_invoice_id = invoice["id"]
         sub.save()
 
         members = Member.objects.filter(
@@ -415,9 +386,10 @@ def stripe_connected_webhook(request):
             sub.status
         )
 
-        SubscriptionItem.objects.filter(
-            subscription=sub
-        ).update(monthly_double_resume_charge_prevention=False)
+        if is_cycle:
+            SubscriptionItem.objects.filter(
+                subscription=sub
+            ).update(monthly_double_resume_charge_prevention=False)
     
     elif event["type"] == "invoice.payment_failed":
         invoice = event["data"]["object"]
@@ -437,6 +409,7 @@ def stripe_connected_webhook(request):
 
     elif event["type"] == "customer.subscription.updated":
         stripe_sub = event["data"]["object"]
+
     
         sub = Subscription.objects.filter(
             stripe_subscription_id=stripe_sub["id"], club__stripe_account_id=account_id
@@ -445,12 +418,6 @@ def stripe_connected_webhook(request):
         if sub:
             sub.cancel_at_period_end = stripe_sub.get("cancel_at_period_end", False)
             sub.status = stripe_sub.get("status", sub.status)
-    
-            period_end_ts = stripe_sub.get("current_period_end")
-            if period_end_ts:
-                sub.current_period_end = datetime.fromtimestamp(
-                    period_end_ts, tz=dt_timezone.utc
-                )
     
             sub.save()
 

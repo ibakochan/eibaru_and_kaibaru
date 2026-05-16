@@ -112,26 +112,48 @@ DJANGO_VITE = {
 }
 
 # REQUIRED for YouTube iframes
-CSP_FRAME_SRC = (
-    "'self'",
-    "https://www.youtube.com",
-    "https://www.youtube-nocookie.com",
-)
+#CSP_FRAME_SRC = (
+#    "'self'",
+#    "https://www.youtube.com",
+#    "https://www.youtube-nocookie.com",
+#)
 
 # Safari / fallback
-CSP_CHILD_SRC = (
-    "'self'",
-    "https://www.youtube.com",
-    "https://www.youtube-nocookie.com",
-)
+#CSP_CHILD_SRC = (
+#    "'self'",
+#    "https://www.youtube.com",
+#    "https://www.youtube-nocookie.com",
+#
+#
+#CSP_SCRIPT_SRC = (
+#    "'self'",
+#    "'unsafe-inline'",
+#    "https://www.youtube.com",
+#    "https://www.youtube-nocookie.com",
+#    "https://www.youtube.com/iframe_api",
+#)
 
-CSP_SCRIPT_SRC = (
-    "'self'",
-    "'unsafe-inline'",
-    "https://www.youtube.com",
-    "https://www.youtube-nocookie.com",
-    "https://www.youtube.com/iframe_api",
-)
+# CONTENT_SECURITY_POLICY = {
+#     "DIRECTIVES": {
+#         "script-src": (
+#             "'self'",
+#             "'unsafe-inline'",
+#             "https://www.youtube.com",
+#             "https://www.youtube-nocookie.com",
+#             "https://www.youtube.com/iframe_api",
+#         ),
+#         "frame-src": (
+#             "'self'",
+#             "https://www.youtube.com",
+#             "https://www.youtube-nocookie.com",
+#         ),
+#         "child-src": (
+#             "'self'",
+#             "https://www.youtube.com",
+#             "https://www.youtube-nocookie.com",
+#         ),
+#     }
+# }
 
 # Prevent XFrameOptions conflicts
 

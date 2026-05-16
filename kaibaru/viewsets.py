@@ -1,14 +1,17 @@
 from django.utils import timezone
 from rest_framework import viewsets, serializers, status
 from rest_framework.decorators import action
+from rest_framework.viewsets import ViewSet
 from rest_framework.response import Response
-from .models import SubscriptionItem, Member, Club, Lesson, Participation, SlateImage, JoinRequest, MembershipPlan, Subscription
+from .models import MemberPricingAdjustment, Discount, DiscountCondition, SubscriptionItem, Member, Club, Lesson, Participation, SlateImage, JoinRequest, MembershipPlan, Subscription
 from accounts.models import CustomUser
 from django.contrib.auth import login
 import re
 import unicodedata
 import json
 import logging
+from django.db.models import Q
+from datetime import date
 
 import stripe
 from django.conf import settings
@@ -16,10 +19,15 @@ from django.db.models import Prefetch
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
+from .discounts import calculate_discounted_amount
 import uuid
 
+from .pricing import (
+    calculate_joining_fee,
+    calculate_subscription_pricing,
+)
 
-from .serializers import MembershipPlanSerializer, MemberSerializer, ClubSerializer, LessonSerializer, ParticipationSerializer, SlateImageSerializer, JoinRequestSerializer
+from .serializers import MemberPricingAdjustmentSerializer, DiscountConditionSerializer, DiscountSerializer, MembershipPlanSerializer, MemberSerializer, ClubSerializer, LessonSerializer, ParticipationSerializer, SlateImageSerializer, JoinRequestSerializer
 from django.conf import settings
 from datetime import timedelta
 import hashlib
@@ -30,6 +38,336 @@ from .utils import sync_member_quantity
 
 from django.core.files.base import ContentFile
 import os
+
+from django.utils import timezone
+
+def build_pricing_map(club, request_user):
+    from .billing import compute_access_period_preview
+    from collections import defaultdict
+    from django.db.models import Q
+    from django.utils import timezone
+
+    from .models import Subscription, SubscriptionItem, Member
+    from .pricing import calculate_regular_proration, calculate_monthly_proration
+    from .discounts import (
+        build_discount_context,
+        build_member_discount_map,
+        build_discount_plan_ids_map,
+        apply_discounts,
+        get_applicable_discounts,
+    )
+
+    today = timezone.localdate()
+
+    # -------------------------
+    # ROLE LOGIC
+    # -------------------------
+    is_club_owner = (club.owner_id == request_user.id)
+    user_member = Member.objects.filter(club=club, user=request_user).first()
+    is_manager = user_member.is_manager if user_member else False
+    can_view_all = is_club_owner or is_manager
+    is_authenticated = request_user.is_authenticated
+
+    # -------------------------
+    # SHARED DATA FETCHING
+    # -------------------------
+    members = list(
+        club.members.all().select_related("owner", "club")
+    )
+
+    subs_by_owner = {
+        sub.owner_id: sub
+        for sub in Subscription.objects.filter(
+            club=club,
+            status__in=["active", "trialing", "pending"],
+        )
+    }
+
+    all_items = list(
+        SubscriptionItem.objects.filter(
+            subscription__club=club,
+            subscription__status__in=["active", "trialing", "pending"],
+        )
+        .select_related("member", "plan", "subscription")
+        .filter(
+            Q(deleted_at__isnull=True) |
+            Q(deleted_at__isnull=False, access_until__gt=timezone.now())
+        )
+    )
+
+    items_by_member = defaultdict(list)
+    for item in all_items:
+        items_by_member[item.member_id].append(item)
+
+    plans = list(club.membership_plans.filter(active=True))
+
+    # -------------------------
+    # DISCOUNTS (RAW)
+    # -------------------------
+    subscription_discounts = get_applicable_discounts(
+        club, "subscription"
+    ).prefetch_related("plans")
+
+    joining_fee_discounts = get_applicable_discounts(
+        club, "joining_fee"
+    ).prefetch_related("plans")
+
+    # -------------------------
+    # CONTEXT PRECOMPUTE
+    # -------------------------
+    context = build_discount_context(members)
+
+    member_ages = context["member_ages"]
+    family_counts = context["family_counts"]
+
+    # -------------------------
+    # DISCOUNT MAPS (MEMBER → DISCOUNTS)
+    # -------------------------
+    member_subscription_discounts = build_member_discount_map(
+        members,
+        subscription_discounts,
+        member_ages=member_ages,
+        family_counts=family_counts,
+    )
+
+    member_joining_discounts = build_member_discount_map(
+        members,
+        joining_fee_discounts,
+        member_ages=member_ages,
+        family_counts=family_counts,
+    )
+
+    # -------------------------
+    # PLAN FILTER MAPS
+    # -------------------------
+    subscription_discount_plan_ids = build_discount_plan_ids_map(
+        subscription_discounts
+    )
+
+    joining_discount_plan_ids = build_discount_plan_ids_map(
+        joining_fee_discounts
+    )
+
+    # -------------------------
+    # PRICING MAP BUILD
+    # -------------------------
+    pricing_map = {}
+
+    for member in members:
+        if is_authenticated and not can_view_all and member.owner_id != request_user.id:
+            continue
+
+        member_data = {}
+
+        sub = subs_by_owner.get(member.owner_id)
+        if sub:
+            anchor_day = sub.billing_anchor_day
+            mode = sub.billing_mode
+        else:
+            anchor_day = club.stripe_anchor_date
+            mode = club.subscription_mode
+
+        access_period = None
+
+        if sub:
+            access_until = sub.access_until
+            current_period_end = sub.current_period_end
+
+            access_period = {
+                "access_start": today,
+                "access_until": access_until,
+                "current_period_end": current_period_end,
+                "days": (access_until.date() - today).days + 1 if access_until else 0,
+                "source": "live",
+            }
+        else:
+            access_period = compute_access_period_preview(today, mode, anchor_day)
+            access_period["source"] = "preview"
+        
+        member_data["access_preview"] = {
+            "start": access_period["access_start"].isoformat(),
+            "end": access_period["access_until"].isoformat() if access_period["access_until"] else None,
+            "current_period_end": access_period["current_period_end"].isoformat() if access_period["current_period_end"] else None,
+            "days": access_period["days"],
+
+            "billing_mode": mode,
+            "billing_anchor_day": anchor_day,
+            "source": access_period.get("source"),
+        }
+
+        # =========================================================
+        # SELF VIEW
+        # =========================================================
+        if is_authenticated and member.owner_id == request_user.id:
+
+            # -------------------------
+            # Joining fee
+            # -------------------------
+            if club.joining_fee > 0 and not member.has_been_charged_joining_fee:
+                member_data["joining_fee"] = apply_discounts(
+                    member_id=member.id,
+                    base_amount=club.joining_fee,
+                    discount_type="joining_fee",
+                    member_subscription_discounts=member_subscription_discounts,
+                    member_joining_discounts=member_joining_discounts,
+                    subscription_discount_plan_ids=subscription_discount_plan_ids,
+                    joining_discount_plan_ids=joining_discount_plan_ids,
+                )
+
+            # -------------------------
+            # Existing items
+            # -------------------------
+            subscription_items = []
+            for item in items_by_member.get(member.id, []):
+                plan = item.plan
+                if not plan:
+                    continue
+
+                base = item.price_at_subscription or plan.price
+
+                pricing_result = apply_discounts(
+                    member_id=member.id,
+                    base_amount=base,
+                    discount_type="subscription",
+                    plan=plan,
+                    member_subscription_discounts=member_subscription_discounts,
+                    member_joining_discounts=member_joining_discounts,
+                    subscription_discount_plan_ids=subscription_discount_plan_ids,
+                    joining_discount_plan_ids=joining_discount_plan_ids,
+                )
+
+                subscription_items.append({
+                    "item_id": item.id,
+                    "plan_id": plan.id,
+                    "plan_name": plan.name,
+                    "deleted_at": item.deleted_at.isoformat() if item.deleted_at else None,
+                    "access_until": item.access_until.isoformat() if item.access_until else None,
+                    **pricing_result,
+                })
+
+            member_data["subscription_items"] = subscription_items
+
+            # -------------------------
+            # PLAN ALTERNATIVES
+            # -------------------------
+            plan_alternatives = {}
+
+            for plan in plans:
+                full_pricing = apply_discounts(
+                    member_id=member.id,
+                    base_amount=plan.price,
+                    discount_type="subscription",
+                    plan=plan,
+                    member_subscription_discounts=member_subscription_discounts,
+                    member_joining_discounts=member_joining_discounts,
+                    subscription_discount_plan_ids=subscription_discount_plan_ids,
+                    joining_discount_plan_ids=joining_discount_plan_ids,
+                )
+
+                # proration
+                if mode == "regular":
+                    proration = calculate_regular_proration(
+                        today, anchor_day, plan.price
+                    )
+                    ratio = (
+                        proration["remaining_days"]
+                        / proration["billing_period_days"]
+                    )
+                else:
+                    proration = calculate_monthly_proration(
+                        today, plan.price
+                    )
+                    ratio = (
+                        proration["remaining_days"]
+                        / proration["days_in_month"]
+                    )
+
+                prorated_pricing = apply_discounts(
+                    member_id=member.id,
+                    base_amount=proration["prorated_amount"],
+                    discount_type="subscription",
+                    plan=plan,
+                    proration_ratio=ratio,
+                    member_subscription_discounts=member_subscription_discounts,
+                    member_joining_discounts=member_joining_discounts,
+                    subscription_discount_plan_ids=subscription_discount_plan_ids,
+                    joining_discount_plan_ids=joining_discount_plan_ids,
+                )
+
+                is_monthly_past_anchor = (
+                    mode == "monthly"
+                    and anchor_day
+                    and today.day > anchor_day
+                )
+
+                if is_monthly_past_anchor:
+                    today_charge = {
+                        "base": prorated_pricing["base"] + full_pricing["base"],
+                        "final": prorated_pricing["final"] + full_pricing["final"],
+                        "savings": prorated_pricing["savings"] + full_pricing["savings"],
+                    }
+                else:
+                    today_charge = prorated_pricing
+
+                plan_alternatives[plan.id] = {
+                    "plan_name": plan.name,
+                    "monthly": full_pricing,
+                    "prorated": {
+                        **prorated_pricing,
+                        "proration": proration,
+                        "ratio": ratio,
+                    },
+                    "today_charge": today_charge,
+                }
+
+            member_data["plan_alternatives"] = plan_alternatives
+
+        # =========================================================
+        # STAFF VIEW
+        # =========================================================
+        elif can_view_all:
+            staff_items = []
+
+            for item in items_by_member.get(member.id, []):
+                plan = item.plan
+                if not plan:
+                    continue
+
+                base = item.price_at_subscription or plan.price
+
+                pricing_result = apply_discounts(
+                    member_id=member.id,
+                    base_amount=base,
+                    discount_type="subscription",
+                    plan=plan,
+                    member_subscription_discounts=member_subscription_discounts,
+                    member_joining_discounts=member_joining_discounts,
+                    subscription_discount_plan_ids=subscription_discount_plan_ids,
+                    joining_discount_plan_ids=joining_discount_plan_ids,
+                )
+
+                staff_items.append({
+                    "item_id": item.id,
+                    "plan_id": plan.id,
+                    "plan_name": plan.name,
+                    "deleted_at": item.deleted_at.isoformat() if item.deleted_at else None,
+                    "access_until": item.access_until.isoformat() if item.access_until else None,
+                    **pricing_result,
+                })
+
+            member_data["subscription_items"] = staff_items
+
+        # =========================================================
+        # PUBLIC VIEW
+        # =========================================================
+        else:
+            member_data = {
+                "has_subscription": member.id in items_by_member
+            }
+
+        pricing_map[member.id] = member_data
+
+    return pricing_map
 
 
 from collections import defaultdict
@@ -69,7 +407,115 @@ def slugify(value):
     return value.strip("-").lower()
 
 
+class MemberPricingAdjustmentViewSet(viewsets.ModelViewSet):
+    queryset = MemberPricingAdjustment.objects.all()
+    serializer_class = MemberPricingAdjustmentSerializer
 
+    def get_queryset(self):
+        qs = (
+            MemberPricingAdjustment.objects.all()
+            .select_related("member", "club")
+            .order_by("-created_at")
+        )
+
+        club_id = self.request.query_params.get("club")
+        member_id = self.request.query_params.get("member")
+
+        if club_id:
+            qs = qs.filter(club_id=club_id)
+
+        if member_id:
+            qs = qs.filter(member_id=member_id)
+
+        return qs
+
+    # -------------------------
+    # CREATE
+    # -------------------------
+    def perform_create(self, serializer):
+        club_id = self.request.data.get("club")
+        member_id = self.request.data.get("member")
+
+        if not club_id:
+            raise serializers.ValidationError({"club": "club is required"})
+        if not member_id:
+            raise serializers.ValidationError({"member": "member is required"})
+
+        club = Club.objects.filter(id=club_id, is_deleted=False).first()
+        if not club:
+            raise serializers.ValidationError({"club": "Club not found"})
+
+        # permission check (same pattern as your other viewsets)
+        if club.owner_id != self.request.user.id:
+            raise serializers.ValidationError({"detail": "Not allowed"})
+
+        member = Member.objects.filter(id=member_id, club=club).first()
+        if not member:
+            raise serializers.ValidationError({"member": "Member not found"})
+
+        serializer.save(club=club, member=member)
+
+    # -------------------------
+    # UPDATE
+    # -------------------------
+    def perform_update(self, serializer):
+        obj = self.get_object()
+
+        if obj.club.owner_id != self.request.user.id:
+            raise serializers.ValidationError({"detail": "Not allowed"})
+
+        # optional safety: prevent cross-club reassignment
+        serializer.save(club=obj.club)
+
+    # -------------------------
+    # DELETE
+    # -------------------------
+    def perform_destroy(self, instance):
+        if instance.club.owner_id != self.request.user.id:
+            raise serializers.ValidationError({"detail": "Not allowed"})
+
+        instance.delete()
+
+
+class DiscountViewSet(viewsets.ModelViewSet):
+    serializer_class = DiscountSerializer
+    queryset = Discount.objects.all()
+
+    def get_queryset(self):
+        queryset = Discount.objects.all().prefetch_related("conditions", "plans")
+
+        club_id = self.request.query_params.get("club")
+        if club_id:
+            queryset = queryset.filter(club_id=club_id)
+    
+        return queryset
+
+    def perform_create(self, serializer):
+        club_id = self.request.data.get("club")
+
+        club = Club.objects.filter(id=club_id).first()
+
+        if not club:
+            raise serializers.ValidationError({"club": "Club not found."})
+
+        if club.owner != self.request.user:
+            raise serializers.ValidationError({"detail": "Not allowed."})
+
+        serializer.save(club=club)
+
+    def perform_update(self, serializer):
+        discount = self.get_object()
+
+        if discount.club.owner != self.request.user:
+            raise serializers.ValidationError({"detail": "Not allowed."})
+
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        if instance.club.owner != self.request.user:
+            raise serializers.ValidationError({"detail": "Not allowed."})
+
+        instance.delete()
 
 
 
@@ -582,8 +1028,18 @@ class ClubViewSet(viewsets.ModelViewSet):
         club = self.get_queryset().filter(subdomain=subdomain).first()
         if not club:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+
         serializer = self.get_serializer(club, context={"request": request})
         return Response(serializer.data)
+
+    @action(detail=True, methods=["get"])
+    def pricing_map(self, request, pk=None):
+   
+        club = self.get_object()
+        data = build_pricing_map(club, request.user)
+
+        return Response(data)
+
 
     @action(detail=False, methods=["post"], url_path="create-trial")
     def create_trial(self, request):

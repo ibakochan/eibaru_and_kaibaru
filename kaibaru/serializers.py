@@ -1,10 +1,11 @@
 from rest_framework import serializers
-from .models import Member, Club, Lesson, Participation, SlateImage, JoinRequest, Subscription, SubscriptionItem
+from .models import MemberPricingAdjustment, Discount, DiscountCondition, Member, Club, Lesson, Participation, SlateImage, JoinRequest, Subscription, SubscriptionItem
 
 from google.cloud import storage
 from django.db.models import Q
 from .permissions import IsSuperuser
 from django.utils import timezone
+from django.utils.timezone import now
 
 from collections import defaultdict
 
@@ -17,10 +18,176 @@ from datetime import date
 
 from .models import MembershipPlan
 
+
+
+
+class MemberPricingAdjustmentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MemberPricingAdjustment
+        fields = [
+            "id",
+            "member",
+            "club",
+            "discount_type",
+            "value",
+            "reason",
+            "active",
+            "valid_from",
+            "valid_until",
+            "created_at",
+        ]
+        read_only_fields = ["id", "created_at"]
+
+    def validate_value(self, value):
+        if value < 0:
+            raise serializers.ValidationError("value must be >= 0")
+        return value
+
+    def validate(self, data):
+        if data["discount_type"] == "percentage" and data["value"] > 100:
+            raise serializers.ValidationError("percentage cannot exceed 100")
+        return data
+
+
+class DiscountConditionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DiscountCondition
+        fields = [
+            "id",
+            "type",
+            "value",
+        ]
+        read_only_fields = ["id"]
+
+    def validate(self, data):
+        ctype = data.get("type")
+        value = data.get("value")
+    
+        if ctype == "gender":
+            if value not in ["male", "female"]:
+                raise serializers.ValidationError(
+                    {"value": "性別は male または female のみです"}
+                )
+        else:
+            try:
+                value = int(value)  # 👈 convert here
+            except (TypeError, ValueError):
+                raise serializers.ValidationError(
+                    {"value": "数値を入力してください"}
+                )
+    
+            if value < 0:
+                raise serializers.ValidationError(
+                    {"value": "0以上である必要があります"}
+                )
+    
+            if ctype == "plan_count_gte" and value < 2:
+                raise serializers.ValidationError(
+                    {"value": "プラン数は2以上である必要があります"}
+                )
+    
+            if ctype == "is_family" and value < 1:
+                raise serializers.ValidationError(
+                    {"value": "家族人数は1以上である必要があります"}
+                )
+    
+            data["value"] = value  # 👈 IMPORTANT: save converted int
+    
+        return data
+
+class DiscountSerializer(serializers.ModelSerializer):
+    conditions = DiscountConditionSerializer(many=True)
+    plans = serializers.PrimaryKeyRelatedField(
+        many=True,
+        queryset=MembershipPlan.objects.all(),
+        required=False
+    )
+
+    class Meta:
+        model = Discount
+        fields = [
+            "id",
+            "club",
+            "name",
+            "discount_type",
+            "value",
+            "active",
+            "priority",
+            "valid_from",
+            "valid_until",
+            "conditions",
+            "apply_to",
+            "plans", 
+        ]
+        read_only_fields = ["id", "club"]
+    
+    def validate(self, data):
+        discount_type = data.get("discount_type")
+        value = data.get("value")
+
+        if discount_type == "percentage":
+            if value > 100:
+                raise serializers.ValidationError(
+                    {"value": "割引率は100%以下にしてください"}
+                )
+            if value < 0:
+                raise serializers.ValidationError(
+                    {"value": "割引率は0%以上にしてください"}
+                )
+
+        elif discount_type == "fixed":
+            if value < 0:
+                raise serializers.ValidationError(
+                    {"value": "割引額は0以上にしてください"}
+                )
+
+        conditions = data.get("conditions", [])
+        types = [c.get("type") for c in conditions if c.get("type")]
+
+        if len(types) != len(set(types)):
+            raise serializers.ValidationError(
+                {"conditions": "同じ条件タイプは複数設定できません"}
+            )
+
+        return data
+
+    def create(self, validated_data):
+        conditions_data = validated_data.pop("conditions", [])
+        plans = validated_data.pop("plans", [])
+        discount = Discount.objects.create(**validated_data)
+
+        discount.plans.set(plans)
+
+        for cond in conditions_data:
+            DiscountCondition.objects.create(discount=discount, **cond)
+
+        return discount
+
+    def update(self, instance, validated_data):
+        conditions_data = validated_data.pop("conditions", None)
+        plans = validated_data.pop("plans", None)
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        if plans is not None:
+            instance.plans.set(plans)
+
+        if conditions_data is not None:
+            instance.conditions.all().delete()
+            for cond in conditions_data:
+                DiscountCondition.objects.create(discount=instance, **cond)
+
+        return instance
+
 class SubscriptionItemSerializer(serializers.ModelSerializer):
     plan_id = serializers.IntegerField(source="plan.id", read_only=True)
     plan_name = serializers.SerializerMethodField()
     member_id = serializers.IntegerField(source="member.id", read_only=True)
+
+
+
 
 
     class Meta:
@@ -33,15 +200,41 @@ class SubscriptionItemSerializer(serializers.ModelSerializer):
             "access_until",
             "member_id",
             "id",
+            "price_at_subscription",
+
         ]
 
     def get_plan_name(self, obj):
         return obj.plan.name if obj.plan else None
 
 
+
+
+class MemberSubscriptionSerializer(serializers.ModelSerializer):
+    items = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Subscription
+        fields = [
+            "id",
+            "status",
+            "current_period_end",
+            "access_until",
+            "cancel_at_period_end",
+            "billing_anchor_day",
+            "billing_mode",
+            "items",
+        ]
+
+    def get_items(self, obj):
+        member = self.context.get("member")
+        return SubscriptionItemSerializer(
+            obj.items.filter(member=member),
+            many=True
+        ).data
+
 class SubscriptionSerializer(serializers.ModelSerializer):
     items = SubscriptionItemSerializer(many=True, read_only=True)
-    anchor_day = serializers.SerializerMethodField()
 
     class Meta:
         model = Subscription
@@ -54,16 +247,12 @@ class SubscriptionSerializer(serializers.ModelSerializer):
 
             # 👇 ADD THESE
             "billing_anchor_day",
-            "anchor_day",
             "billing_mode",
 
             "items",
         ]
 
-    def get_anchor_day(self, obj):
-        if obj.billing_anchor_day:
-            return obj.billing_anchor_day
-        return None
+
 
 class MembershipPlanSerializer(serializers.ModelSerializer):
     class Meta:
@@ -164,7 +353,8 @@ class MemberSerializer(serializers.ModelSerializer):
     this_month_participation = serializers.SerializerMethodField()
     level_participation = serializers.SerializerMethodField()
     age = serializers.SerializerMethodField()
-    subscription_items = SubscriptionItemSerializer(many=True, read_only=True)
+    subscription_state = serializers.SerializerMethodField()
+    subscription_items = serializers.SerializerMethodField()
 
     class Meta:
         model = Member
@@ -190,7 +380,6 @@ class MemberSerializer(serializers.ModelSerializer):
             "is_kyukai",
             "is_kyukai_paid",
             "kyukai_since",
-            "subscription_items",
             "is_manager",
             "is_instructor",
             "birth_date",
@@ -198,9 +387,55 @@ class MemberSerializer(serializers.ModelSerializer):
             "age",
             "has_paid_joining_fee",
             "has_been_charged_joining_fee",
+            "subscription_state",
+            "subscription_items",
         ]
         read_only_fields = ["id", "user", "is_manager", "is_instructor",]
 
+    
+    def get_subscription_items(self, obj):
+        items = (
+            obj.subscription_items
+            .select_related("subscription", "plan")
+            .filter(
+                Q(deleted_at__isnull=True)  # active
+                |
+                Q(deleted_at__isnull=False, access_until__gt=now())  # grace
+            )
+            .filter(
+                subscription__status__in=["active", "trialing", "pending"]
+            )
+        )
+
+        return SubscriptionItemSerializer(items, many=True).data
+    
+    def get_subscription_state(self, obj):
+        item = (
+            obj.subscription_items
+            .select_related("subscription")
+            .filter(
+                subscription__status__in=["active", "trialing", "pending"],
+                deleted_at__isnull=True
+            )
+            .order_by("-subscription__current_period_end")
+            .first()
+        )
+    
+        if not item:
+            return None
+    
+        sub = item.subscription
+    
+        return {
+            "id": sub.id,
+            "status": sub.status,
+            "current_period_end": sub.current_period_end,
+            "access_until": sub.access_until,
+            "cancel_at_period_end": sub.cancel_at_period_end,
+            "billing_anchor_day": sub.billing_anchor_day,
+            "billing_mode": sub.billing_mode,
+        }
+        
     def get_age(self, obj):
         if not obj.birth_date:
             return None
@@ -347,7 +582,6 @@ class ClubSerializer(serializers.ModelSerializer):
     join_requests = serializers.SerializerMethodField()
     my_join_requests = serializers.SerializerMethodField()
     membership_plans = MembershipPlanSerializer(many=True, read_only=True)
-    current_subscription = serializers.SerializerMethodField()
 
 
 
@@ -404,7 +638,6 @@ class ClubSerializer(serializers.ModelSerializer):
             "page_content",
             "membership_plans",
             "stripe_subscription_id",
-            "current_subscription",
         ]
         read_only_fields = [
             "id",
@@ -420,21 +653,7 @@ class ClubSerializer(serializers.ModelSerializer):
             "stripe_subscription_id",
         ]
     
-    def get_current_subscription(self, obj):
-        request = self.context.get("request")
-        if not request or not request.user.is_authenticated:
-            return None
-    
-        sub = Subscription.objects.filter(
-            owner=request.user,
-            club=obj,
-            status__in=["active", "trialing", "pending"]
-        ).first()
-    
-        if not sub:
-            return None
-    
-        return SubscriptionSerializer(sub).data
+
 
 
     def get_frozen(self, club):  

@@ -17,6 +17,8 @@ router.register(r'lessons', viewsets.LessonViewSet)
 router.register(r'participations', viewsets.ParticipationViewSet)
 router.register(r'slate_images', viewsets.SlateImageViewSet)
 router.register(r'membershipplans', viewsets.MembershipPlanViewSet)
+router.register(r'discounts', viewsets.DiscountViewSet)
+router.register(r'member_pricing_adjustments', viewsets.MemberPricingAdjustmentViewSet)
 
 app_name='kaibaru'
 urlpatterns = [
