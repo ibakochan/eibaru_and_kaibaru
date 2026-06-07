@@ -12,6 +12,7 @@ import json
 import logging
 from django.db.models import Q
 from datetime import date
+from django.db.models import Sum
 
 import stripe
 from django.conf import settings
@@ -35,17 +36,29 @@ import hashlib
 from django.db import transaction
 
 from .utils import sync_member_quantity
+from .rules_plans import would_break_any_bundle
 
 from django.core.files.base import ContentFile
 import os
+from django.utils.timezone import now
 
-from django.utils import timezone
+def build_member_adjustment_map(members):
+    qs = MemberPricingAdjustment.objects.filter(
+        member_id__in=[m.id for m in members],
+    ).prefetch_related("plans")
+
+    result = defaultdict(list)
+
+    for adj in qs:
+        adj.plan_ids = {p.id for p in adj.plans.all()}  # 👈 add this
+        result[adj.member_id].append(adj)
+
+    return result
 
 def build_pricing_map(club, request_user):
     from .billing import compute_access_period_preview
     from collections import defaultdict
     from django.db.models import Q
-    from django.utils import timezone
 
     from .models import Subscription, SubscriptionItem, Member
     from .pricing import calculate_regular_proration, calculate_monthly_proration
@@ -74,6 +87,8 @@ def build_pricing_map(club, request_user):
     members = list(
         club.members.all().select_related("owner", "club")
     )
+
+    member_adjustments = build_member_adjustment_map(members)
 
     subs_by_owner = {
         sub.owner_id: sub
@@ -205,6 +220,8 @@ def build_pricing_map(club, request_user):
             # -------------------------
             if club.joining_fee > 0 and not member.has_been_charged_joining_fee:
                 member_data["joining_fee"] = apply_discounts(
+                    member=member,
+                    member_adjustments=member_adjustments,
                     member_id=member.id,
                     base_amount=club.joining_fee,
                     discount_type="joining_fee",
@@ -226,6 +243,8 @@ def build_pricing_map(club, request_user):
                 base = item.price_at_subscription or plan.price
 
                 pricing_result = apply_discounts(
+                    member=member,
+                    member_adjustments=member_adjustments,
                     member_id=member.id,
                     base_amount=base,
                     discount_type="subscription",
@@ -254,6 +273,8 @@ def build_pricing_map(club, request_user):
 
             for plan in plans:
                 full_pricing = apply_discounts(
+                    member=member,
+                    member_adjustments=member_adjustments,
                     member_id=member.id,
                     base_amount=plan.price,
                     discount_type="subscription",
@@ -283,6 +304,8 @@ def build_pricing_map(club, request_user):
                     )
 
                 prorated_pricing = apply_discounts(
+                    member=member,
+                    member_adjustments=member_adjustments,
                     member_id=member.id,
                     base_amount=proration["prorated_amount"],
                     discount_type="subscription",
@@ -336,6 +359,8 @@ def build_pricing_map(club, request_user):
                 base = item.price_at_subscription or plan.price
 
                 pricing_result = apply_discounts(
+                    member=member,
+                    member_adjustments=member_adjustments,
                     member_id=member.id,
                     base_amount=base,
                     discount_type="subscription",
@@ -519,10 +544,48 @@ class DiscountViewSet(viewsets.ModelViewSet):
 
 
 
+
 class MembershipPlanViewSet(viewsets.ModelViewSet):
     queryset = MembershipPlan.objects.all()
     serializer_class = MembershipPlanSerializer
 
+    
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+
+        subdomain = self.request.data.get("club_subdomain")
+        club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
+
+        context["club"] = club
+        return context
+
+    def perform_destroy(self, instance):
+        if self.request.user != instance.club.owner:
+            raise serializers.ValidationError(
+                {"detail": "Only owner can delete plans."}
+            )
+        
+        # CASE 1: block if it would break bundles
+        if would_break_any_bundle(instance):
+            raise serializers.ValidationError(
+                "Cannot delete plan because it would leave a bundle with <2 plans."
+            )
+
+        
+        # CASE 2: soft delete if subscriptions exist
+        if instance.subscriptionitem_set.exists():
+            instance.is_deleted = True
+            instance.deleted_at = timezone.now()
+            instance.save(update_fields=["is_deleted", "deleted_at"])
+            return
+    
+        
+    
+        # CASE 3: hard delete
+        instance.bundled_plans.clear()
+        instance.delete()
+    
     def perform_create(self, serializer):
         subdomain = self.request.data.get("club_subdomain")
 
@@ -636,6 +699,7 @@ class MembershipPlanViewSet(viewsets.ModelViewSet):
 class SlateImageViewSet(viewsets.ModelViewSet):
     queryset = SlateImage.objects.all()
     serializer_class = SlateImageSerializer
+
 
     def perform_create(self, serializer):
         serializer.save(
@@ -1002,12 +1066,13 @@ class ClubViewSet(viewsets.ModelViewSet):
                     queryset=Member.objects.prefetch_related(
                         "participations",
                         Prefetch(
-                            "subscription_items",
-                            queryset=SubscriptionItem.objects.select_related(
-                                "subscription",
-                                "plan"
-                            ).filter(
-                                subscription__status="active"
+                           "subscription_items",
+                            queryset=SubscriptionItem.objects
+                            .select_related("subscription", "plan", "source_item")
+                            .prefetch_related("replacement_for").filter(
+                                Q(deleted_at__isnull=True) |
+                                Q(deleted_at__isnull=False, access_until__gt=now()),
+                                subscription__status__in=["active", "trialing", "pending"],
                             ),
                         ),
                     ),
@@ -1538,3 +1603,4 @@ class ClubViewSet(viewsets.ModelViewSet):
 
         serializer = self.get_serializer(club, context={"request": request})
         return Response(serializer.data, status=status.HTTP_200_OK)
+

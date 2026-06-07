@@ -16,6 +16,9 @@ from .models import (
     Payment,
     PaymentMethod,
     StripeCustomer,
+    Discount,
+    DiscountCondition,
+    MemberPricingAdjustment,
 )
 
 admin.site.register([
@@ -35,4 +38,7 @@ admin.site.register([
     Payment,
     PaymentMethod,
     StripeCustomer,
+    Discount,
+    DiscountCondition,
+    MemberPricingAdjustment,
 ])

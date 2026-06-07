@@ -11,6 +11,7 @@ from django.db import transaction
 
 from datetime import datetime, timezone as dt_timezone
 from django.utils import timezone
+from datetime import timedelta
 
 import calendar
 from django.db import IntegrityError
@@ -21,25 +22,38 @@ logger = logging.getLogger(__name__)
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
 
-
+from .discounts import calculate_discounted_amount
 from .billing import (
-    resolve_and_apply_subscription_period,
-    extract_subscription_id_from_invoice,
+    get_next_month_start,
     get_next_billing_cycle_anchor,
-    is_near_anchor, is_valid_billing_day,
-    validate_plan_change_window,
     get_cancel_quantity_action,
     should_set_monthly_resume_prevention,
     should_cancel_subscription,
     get_cancel_success_message,
-    can_resume_subscription,
     get_resume_item_action,
     should_charge_resume_next_month,
     get_resume_charge_amount,
     get_resume_success_message,
+    extract_subscription_id_from_invoice,
+    resolve_and_apply_subscription_period
+)
+
+from .rules_subscriptions import (
+    active_items_q,
+    ensure_group_exclusive,
+    get_bundle_map,
+    validate_group_rule,
+    validate_bundle_rule,
+    validate_subscription_transition,
+    validate_plan_change_window,
+    is_valid_billing_day,
+    is_near_anchor,
+    can_resume_subscription,
 )
 
 from .pricing import calculate_joining_fee, calculate_subscription_pricing
+
+now = timezone.now()
 # ---------------------------
 # Connected account / member webhook
 # ---------------------------
@@ -232,11 +246,25 @@ def stripe_connected_webhook(request):
             
             charged_next_month = False
             if today.day > club.stripe_anchor_date:
+                final_next_month_amount = calculate_discounted_amount(
+                    club=club,
+                    member=member,
+                    plan=plan,
+                    base_amount=plan.price,
+                    apply_to="subscription",
+                )
+
                 stripe.InvoiceItem.create(
                     customer=sub.customer,
-                    amount=plan.price,
+                    amount=final_next_month_amount,
                     currency="jpy",
                     description=f"{plan.name} 翌月分前払い",
+                    metadata={
+                        "type": "next_month_fee",
+                        "member_id": member.id,
+                        "plan_id": plan.id,
+                        "club_id": club.id,
+                    },
                     stripe_account=account_id
                 )
                 charged_next_month = True
@@ -421,7 +449,150 @@ def stripe_connected_webhook(request):
     
             sub.save()
 
+    
+    elif event["type"] == "invoice.created":
+        invoice = event["data"]["object"]
 
+        billing_reason = invoice.get("billing_reason")
+        is_cycle = billing_reason == "subscription_cycle"
+
+        if not is_cycle:
+            logger.info(
+                f"[invoice.created] Ignored invoice {invoice.get('id')} "
+                f"because billing_reason={billing_reason}"
+            )
+            return HttpResponse(status=200)
+
+
+
+        logger.info(f"[invoice.created] Processing invoice {invoice.get('id')}")
+    
+        def extract_subscription_from_invoice(invoice):
+            # 1. direct (sometimes present)
+            sub_id = invoice.get("subscription")
+            if sub_id:
+                return sub_id
+    
+            # 2. parent.subscription_details (your case)
+            parent = invoice.get("parent", {})
+            sub_details = parent.get("subscription_details", {})
+            if sub_details.get("subscription"):
+                return sub_details["subscription"]
+    
+            # 3. fallback: scan invoice lines
+            for line in invoice.get("lines", {}).get("data", []):
+                parent = line.get("parent", {})
+                details = parent.get("subscription_item_details", {})
+                if details.get("subscription"):
+                    return details["subscription"]
+    
+            return None
+    
+        subscription_id = extract_subscription_from_invoice(invoice)
+    
+        if not subscription_id:
+            logger.warning(f"[invoice.created] No subscription on invoice {invoice.get('id')}")
+            return HttpResponse(status=200)
+    
+        sub = Subscription.objects.filter(
+            stripe_subscription_id=subscription_id,
+            club__stripe_account_id=account_id
+        ).first()
+    
+        if not sub:
+            logger.warning(f"[invoice.created] Subscription not found {subscription_id}")
+            return HttpResponse(status=200)
+
+
+
+        SubscriptionItem.objects.filter(
+            subscription=sub,
+            deleted_at__isnull=False,
+            access_until__isnull=False,
+        ).update(plan_change_locked=True)
+    
+        # ------------------------------------------------------------
+        # 1. Gather members in this subscription
+        # ------------------------------------------------------------
+        members = Member.objects.filter(
+            subscription_items__subscription=sub
+        ).distinct()
+    
+        if not members.exists():
+            logger.warning(f"[invoice.created] No members found for subscription {sub.id}")
+            return HttpResponse(status=200)
+    
+        # ------------------------------------------------------------
+        # 2. Stripe total
+        # ------------------------------------------------------------
+        stripe_total = invoice.get("amount_due", 0)
+    
+        # ------------------------------------------------------------
+        # 3. Compute expected total using NEW unified engine
+        # ------------------------------------------------------------
+        expected_total = 0
+
+        for member in members:
+            items = SubscriptionItem.objects.filter(
+                subscription=sub,
+                member=member
+            ).select_related("plan")
+        
+            if not items.exists():
+                continue
+        
+            member_total = 0
+        
+            for item in items:
+                if not item.plan:
+                    continue
+        
+                base = item.plan.price * item.quantity
+        
+                discounted = calculate_discounted_amount(
+                    club=sub.club,
+                    member=member,
+                    plan=item.plan,
+                    base_amount=base,
+                    apply_to="subscription",
+                )
+        
+                member_total += discounted
+        
+            expected_total += member_total
+        
+        expected_total = max(0, int(expected_total))
+    
+        # ------------------------------------------------------------
+        # 4. Delta calculation
+        # ------------------------------------------------------------
+        delta = stripe_total - expected_total
+    
+        logger.info(
+            f"[invoice.created] Stripe={stripe_total}, Expected={expected_total}, Delta={delta}"
+        )
+    
+        # ------------------------------------------------------------
+        # 5. Apply correction ONLY if needed
+        # ------------------------------------------------------------
+        if abs(delta) > 0:
+    
+            stripe.InvoiceItem.create(
+                customer=invoice["customer"],
+                invoice=invoice["id"],
+                amount=-delta,
+                currency="jpy",
+                description="Automated pricing adjustment (discount reconciliation)",
+                metadata={
+                    "type": "pricing_delta",
+                    "subscription_id": sub.id,
+                },
+                stripe_account=account_id
+            )
+    
+            logger.info(f"[invoice.created] Applied delta adjustment: {-delta}")
+    
+    
     return HttpResponse(status=200)
 
 # ---------------------------
@@ -532,4 +703,4 @@ def stripe_platform_webhook(request):
             club.deleted_at = dj_timezone.localdate()
             club.save()
 
-    return HttpResponse(status=200)
+    return HttpResponse(status=200)    

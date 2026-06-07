@@ -8,6 +8,9 @@ from .models import Discount, SubscriptionItem, Member
 
 logger = logging.getLogger(__name__)
 
+
+
+
 def get_member_pricing_adjustment(member_id):
     now = timezone.now()
 
@@ -20,11 +23,91 @@ def get_member_pricing_adjustment(member_id):
             Q(valid_from__isnull=True) | Q(valid_from__lte=now),
             Q(valid_until__isnull=True) | Q(valid_until__gte=now),
         )
-        .first()
     )
 # =========================
 # Helpers
 # =========================
+
+def apply_member_adjustments(
+    member,
+    amount,
+    plan=None,
+    proration_ratio=None,
+    adjustments=None,
+    pricing_map=False,
+    apply_to=None,
+):
+    # -------------------------
+    # DATA SOURCE RESOLUTION
+    # -------------------------
+
+    if apply_to != "subscription":
+        return max(0, int(amount))
+
+    if adjustments is None:
+        if pricing_map:
+            adjustments = member.pricing_adjustments.all()
+        else:
+            adjustments = get_member_pricing_adjustment(member.id)
+
+    # -------------------------
+    # NORMALIZE INPUT SAFETY
+    # -------------------------
+    if not adjustments:
+        return max(0, int(amount))
+
+    if isinstance(adjustments, dict):
+        adjustments = adjustments.get(member.id, [])
+
+    try:
+        adjustments = list(adjustments)
+    except TypeError:
+        return max(0, int(amount))
+
+    # -------------------------
+    # PLAN FILTER PRE-PASS (keep logic same)
+    # -------------------------
+    filtered = []
+
+    for adj in adjustments:
+
+        if not hasattr(adj, "plans"):
+            continue
+
+        if pricing_map:
+            plan_ids = getattr(adj, "plan_ids", None)
+
+            if plan_ids is None:
+                plan_ids = {p.id for p in adj.plans.all()}
+
+            if plan_ids and plan is not None and plan.id not in plan_ids:
+                continue
+
+        else:
+            if adj.plans.exists():
+                if plan is None or not adj.plans.filter(id=plan.id).exists():
+                    continue
+
+        filtered.append(adj)
+
+    # -------------------------
+    # 1. PERCENTAGE ADJUSTMENTS
+    # -------------------------
+    for adj in [a for a in filtered if a.discount_type == "percentage"]:
+        amount = int(amount * (1 - adj.value / 100))
+
+    # -------------------------
+    # 2. FIXED ADJUSTMENTS
+    # -------------------------
+    for adj in [a for a in filtered if a.discount_type == "fixed"]:
+        value = adj.value
+
+        if proration_ratio is not None:
+            value = round(value * proration_ratio)
+
+        amount -= value
+
+    return max(0, int(amount))
 
 def calculate_age(birth_date):
     if not birth_date:
@@ -195,6 +278,7 @@ def calculate_discounted_amount(
         )
     
     final_amount = max(0, int(amount))
+    final_amount = apply_member_adjustments(member, final_amount, plan, proration_ratio, apply_to=apply_to,)
 
     logger.info(
         f"[DISCOUNT] Final: {final_amount} from base={base_amount}"
@@ -434,6 +518,8 @@ def build_member_discount_map(
 
 def apply_discounts(
     *,
+    member,
+    member_adjustments,
     member_id,
     base_amount,
     discount_type,
@@ -507,18 +593,11 @@ def apply_discounts(
             scaled = d.value
 
         amount -= scaled
+    
+    pricing_map = True
 
     final = max(0, int(amount))
-
-    adjustment = get_member_pricing_adjustment(member_id)
-
-    if adjustment:
-        if adjustment.discount_type == "percentage":
-            final = int(final * (1 - adjustment.value / 100))
-        else:
-            final -= adjustment.value
-
-    final = max(0, final)
+    final = apply_member_adjustments(member, final, plan, proration_ratio, member_adjustments, pricing_map, apply_to=discount_type,)
 
     return {
         "base": base_amount,

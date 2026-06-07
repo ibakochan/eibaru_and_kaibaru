@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import MemberPricingAdjustment, Discount, DiscountCondition, Member, Club, Lesson, Participation, SlateImage, JoinRequest, Subscription, SubscriptionItem
+from .models import MembershipPlanGroup, MemberPricingAdjustment, Discount, DiscountCondition, Member, Club, Lesson, Participation, SlateImage, JoinRequest, Subscription, SubscriptionItem
 
 from google.cloud import storage
 from django.db.models import Q
@@ -18,8 +18,12 @@ from datetime import date
 
 from .models import MembershipPlan
 
+from django.db import transaction
+from .rules_plans import enforce_membership_plan_invariants
 
+from django.utils.timezone import now
 
+NOW = now()
 
 class MemberPricingAdjustmentSerializer(serializers.ModelSerializer):
     class Meta:
@@ -35,6 +39,7 @@ class MemberPricingAdjustmentSerializer(serializers.ModelSerializer):
             "valid_from",
             "valid_until",
             "created_at",
+            "plans",
         ]
         read_only_fields = ["id", "created_at"]
 
@@ -185,6 +190,10 @@ class SubscriptionItemSerializer(serializers.ModelSerializer):
     plan_id = serializers.IntegerField(source="plan.id", read_only=True)
     plan_name = serializers.SerializerMethodField()
     member_id = serializers.IntegerField(source="member.id", read_only=True)
+    source_item = serializers.SerializerMethodField()
+    next_item = serializers.SerializerMethodField()
+    is_scheduled_change = serializers.SerializerMethodField()
+
 
 
 
@@ -201,8 +210,37 @@ class SubscriptionItemSerializer(serializers.ModelSerializer):
             "member_id",
             "id",
             "price_at_subscription",
-
+            "source_item",
+            "next_item",
+            "is_scheduled_change",
+            "access_start",
+            "plan_change_locked",
         ]
+
+    def get_source_item(self, obj):
+        if not obj.source_item:
+            return None
+
+        return {
+            "id": obj.source_item.id,
+            "plan_id": obj.source_item.plan.id if obj.source_item.plan else None,
+            "plan_name": obj.source_item.plan.name if obj.source_item.plan else None,
+            "access_start": obj.source_item.access_start,
+        }
+
+    def get_next_item(self, obj):
+        next_item = obj.replacement_for.first()
+        if not next_item:
+            return None
+
+        return {
+            "id": next_item.id,
+            "plan_id": next_item.plan.id if next_item.plan else None,
+            "plan_name": next_item.plan.name if next_item.plan else None,
+        }
+    
+    def get_is_scheduled_change(self, obj):
+        return obj.source_item_id is not None or obj.replacement_for.all().exists()
 
     def get_plan_name(self, obj):
         return obj.plan.name if obj.plan else None
@@ -227,11 +265,8 @@ class MemberSubscriptionSerializer(serializers.ModelSerializer):
         ]
 
     def get_items(self, obj):
-        member = self.context.get("member")
-        return SubscriptionItemSerializer(
-            obj.items.filter(member=member),
-            many=True
-        ).data
+        items = getattr(obj, "active_subscription_items", [])
+        return SubscriptionItemSerializer(items, many=True).data
 
 class SubscriptionSerializer(serializers.ModelSerializer):
     items = SubscriptionItemSerializer(many=True, read_only=True)
@@ -254,7 +289,13 @@ class SubscriptionSerializer(serializers.ModelSerializer):
 
 
 
+
 class MembershipPlanSerializer(serializers.ModelSerializer):
+    group = serializers.PrimaryKeyRelatedField(read_only=True)
+    group_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
+    merge_plan_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
+    default_plan_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
+
     class Meta:
         model = MembershipPlan
         fields = [
@@ -269,9 +310,14 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
             "member_category",
             "age_min",
             "age_max",
+            "bundled_plans",
             "active",
             "created_at",
             "updated_at",
+            "group",
+            "group_id",
+            "merge_plan_id",
+            "default_plan_id",
         ]
         read_only_fields = [
             "id",
@@ -279,7 +325,243 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+
+    def validate(self, attrs):
+        bundled = attrs.get("bundled_plans", [])
     
+        club = self.context.get("club")
+        if not club:
+            raise serializers.ValidationError({
+                "club_subdomain": "Club is required."
+            })
+    
+        # convert to set of IDs (works for both create + update)
+        new_set = set(p.id for p in bundled)
+    
+        # ---------------------------------------------------
+        # 1. OPTIONAL BUNDLE (empty = normal plan)
+        # ---------------------------------------------------
+        if not new_set:
+            return attrs
+    
+        # ---------------------------------------------------
+        # 2. MUST HAVE AT LEAST 2 PLANS
+        # ---------------------------------------------------
+        if len(new_set) < 2:
+            raise serializers.ValidationError(
+                {"bundled_plans": "A bundle must contain at least 2 plans."}
+            )
+    
+        # ---------------------------------------------------
+        # 3. PREVENT SELF-INCLUSION (update case)
+        # ---------------------------------------------------
+        if self.instance and self.instance.id in new_set:
+            raise serializers.ValidationError(
+                {"bundled_plans": "A plan cannot include itself in a bundle."}
+            )
+    
+        # ---------------------------------------------------
+        # 4. PREVENT NESTED BUNDLES
+        # (any plan already used inside another bundle)
+        # ---------------------------------------------------
+        nested_bundles = MembershipPlan.objects.filter(
+            id__in=new_set,
+            bundled_plans__isnull=False
+        ).distinct()
+    
+        if nested_bundles.exists():
+            raise serializers.ValidationError(
+                {"bundled_plans": "Bundles cannot contain other bundles."}
+            )
+    
+        # ---------------------------------------------------
+        # 5. PREVENT IDENTICAL BUNDLES (same club)
+        # ---------------------------------------------------
+        qs = MembershipPlan.objects.filter(club=club)
+    
+        if self.instance:
+            qs = qs.exclude(id=self.instance.id)
+    
+        for p in qs:
+            existing_set = set(
+                p.bundled_plans.values_list("id", flat=True)
+            )
+    
+            if existing_set == new_set:
+                raise serializers.ValidationError(
+                    {"bundled_plans": "An identical bundle already exists."}
+                )
+    
+        return attrs
+    
+
+
+    def create(self, validated_data):
+        bundled = validated_data.pop("bundled_plans", [])
+        group_id = validated_data.pop("group_id", None)
+        merge_plan_id = validated_data.pop("merge_plan_id", None)
+        default_plan_id = validated_data.pop("default_plan_id", None)
+    
+        club = self.context.get("club") or validated_data.get("club")
+    
+        with transaction.atomic():
+            plan = MembershipPlan.objects.create(**validated_data)
+            group = None
+    
+            # CASE 1: join existing group
+            if group_id:
+                group = MembershipPlanGroup.objects.get(id=group_id, club=club)
+                plan.group = group
+                plan.save(update_fields=["group"])
+    
+            # CASE 2: merge with single plan → create group
+            elif merge_plan_id:
+                other = MembershipPlan.objects.get(id=merge_plan_id, club=club)
+    
+                if other.group:
+                    group = other.group
+                else:
+                    group = MembershipPlanGroup.objects.create(club=club)
+                    other.group = group
+                    other.save(update_fields=["group"])
+    
+                plan.group = group
+                plan.save(update_fields=["group"])
+    
+            # DEFAULT PLAN LOGIC (FIXED)
+            if group:
+                if default_plan_id:
+                    default_plan = MembershipPlan.objects.get(
+                        id=default_plan_id,
+                        club=club
+                    )
+    
+                    if default_plan.group_id != group.id:
+                        raise serializers.ValidationError({
+                            "default_plan_id": "Default plan must belong to the group."
+                        })
+    
+                    group.default_plan = default_plan
+                else:
+                    group.default_plan = plan
+    
+                group.save(update_fields=["default_plan"])
+    
+            plan.bundled_plans.set(bundled)
+            enforce_membership_plan_invariants(club)
+    
+        return plan
+     
+     
+    def update(self, instance, validated_data):
+        bundled = validated_data.pop("bundled_plans", None)
+        group_id = validated_data.pop("group_id", None)
+        merge_plan_id = validated_data.pop("merge_plan_id", None)
+        default_plan_id = validated_data.pop("default_plan_id", None)
+    
+        if bundled is not None:
+            is_current_bundle = instance.bundled_plans.exists()
+    
+            new_count = len(bundled)
+            is_becoming_bundle = new_count >= 2
+            is_becoming_normal = new_count < 2
+    
+            if not is_current_bundle and is_becoming_bundle:
+                raise serializers.ValidationError({
+                    "bundled_plans": "通常プランをセットプランに変更することはできません。"
+                })
+    
+            if is_current_bundle and is_becoming_normal:
+                raise serializers.ValidationError({
+                    "bundled_plans": "セットプランは通常プランに戻すことはできません。"
+                })
+    
+        with transaction.atomic():
+    
+            old_group = instance.group
+    
+            for attr, value in validated_data.items():
+                setattr(instance, attr, value)
+    
+            if group_id is not None:
+                if group_id == 0:
+                    instance.group = None
+                else:
+                    instance.group = MembershipPlanGroup.objects.get(
+                        id=group_id,
+                        club=instance.club
+                    )
+    
+            elif merge_plan_id:
+                other = MembershipPlan.objects.get(
+                    id=merge_plan_id,
+                    club=instance.club
+                )
+    
+                if other.group:
+                    instance.group = other.group
+                else:
+                    group = MembershipPlanGroup.objects.create(club=instance.club)
+                    other.group = group
+                    other.save(update_fields=["group"])
+                    instance.group = group
+    
+            else:
+                instance.group = None
+    
+            instance.save()
+    
+
+    
+            # CLEANUP: ensure default still valid
+            if instance.group and instance.group.default_plan:
+                if instance.group.default_plan.group_id != instance.group_id:
+                    instance.group.default_plan = max(
+                        instance.group.plans.all(),
+                        key=lambda p: p.price,
+                        default=None
+                    )
+                    instance.group.save(update_fields=["default_plan"])
+    
+            # CLEANUP groups
+            if old_group:
+                if old_group.plans.count() < 2:
+                    old_group.plans.update(group=None)
+                    old_group.delete()
+    
+            if bundled is not None:
+                if len(bundled) >= 2:
+                    instance.bundled_plans.set(bundled)
+
+            if default_plan_id and instance.group:
+                default_plan = MembershipPlan.objects.get(
+                    id=default_plan_id,
+                    club=instance.club
+                )
+
+                if default_plan.group_id != instance.group_id:
+                    raise serializers.ValidationError({
+                        "default_plan_id": "Default plan must belong to the group."
+                    })
+
+                instance.group.default_plan = default_plan
+                instance.group.save(update_fields=["default_plan"])
+            
+        transaction.on_commit(
+            lambda: enforce_membership_plan_invariants(instance.club)
+        )
+    
+        return instance
+
+
+class MembershipPlanGroupSerializer(serializers.ModelSerializer):
+    plans = MembershipPlanSerializer(many=True, read_only=True)
+    default_plan_id = serializers.IntegerField(required=False, allow_null=True)
+    
+    class Meta:
+        model = MembershipPlanGroup
+        fields = ["id", "plans", "default_plan_id"]
+
 
 class MyJoinRequestSerializer(serializers.ModelSerializer):
     class Meta:
@@ -394,34 +676,28 @@ class MemberSerializer(serializers.ModelSerializer):
 
     
     def get_subscription_items(self, obj):
-        items = (
-            obj.subscription_items
-            .select_related("subscription", "plan")
-            .filter(
-                Q(deleted_at__isnull=True)  # active
-                |
-                Q(deleted_at__isnull=False, access_until__gt=now())  # grace
-            )
-            .filter(
-                subscription__status__in=["active", "trialing", "pending"]
-            )
+        items = obj._prefetched_objects_cache.get(
+            "subscription_items",
+            obj.subscription_items.all()
         )
-
         return SubscriptionItemSerializer(items, many=True).data
     
     def get_subscription_state(self, obj):
-        item = (
-            obj.subscription_items
-            .select_related("subscription")
-            .filter(
-                subscription__status__in=["active", "trialing", "pending"],
-                deleted_at__isnull=True
-            )
-            .order_by("-subscription__current_period_end")
-            .first()
+        items = obj._prefetched_objects_cache.get(
+            "subscription_items",
+            obj.subscription_items.select_related("subscription").all()
         )
     
-        if not item:
+        def sort_key(x):
+            if not x.subscription:
+                return 0
+            if not x.subscription.current_period_end:
+                return 0
+            return x.subscription.current_period_end
+    
+        item = max(items, key=sort_key, default=None)
+    
+        if not item or not item.subscription:
             return None
     
         sub = item.subscription
@@ -435,7 +711,9 @@ class MemberSerializer(serializers.ModelSerializer):
             "billing_anchor_day": sub.billing_anchor_day,
             "billing_mode": sub.billing_mode,
         }
-        
+
+    
+            
     def get_age(self, obj):
         if not obj.birth_date:
             return None
@@ -471,7 +749,12 @@ class MemberSerializer(serializers.ModelSerializer):
             return data
 
         club = getattr(instance, "club", None)
-        user_member = club.members.filter(user=user).first() if club else None
+        members = getattr(instance, "_prefetched_objects_cache", {}).get(
+            "members",
+            instance.club.members.all()
+        )
+
+        user_member = next((m for m in members if m.user_id == user.id), None)
 
         if instance.user == user:
             return data
@@ -491,15 +774,20 @@ class MemberSerializer(serializers.ModelSerializer):
 
         return data
 
+    def _participations(self, obj):
+        return getattr(obj, "_prefetched_objects_cache", {}).get("participations", obj.participations.all())
 
     def get_total_participation(self, obj):
-        return obj.manual_total_participation + sum(p.total_count for p in obj.participations.all())
+        parts = self._participations(obj)
+        return obj.manual_total_participation + sum(p.total_count for p in parts)
 
     def get_this_month_participation(self, obj):
-        return sum(p.monthly_count for p in obj.participations.all())
+        parts = self._participations(obj)
+        return sum(p.monthly_count for p in parts)
 
     def get_level_participation(self, obj):
         level_sums = defaultdict(int)
+        parts = self._participations(obj)
 
         if obj.manual_level_counts:
             for lvl, count in obj.manual_level_counts.items():
@@ -507,11 +795,12 @@ class MemberSerializer(serializers.ModelSerializer):
                     level_sums[int(lvl)] += int(count)
                 except ValueError:
                     continue
-
-        for p in obj.participations.all():
+    
+        for p in parts:
             if p.level_counts:
                 for lvl, count in p.level_counts.items():
                     level_sums[int(lvl)] += count
+
         return dict(level_sums)
 
 
@@ -582,6 +871,7 @@ class ClubSerializer(serializers.ModelSerializer):
     join_requests = serializers.SerializerMethodField()
     my_join_requests = serializers.SerializerMethodField()
     membership_plans = MembershipPlanSerializer(many=True, read_only=True)
+    membership_plan_groups = MembershipPlanGroupSerializer(many=True, read_only=True, source="membershipplangroup_set")
 
 
 
@@ -637,6 +927,7 @@ class ClubSerializer(serializers.ModelSerializer):
             "slate_images",
             "page_content",
             "membership_plans",
+            "membership_plan_groups",
             "stripe_subscription_id",
         ]
         read_only_fields = [
@@ -762,19 +1053,21 @@ class ClubSerializer(serializers.ModelSerializer):
         if instance.owner_id == user.id:
             return data
 
-        user_member = instance.members.filter(user=user).first()
+        members = getattr(instance, "_prefetched_objects_cache", {}).get("members", instance.members.all())
+        user_member = next((m for m in members if m.user_id == user.id), None)
 
         if user_member and (user_member.is_instructor or user_member.is_manager):
             return data
 
-        data["members"] = list(instance.members.filter(
-            models.Q(is_instructor=True) | 
-            models.Q(is_manager=True) | 
-            models.Q(user=instance.owner) |
-            models.Q(user=user) |
-            models.Q(owner=user)
-        ))
-        data["members"] = MemberSerializer(data["members"], many=True, context=self.context).data
+
+        filtered = [
+            m for m in members
+            if m.is_instructor
+            or m.is_manager
+            or m.user_id == instance.owner_id
+            or m.user_id == user.id
+        ]
+        data["members"] = MemberSerializer(filtered, many=True, context=self.context).data
 
         return data
 

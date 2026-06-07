@@ -2,9 +2,11 @@
 from datetime import date
 import stripe
 from django.conf import settings
-from .models import Member
+from .models import Member, MembershipPlan, SubscriptionItem
 
-
+from django.utils import timezone
+from django.db.models import Q
+from django.core.exceptions import ValidationError
 
 
 def add_one_month(d):
@@ -62,3 +64,7 @@ def sync_member_quantity(club):
             }],
             proration_behavior="none",
         )
+
+
+
+

@@ -35,6 +35,8 @@ urlpatterns = [
     path('resume_club_subscription/<int:club_id>/', stripe_views.resume_club_subscription, name='resume_club_subscription'),
     path('cancel_member_subscription/<int:item_id>/', stripe_views.cancel_member_subscription, name='cancel_member_subscription'),
     path('resume_member_subscription/<int:item_id>/', stripe_views.resume_member_subscription, name='resume_member_subscription'),
+    path('change_member_plan/<int:item_id>/<int:new_plan_id>/', stripe_views.change_member_plan, name='change_member_plan'),
+    path('cancel_member_plan_change/<int:new_item_id>/', stripe_views.cancel_member_plan_change, name='cancel_member_plan_change'),
     path('create_stripe_account_link/<int:club_id>/', stripe_views.create_stripe_account_link, name='create_stripe_account_link'),
     path('create_member_checkout_session/<int:club_id>/<int:plan_id>/', stripe_views.create_member_checkout_session, name='create_member_checkout_session'),
 

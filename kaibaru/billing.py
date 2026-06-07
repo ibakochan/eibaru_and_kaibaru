@@ -1,6 +1,18 @@
 import calendar
 from datetime import datetime, timezone as dt_timezone
 
+from django.db.models import Prefetch
+from.models import SubscriptionItem
+
+from datetime import date
+
+def get_next_month_start(today: date):
+    if today.month == 12:
+        return date(today.year + 1, 1, 1)
+    return date(today.year, today.month + 1, 1)
+
+
+
 
 def resolve_and_apply_subscription_period(sub, period_end_ts, today):
     period_end = datetime.fromtimestamp(period_end_ts, tz=dt_timezone.utc)
@@ -85,49 +97,7 @@ def get_next_billing_cycle_anchor(today, anchor_day):
 
     return int(anchor_date.timestamp())
 
-def is_valid_billing_day(today):
-    return 2 <= today.day <= 27
 
-def is_near_anchor(today, anchor_day):
-    if not anchor_day:
-        return False
-
-    try:
-        anchor_date = today.replace(day=anchor_day)
-    except ValueError:
-        last_day = calendar.monthrange(today.year, today.month)[1]
-        anchor_date = today.replace(day=min(anchor_day, last_day))
-
-    return abs((today - anchor_date).days) <= 1
-
-def validate_plan_change_window(today, subscription):
-    """
-    Returns:
-        None if allowed
-        error message string if blocked
-    """
-
-    # Only allow day 2-27
-    if today.day < 2 or today.day > 27:
-        return "この期間はプランの変更ができません。毎月2日〜27日のみ変更可能です。"
-
-    anchor_day = subscription.billing_anchor_day
-    current_period_end = subscription.current_period_end
-
-    # Monthly billing processing lock
-    if (
-        subscription.billing_mode == "monthly"
-        and today.day > anchor_day
-        and current_period_end
-        and current_period_end.month == today.month
-    ):
-        return "請求処理中のため、この期間はプランの変更ができません。しばらくしてからお試しください。"
-
-    # Near anchor block
-    if is_near_anchor(today, anchor_day) or not is_valid_billing_day(today):
-        return "毎月2日〜27日のみ変更可能です。また、請求日の前後1日は変更できません。別の日にお試しください。"
-
-    return None
 
 
 def get_cancel_quantity_action(current_qty):
@@ -142,6 +112,7 @@ def get_cancel_quantity_action(current_qty):
     return ("modify", current_qty - 1)
 
 
+
 def should_set_monthly_resume_prevention(today, subscription):
     """
     If canceled after anchor in monthly mode,
@@ -152,9 +123,10 @@ def should_set_monthly_resume_prevention(today, subscription):
         and today.day > subscription.billing_anchor_day
     )
 
-
 def should_cancel_subscription(remaining_items_exist):
     return not remaining_items_exist
+
+
 
 
 def get_cancel_success_message(subscription):
@@ -171,12 +143,7 @@ def get_cancel_success_message(subscription):
 # NEW RESUME HELPERS
 # -------------------------
 
-def can_resume_subscription(item, now):
-    return (
-        item.deleted_at is not None
-        and item.access_until is not None
-        and item.access_until > now
-    )
+
 
 
 def get_resume_item_action(existing_item):

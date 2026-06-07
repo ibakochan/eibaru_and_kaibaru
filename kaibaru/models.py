@@ -5,8 +5,9 @@ from .storage_backends import PrivateMediaStorage
 import datetime
 import hashlib
 
+from django.core.exceptions import ValidationError
 from django.db.models import Q
-
+from django.utils import timezone
 def club_folder_upload_to(subfolder=None):
 
     def upload(instance, filename):
@@ -162,10 +163,30 @@ class Club(models.Model):
     def __str__(self):
         return self.subdomain
 
+class MembershipPlanGroup(models.Model):
+    name = models.CharField(max_length=100)
+    club = models.ForeignKey(Club, on_delete=models.CASCADE)
 
+    default_plan = models.ForeignKey(
+        "MembershipPlan",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="default_for_groups"
+    )
 
 class MembershipPlan(models.Model):
     club = models.ForeignKey(Club, related_name="membership_plans", on_delete=models.CASCADE)
+    
+    
+    group = models.ForeignKey(
+        MembershipPlanGroup,
+        related_name="plans",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True
+    )
+    
     name = models.CharField(max_length=100)   
     description = models.TextField(blank=True)
 
@@ -191,6 +212,19 @@ class MembershipPlan(models.Model):
     age_min = models.PositiveIntegerField(null=True, blank=True)
     age_max = models.PositiveIntegerField(null=True, blank=True)
 
+    bundled_plans = models.ManyToManyField(
+        "self",
+        symmetrical=False,
+        related_name="part_of_bundles",
+        blank=True,
+    )
+
+    is_deleted = models.BooleanField(default=False)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+
+
+    
     class Meta:
         ordering = ["price"]
         unique_together = ("club", "name")
@@ -369,6 +403,8 @@ class Subscription(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    billing_lock_until = models.DateTimeField(null=True, blank=True)
     
 
 
@@ -408,9 +444,21 @@ class SubscriptionItem(models.Model):
     access_until = models.DateTimeField(null=True, blank=True)
     monthly_double_resume_charge_prevention = models.BooleanField(default=False)
 
+    access_start = models.DateTimeField(null=True, blank=True)
+
+    plan_change_locked = models.BooleanField(default=False)
+
     quantity = models.PositiveIntegerField(default=1)
 
     created_at = models.DateTimeField(auto_now_add=True)
+
+    source_item = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="replacement_for"
+    )
 
     class Meta:
         constraints = [
@@ -706,6 +754,12 @@ class MemberPricingAdjustment(models.Model):
         Club,
         on_delete=models.CASCADE,
         related_name="member_pricing_adjustments"
+    )
+
+    plans = models.ManyToManyField(
+        MembershipPlan,
+        blank=True,
+        related_name="member_adjustments"
     )
 
 
