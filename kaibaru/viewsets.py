@@ -14,11 +14,16 @@ from django.db.models import Q
 from datetime import date
 from django.db.models import Sum
 
+
+from collections import defaultdict
+
 import stripe
 from django.conf import settings
 from django.db.models import Prefetch
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
+
+from .tasks_emails import send_plan_deletion_emails
 
 from .discounts import calculate_discounted_amount
 import uuid
@@ -41,6 +46,9 @@ from .rules_plans import would_break_any_bundle
 from django.core.files.base import ContentFile
 import os
 from django.utils.timezone import now
+from .service_subscription import SubscriptionItemService
+
+
 
 def build_member_adjustment_map(members):
     qs = MemberPricingAdjustment.objects.filter(
@@ -560,29 +568,93 @@ class MembershipPlanViewSet(viewsets.ModelViewSet):
         context["club"] = club
         return context
 
+
+
     def perform_destroy(self, instance):
         if self.request.user != instance.club.owner:
             raise serializers.ValidationError(
                 {"detail": "Only owner can delete plans."}
             )
-        
-        # CASE 1: block if it would break bundles
+    
         if would_break_any_bundle(instance):
             raise serializers.ValidationError(
                 "Cannot delete plan because it would leave a bundle with <2 plans."
             )
+    
+        # ---------------------------------------------------------
+        # STEP 1: Check ANY subscription history (even soft deleted)
+        # ---------------------------------------------------------
+        has_history = SubscriptionItem.objects.filter(
+            plan=instance
+        ).exists()
+    
+        active_items = SubscriptionItem.objects.filter(
+            plan=instance,
+            deleted_at__isnull=True
+        ).select_related("subscription")
 
+        # ---------------------------------------------------------
+        # CASE 1: ACTIVE ITEMS EXIST → cancel them
+        # ---------------------------------------------------------
+        if active_items.exists():
+            
+            owner_map = defaultdict(lambda: {
+                "members": set(),
+                "plans": set(),
+                "access_until": None,
+            })
+    
+            for item in active_items:
+                owner = item.member.owner
+                group = owner_map[owner.id]
+    
+                group["members"].add(item.member.full_name)
+                group["plans"].add(item.plan.name)
+                group["access_until"] = item.subscription.access_until
         
-        # CASE 2: soft delete if subscriptions exist
-        if instance.subscriptionitem_set.exists():
+    
+
+
+
+            for item in active_items:
+                SubscriptionItemService.cancel_item(
+                    item=item,
+                    subscription=item.subscription,
+                    club=instance.club
+                )
+    
             instance.is_deleted = True
             instance.deleted_at = timezone.now()
             instance.save(update_fields=["is_deleted", "deleted_at"])
+         
+            serializable_owner_map = {
+                str(owner_id): {
+                    "members": list(data["members"]),
+                    "plans": list(data["plans"]),
+                    "access_until": data["access_until"].isoformat() if data["access_until"] else None,
+                }
+                for owner_id, data in owner_map.items()
+            }
+
+            transaction.on_commit(
+                lambda: send_plan_deletion_emails.delay(serializable_owner_map)
+            )
+
+            return
+            
+        # ---------------------------------------------------------
+        # STEP 3: HAS HISTORY → SOFT DELETE ONLY
+        # ---------------------------------------------------------
+        if has_history:
+            instance.is_deleted = True
+            instance.deleted_at = timezone.now()
+            instance.save(update_fields=["is_deleted", "deleted_at"])
+
             return
     
-        
-    
-        # CASE 3: hard delete
+        # ---------------------------------------------------------
+        # STEP 4: NEVER USED → SAFE HARD DELETE
+        # ---------------------------------------------------------
         instance.bundled_plans.clear()
         instance.delete()
     
@@ -786,91 +858,113 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
             club=club,
         )
 
-    @action(detail=True, methods=["post"])
-    def accept(self, request, pk=None):
-        join_request = self.get_object()
+
+    @action(detail=False, methods=["post"])
+    def bulk_accept(self, request):
+        ids = request.data.get("ids", [])
     
-        if request.user.id != join_request.club.owner_id:
+        if not isinstance(ids, list) or not ids:
+            return Response(
+                {"detail": "ids must be a non-empty list"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+    
+        join_requests = JoinRequest.objects.filter(id__in=ids).select_related("club")
+
+        if join_requests.exclude(club__owner_id=request.user.id).exists():
             return Response({"detail": "Not allowed"}, status=403)
     
-        # ---- Copy picture file ----
-        new_picture = None
+        if not join_requests.exists():
+            return Response(
+                {"detail": "No join requests found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
     
-        if join_request.picture:
-            original_file = join_request.picture
-            original_file.open()
-            file_content = original_file.read()
-            original_file.close()
+        created_member_ids = []
     
-            # Create new filename
-            base_name = os.path.basename(original_file.name)
-            new_filename = f"{join_request.club.subdomain}/members/{base_name}"
+        with transaction.atomic():
+            for jr in join_requests:
     
-            new_picture = ContentFile(file_content)
-            new_picture.name = new_filename
+                new_picture = None
     
-        # ---- Create member ----
-        member = Member.objects.create(
-            club=join_request.club,
-            user=join_request.user,
-            owner=join_request.owner,
-            full_name=join_request.full_name,
-            furigana=join_request.furigana,
-            birth_date=join_request.birth_date,
-            gender=join_request.gender,
-            phone_number=join_request.phone_number,
-            emergency_number=join_request.emergency_number,
-            other_information=join_request.other_information,
-            picture=new_picture,
-            level=join_request.level or 1,
-        )
+                if jr.picture:
+                    jr.picture.open()
+                    file_content = jr.picture.read()
+                    jr.picture.close()
     
-        # ---- Delete join request AFTER copy ----
-        join_request.delete()
+                    base_name = os.path.basename(jr.picture.name)
+                    new_filename = f"{jr.club.subdomain}/members/{base_name}"
+    
+                    new_picture = ContentFile(file_content)
+                    new_picture.name = new_filename
+    
+                member = Member.objects.create(
+                    club=jr.club,
+                    user=jr.user,
+                    owner=jr.owner,
+                    full_name=jr.full_name,
+                    furigana=jr.furigana,
+                    birth_date=jr.birth_date,
+                    gender=jr.gender,
+                    phone_number=jr.phone_number,
+                    emergency_number=jr.emergency_number,
+                    other_information=jr.other_information,
+                    picture=new_picture,
+                    level=jr.level or 1,
+                )
+    
+                created_member_ids.append(member.id)
+        
+            # delete after processing
+            join_requests.delete()
     
         return Response(
-            MemberSerializer(member, context={"request": request}).data,
+            {
+                "created_member_ids": created_member_ids
+            },
             status=status.HTTP_201_CREATED
         )
-        
-        
-    @action(detail=True, methods=["post"])
-    def reject(self, request, pk=None):
-        join_request = self.get_object()
+            
+            
+    @action(detail=False, methods=["post"])
+    def bulk_reject(self, request):
+        ids = request.data.get("ids", [])
+
+        if not isinstance(ids, list) or not ids:
+            return Response(
+                {"detail": "ids must be a non-empty list"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
     
-        if request.user.id != join_request.club.owner_id:
-            return Response({"detail": "Not allowed"}, status=403)
+        join_requests = JoinRequest.objects.filter(id__in=ids).select_related("club")
     
-        join_request.delete()
-        return Response({"detail": "Deleted"}, status=status.HTTP_204_NO_CONTENT)
+        if not join_requests.exists():
+            return Response(
+                {"detail": "No join requests found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
     
-       
+        # ❗ validate ownership BEFORE delete
+        if join_requests.exclude(club__owner_id=request.user.id).exists():
+            return Response(
+                {"detail": "Not allowed for some requests"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+    
+        join_requests.delete()
+
+        return Response(
+            {"deleted_ids": list(join_requests.values_list("id", flat=True))},
+            status=status.HTTP_200_OK
+        )
+
+
+
+
 class MemberViewSet(viewsets.ModelViewSet):
     queryset = Member.objects.all()
     serializer_class = MemberSerializer
 
-    @action(detail=True, methods=["post"])
-    def freeze(self, request, pk=None):
-        """Freeze / kyukai a member"""
-        member = self.get_object()
-        if not member.is_kyukai:
-            member.is_kyukai = True
-            member.kyukai_since = timezone.localdate()
-            member.is_kyukai_paid = False
-        else:
-            member.is_kyukai = False
-            member.kyukai_since = None
-            member.is_kyukai_paid = False
-        member.save()
-        sync_member_quantity(member.club)
-
-        status_text = "frozen" if member.is_kyukai else "unfrozen"
-        return Response({
-            "status": status_text,
-            "is_kyukai": member.is_kyukai,
-            "kyukai_since": member.kyukai_since,
-            "is_kyukai_paid": member.is_kyukai_paid,
-        }, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["delete"])
     def remove(self, request, pk=None):

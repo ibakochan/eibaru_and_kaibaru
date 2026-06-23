@@ -7,7 +7,6 @@ import hashlib
 
 from django.core.exceptions import ValidationError
 from django.db.models import Q
-from django.utils import timezone
 def club_folder_upload_to(subfolder=None):
 
     def upload(instance, filename):
@@ -452,6 +451,9 @@ class SubscriptionItem(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
 
+    change_locked_until = models.DateTimeField(null=True, blank=True)
+    cancel_locked_until = models.DateTimeField(null=True, blank=True)
+
     source_item = models.ForeignKey(
         "self",
         null=True,
@@ -464,10 +466,11 @@ class SubscriptionItem(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["subscription", "member", "plan"],
-                condition=Q(plan__isnull=False),
-                name="unique_member_plan_per_subscription"
+                name="unique_member_plan_per_subscription",
             )
         ]
+
+
 
 class Invoice(models.Model):
 

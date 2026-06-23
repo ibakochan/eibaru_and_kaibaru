@@ -1,9 +1,99 @@
 from celery import shared_task
 from django.conf import settings
 from django.core.mail import send_mail
+from accounts.models import CustomUser
 
-from .models import Club
+
+from .models import Club, SubscriptionItem
  
+from datetime import datetime
+
+def format_date(dt):
+    if not dt:
+        return "---"
+    if isinstance(dt, str):
+        dt = datetime.fromisoformat(dt)
+    return dt.strftime("%Y年%m月%d日")
+
+@shared_task(
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=30,
+    retry_kwargs={"max_retries": 5},
+)
+def send_plan_deletion_emails(self, owner_map):
+    for owner_id, data in owner_map.items():
+        owner = CustomUser.objects.filter(id=owner_id).first()
+        if not owner:
+            continue
+
+        members = data["members"]
+        plans = data["plans"]
+        access_until = data["access_until"]
+
+        member_text = "、".join(members)
+        plan_text = "、".join(plans)
+
+        message = (
+            f"{owner.get_full_name() or owner.email} 様\n\n"
+            f"ご利用中のプラン「{plan_text}」が削除スケジュールに入りました。\n\n"
+            f"■ 対象メンバー\n"
+            f"{member_text}\n\n"
+            f"■ ご利用可能期限\n"
+            f"{format_date(access_until)} まで\n\n"
+            f"この日付までは引き続きご利用いただけます。\n\n"
+            f"削除スケジュールはログイン後にプラン変更へ切り替えることが可能です。\n\n"
+        )
+
+        has_active = SubscriptionItem.objects.filter(
+            member__owner_id=owner.id,
+            deleted_at__isnull=True
+        ).exists()
+
+        if not has_active:
+            message += (
+                "\n現在すべてのご契約プランが削除予約状態となっています。\n"
+                "次回の請求サイクルまでにいずれかのメンバーに対して新しいプラン設定が行われない場合、\n"
+                "サブスクリプションは停止されます。\n"
+                "継続をご希望の場合は、ログインの上、プラン変更を行ってください。\n"
+            )
+
+        send_mail(
+            subject="【Kaibaru】プラン削除スケジュールのお知らせ",
+            message=message,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[owner.email],
+        )
+
+        
+@shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=30, retry_kwargs={"max_retries": 5})
+def send_invoice_paid_email(self, member_id, amount, items, period_end, plan_name):
+    from .models import Member  # import inside to avoid circular imports
+
+    member = Member.objects.select_related("owner").filter(id=member_id).first()
+    if not member:
+        return
+
+    owner_email = member.owner.email
+    owner_name = member.owner.get_full_name() or member.owner.email
+
+    item_text = "、".join(items) if items else "お支払い"
+
+    send_mail(
+        subject="【Kaibaru】お支払いが完了しました",
+        message=(
+            f"{owner_name} 様\n\n"
+            f"以下のお支払いが完了しました。\n\n"
+            f"プラン: {plan_name}\n"
+            f"内容: {item_text}\n"
+            f"金額: ¥{amount}\n"
+            f"ご利用可能期限: {format_date(period_end)}\n\n"
+            f"本プランはお支払いごとに1ヶ月分ずつご利用期間が延長されます。\n"
+            f"今後ともよろしくお願いいたします。\n"
+        ),
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[owner_email],
+    )
 
 @shared_task(
     bind=True,

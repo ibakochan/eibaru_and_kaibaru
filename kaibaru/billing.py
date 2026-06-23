@@ -41,6 +41,8 @@ def resolve_and_apply_subscription_period(sub, period_end_ts, today):
         "current_period_end": period_end.date(),
     }
 
+
+
 def extract_subscription_id_from_invoice(invoice):
     """
     Extract subscription ID from Stripe invoice across different Stripe formats.

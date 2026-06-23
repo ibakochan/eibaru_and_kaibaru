@@ -403,7 +403,7 @@ hebonshiki4 = {
     # rya (りゃ)
     'ryakugo': 'りゃくご',
     'ryakusho': 'りゃくしょ',
-    'ryakujyo': 'りゃくじょ',
+    'ryakujo': 'りゃくじょ',
     'ryakudatsu': 'りゃくだつ',
 
     # ryu (りゅ)
@@ -444,7 +444,7 @@ hebonshiki4 = {
     # ju (じゅ)
     'jugyo': 'じゅうぎょう',
     'jutan': 'じゅうたん',
-    'junban': 'じゅんばん',
+    'jumban': 'じゅんばん',
     'juyo': 'じゅうよう',
 
     # jo (じょ)

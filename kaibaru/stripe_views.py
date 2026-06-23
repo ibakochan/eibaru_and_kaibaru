@@ -94,7 +94,7 @@ def create_checkout_session(request, club_id):
 
     active_members = Member.objects.filter(
         club=club
-    ).exclude(is_kyukai=True, is_kyukai_paid=True).count()
+    ).count()
 
     billable_members = max(active_members, 1)
 
@@ -194,6 +194,15 @@ def change_member_plan(request, item_id, new_plan_id):
     if error_response:
         return error_response
 
+    now = timezone.now()
+    if item.change_locked_until and item.change_locked_until > now:
+        return JsonResponse(
+            {"error": "プラン変更は次の請求期間までロックされています"},
+            status=409
+        )
+
+
+
     lock_key = f"change_item:{item.id}:{new_plan_id}"
     if not cache.add(lock_key, True, timeout=10):
         return JsonResponse({"error": "Please wait"}, status=429)
@@ -272,6 +281,13 @@ def cancel_member_subscription(request, item_id):
     error_response = assert_item_unlocked(item)
     if error_response:
         return error_response
+
+    now = timezone.now()
+    if item.cancel_locked_until and item.cancel_locked_until > now:
+        return JsonResponse(
+            {"error": "解約は次の請求期間までロックされています"},
+            status=409
+        )
 
     if item.deleted_at is not None:
         return JsonResponse({"error": "このプランはすでに解約されています"}, status=400)
@@ -424,6 +440,10 @@ def resume_member_subscription(request, item_id):
         logger.error(f"Failed to resume Stripe item {item.id}: {e}")
         return JsonResponse({"error": str(e)}, status=500)
 
+    if subscription.current_period_end:
+        item.cancel_locked_until = subscription.current_period_end
+        item.save(update_fields=["cancel_locked_until"])
+
     subscription.cancel_at_period_end = False
     subscription.save(update_fields=["cancel_at_period_end"])
 
@@ -547,6 +567,10 @@ def cancel_member_plan_change(request, new_item_id):
         logger.error(f"Cancel plan change failed {new_item.id}: {e}")
         return JsonResponse({"error": str(e)}, status=500)
 
+    if subscription.current_period_end:
+        old_item.change_locked_until = subscription.current_period_end
+        old_item.save(update_fields=["change_locked_until"])
+
     return JsonResponse({
         "success": True,
         "message": "プラン変更を取り消しました"
@@ -632,9 +656,7 @@ def create_member_checkout_session(request, club_id, plan_id):
     existing = SubscriptionItem.objects.filter(
         member=member,
         plan=plan,
-        subscription__owner=member.owner,
         subscription__club=member.club,
-        subscription__status__in=["active", "trialing", "pending"],
     ).filter(
         active_items_q()
     ).exists()
@@ -683,7 +705,6 @@ def create_member_checkout_session(request, club_id, plan_id):
                 "error": "毎月2日〜27日のみ変更可能です。また、請求日の前後1日は変更できません。別の日にお試しください。"
             }, status=400)
 
-    charged_next_month = False
     # -------------------------
     # CASE 1: Subscription exists → add item
     # -------------------------
@@ -932,19 +953,76 @@ def create_member_checkout_session(request, club_id, plan_id):
                 invoice.id,
                 stripe_account=club.stripe_account_id
             )
+
+        item = SubscriptionItem.objects.filter(
+            subscription=sub,
+            member=member,
+            plan=plan,
+        ).first()
             
 
-        SubscriptionItem.objects.create(
-            member=member,
-            subscription=sub,
-            plan=plan,
-            stripe_subscription_item_id=stripe_item_id,
+            
+        if item:
+            item.deleted_at = None
+            item.quantity = 1
+            item.price_at_subscription = plan.price
+            item.stripe_price_id_at_subscription = plan.stripe_price_id
+            item.save()
+            
+        else:
 
-            price_at_subscription=plan.price,
-            stripe_price_id_at_subscription=plan.stripe_price_id,
-            quantity=1,
-            monthly_double_resume_charge_prevention=charged_next_month
-        )
+            SubscriptionItem.objects.create(
+                member=member,
+                subscription=sub,
+                plan=plan,
+                stripe_subscription_item_id=stripe_item_id,
+    
+                price_at_subscription=plan.price,
+                stripe_price_id_at_subscription=plan.stripe_price_id,
+                quantity=1,
+            )
+                
+
+
+
+        if sub.cancel_at_period_end:
+            # Re-fetch subscription items to get fresh state
+            fresh_sub = stripe.Subscription.retrieve(
+                sub.stripe_subscription_id,
+                expand=["items.data"],
+                stripe_account=club.stripe_account_id
+            )
+            
+            # Find ghost items: exist in Stripe but soft-deleted in our DB
+            active_price_ids = set(
+                SubscriptionItem.objects.filter(
+                    subscription=sub,
+                    deleted_at__isnull=True
+                ).exclude(id=item.id if 'item' in locals() else None)  # exclude the one we just added
+                .values_list("stripe_price_id_at_subscription", flat=True)
+            )
+            # Also include the new plan's price since we just added it
+            active_price_ids.add(plan.stripe_price_id)
+            
+            for stripe_item in fresh_sub["items"]["data"]:
+                if stripe_item["price"]["id"] not in active_price_ids:
+                    # This is a ghost item — delete it
+                    stripe.SubscriptionItem.delete(
+                        stripe_item["id"],
+                        proration_behavior="none",
+                        stripe_account=club.stripe_account_id
+                    )
+            
+            # Unset cancellation
+            stripe.Subscription.modify(
+                sub.stripe_subscription_id,
+                cancel_at_period_end=False,
+                stripe_account=club.stripe_account_id
+            )
+            sub.cancel_at_period_end = False
+            sub.save(update_fields=["cancel_at_period_end"])
+        
+
     
         return JsonResponse({
             "success": True,
@@ -965,6 +1043,7 @@ def create_member_checkout_session(request, club_id, plan_id):
             "member_id": member.id,
             "club_id": club.id,
             "plan_id": plan.id,
+            "type": "checkout",
         },
     }
     if billing_cycle_anchor:
@@ -972,6 +1051,8 @@ def create_member_checkout_session(request, club_id, plan_id):
 
         if billing_cycle_anchor <= now:
             billing_cycle_anchor = now + 60
+
+    #    billing_cycle_anchor += 30 * 24 * 60 * 60
         subscription_data["billing_cycle_anchor"] = billing_cycle_anchor
         
         subscription_data["proration_behavior"] = "none"
@@ -1022,6 +1103,7 @@ def create_member_checkout_session(request, club_id, plan_id):
             "member_id": member.id,
             "club_id": club.id,
             "plan_id": plan.id,
+            "type": "checkout",
         },
         subscription_data=subscription_data,
         success_url=f"https://{club.subdomain}.kaibaru.jp/?subscription=success",

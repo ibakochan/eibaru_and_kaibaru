@@ -63,9 +63,17 @@ def would_break_any_bundle(plan):
     ).prefetch_related("bundled_plans")
 
     for p in affected:
-        remaining = p.bundled_plans.exclude(id=plan.id).count()
+        # Count only ACTIVE (non-soft-deleted) plans remaining after removing this plan
+        remaining = (
+            p.bundled_plans
+            .exclude(id=plan.id)
+            .exclude(is_deleted=True)
+            .count()
+        )
 
-        if 0 < remaining < 2:
+        # If removing this plan leaves 0 or 1 active plans, it's invalid
+        # (0 = empty bundle, 1 = single-plan bundle — both violate invariant)
+        if remaining < 2:
             return True
 
     return False

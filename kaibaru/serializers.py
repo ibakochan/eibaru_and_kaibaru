@@ -318,6 +318,7 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
             "group_id",
             "merge_plan_id",
             "default_plan_id",
+            "deleted_at",
         ]
         read_only_fields = [
             "id",
@@ -659,9 +660,6 @@ class MemberSerializer(serializers.ModelSerializer):
             "manual_total_participation",
             "manual_level_counts",
             "participation_limit",
-            "is_kyukai",
-            "is_kyukai_paid",
-            "kyukai_since",
             "is_manager",
             "is_instructor",
             "birth_date",
@@ -738,6 +736,8 @@ class MemberSerializer(serializers.ModelSerializer):
 
         if not user or not user.is_authenticated:
             for field in [
+                "subscription_state",
+                "subscription_items",
                 "participations",
                 "total_participation",
                 "this_month_participation",
@@ -749,6 +749,19 @@ class MemberSerializer(serializers.ModelSerializer):
             return data
 
         club = getattr(instance, "club", None)
+
+        can_see_financials = (
+            user.id == instance.user_id           # self
+            or user.id == instance.owner_id       # owns this member
+            or (club and club.owner_id == user.id)  # club owner
+            or (club and club.members.filter(user=user, is_manager=True).exists())  # manager
+        )
+
+        if not can_see_financials:
+            data.pop("subscription_state", None)
+            data.pop("subscription_items", None)
+    
+
         members = getattr(instance, "_prefetched_objects_cache", {}).get(
             "members",
             instance.club.members.all()
@@ -757,6 +770,9 @@ class MemberSerializer(serializers.ModelSerializer):
         user_member = next((m for m in members if m.user_id == user.id), None)
 
         if instance.user == user:
+            return data
+
+        if instance.owner == user:
             return data
 
         if user_member and (user_member.is_instructor or user_member.is_manager or club.owner_id == user.id):
@@ -1037,6 +1053,8 @@ class ClubSerializer(serializers.ModelSerializer):
 
         user = getattr(request, "user", None)
 
+        
+
 
 
         if not user or not user.is_authenticated:
@@ -1066,6 +1084,7 @@ class ClubSerializer(serializers.ModelSerializer):
             or m.is_manager
             or m.user_id == instance.owner_id
             or m.user_id == user.id
+            or m.owner_id == user.id
         ]
         data["members"] = MemberSerializer(filtered, many=True, context=self.context).data
 

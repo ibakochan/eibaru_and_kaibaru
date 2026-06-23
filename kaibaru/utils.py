@@ -29,7 +29,7 @@ def sync_member_quantity(club):
 
     active_members = Member.objects.filter(
         club=club
-    ).exclude(is_kyukai=True, is_kyukai_paid=True).count()
+    ).count()
 
     billable_members = max(active_members, 1)
 

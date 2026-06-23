@@ -6,7 +6,7 @@ from django.http import HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 
 from .models import Club, Member, Subscription, SubscriptionItem, MembershipPlan, StripeWebhookEvent, StripeCustomer
-from .tasks_emails import send_subscription_activated_emails
+from .tasks_emails import send_subscription_activated_emails, send_invoice_paid_email
 from django.db import transaction
 
 from datetime import datetime, timezone as dt_timezone
@@ -49,6 +49,7 @@ from .rules_subscriptions import (
     is_valid_billing_day,
     is_near_anchor,
     can_resume_subscription,
+    item_state,
 )
 
 from .pricing import calculate_joining_fee, calculate_subscription_pricing
@@ -126,10 +127,10 @@ def stripe_connected_webhook(request):
             stripe_customer_obj.save(update_fields=["stripe_customer_id"])
 
         sub_obj, created = Subscription.objects.get_or_create(
-            stripe_subscription_id=sub.id,
+            owner=member.owner,
+            club=club,
             defaults={
-                "owner": member.owner,
-                "club": club,
+                "stripe_subscription_id": sub.id,
                 "status": sub.status,
                 "current_period_end": None,
                 "last_invoice_id": invoice_id,
@@ -138,41 +139,71 @@ def stripe_connected_webhook(request):
             }
         )
 
+        if not created:
+            fields_to_update = ["status", "cancel_at_period_end"]
+            if sub_obj.stripe_subscription_id != sub.id:
+                sub_obj.stripe_subscription_id = sub.id
+                fields_to_update.append("stripe_subscription_id")
+            sub_obj.status = sub.status
+            sub_obj.cancel_at_period_end = False
+            sub_obj.save(update_fields=fields_to_update)
 
-        if created:
-            for item in sub["items"]["data"]:
-        
+        stripe_item_id = None
+
+        for item in sub["items"]["data"]:
+            if item["price"]["id"] == plan.stripe_price_id:
                 stripe_item_id = item["id"]
-                price_id = item["price"]["id"]
-    
-                if price_id == plan.stripe_price_id:
+                break
+
+
+        item = SubscriptionItem.objects.filter(
+            subscription=sub_obj,
+            member=member,
+            plan=plan,
+        ).first()
         
-                    sub_item, item_created = SubscriptionItem.objects.get_or_create(
-                        stripe_subscription_item_id=stripe_item_id,
-                        defaults={
-                            "member": member,
-                            "subscription": sub_obj,
-                            "plan": plan,
-                            "quantity": item.get("quantity", 1),
-
-                            "price_at_subscription": plan.price,
-                            "stripe_price_id_at_subscription": plan.stripe_price_id,
-                        }
-                    )
-
-                    final_amount = calculate_joining_fee(club, member)
-                    # 🔥 JOINING FEE LOGIC (PER MEMBER)
-                    if item_created and club.joining_fee > 0 and not member.has_paid_joining_fee:
-                        stripe.InvoiceItem.create(
-                            customer=sub.customer,
-                            amount=final_amount,
-                            currency="jpy",
-                            description=f"{member.full_name} 入会金",
-                            stripe_account=account_id
-                        )
+        if item:
+            item.deleted_at = None
+            item.quantity = 1
+            item.price_at_subscription = plan.price
+            item.stripe_price_id_at_subscription = plan.stripe_price_id
+            item.stripe_subscription_item_id = stripe_item_id
+            item.save()
+        
+        else:
+            SubscriptionItem.objects.create(
+                subscription=sub_obj,
+                member=member,
+                plan=plan,
+                quantity=1,
+                price_at_subscription=plan.price,
+                stripe_price_id_at_subscription=plan.stripe_price_id,
+                stripe_subscription_item_id=stripe_item_id,
+            )
+        
 
 
-        if created and club.subscription_mode == "regular":
+
+
+                # 🔥 JOINING FEE LOGIC (PER MEMBER)
+        if club.joining_fee > 0 and not member.has_paid_joining_fee:
+            final_amount = calculate_joining_fee(club, member)
+            stripe.InvoiceItem.create(
+                customer=sub.customer,
+                amount=final_amount,
+                currency="jpy",
+                description=f"{member.full_name} 入会金",
+                metadata={
+                    "member_id": member.id,
+                    "club_id": club.id,
+                    "plan_id": plan.id,
+                    "type": "joining fee",
+                },
+                stripe_account=account_id
+            )
+    
+    
+        if club.subscription_mode == "regular":
 
             
             pricing = calculate_subscription_pricing(
@@ -197,7 +228,13 @@ def stripe_connected_webhook(request):
                     customer=sub.customer,
                     amount=prorated_amount,
                     currency="jpy",
-                    description=f"Prorated membership ({remaining_days} days until next anchor)",
+                    description=f"Prorated membership ({pricing['proration']['remaining_days']} days until next anchor)",
+                    metadata={
+                        "member_id": member.id,
+                        "club_id": club.id,
+                        "plan_id": plan.id,
+                        "type": "prorations",
+                    },
                     stripe_account=account_id
                 )
         
@@ -215,7 +252,7 @@ def stripe_connected_webhook(request):
 
 
                 
-        if created and club.subscription_mode == "monthly":
+        if club.subscription_mode == "monthly":
 
                     
             pricing = calculate_subscription_pricing(
@@ -237,7 +274,13 @@ def stripe_connected_webhook(request):
                     customer=sub.customer,
                     amount=prorated_amount,                    
                     currency="jpy",
-                    description=f"Prorated membership ({remaining_days} days)",
+                    description=f"Prorated membership ({pricing['proration']['remaining_days']} days)",
+                    metadata={
+                        "member_id": member.id,
+                        "club_id": club.id,
+                        "plan_id": plan.id,
+                        "type": "prorations",
+                    },
                     stripe_account=account_id
                 )
         
@@ -260,7 +303,7 @@ def stripe_connected_webhook(request):
                     currency="jpy",
                     description=f"{plan.name} 翌月分前払い",
                     metadata={
-                        "type": "next_month_fee",
+                        "type": "next month fee",
                         "member_id": member.id,
                         "plan_id": plan.id,
                         "club_id": club.id,
@@ -279,9 +322,7 @@ def stripe_connected_webhook(request):
             if invoice.amount_due > 0:
                 stripe.Invoice.pay(invoice.id, stripe_account=account_id)
 
-            if charged_next_month:
-                sub_item.monthly_double_resume_charge_prevention = True
-                sub_item.save(update_fields=["monthly_double_resume_charge_prevention"])
+
 
             
 
@@ -317,7 +358,7 @@ def stripe_connected_webhook(request):
 
         # -------- Find local subscription --------
         sub = Subscription.objects.filter(stripe_subscription_id=subscription_id, club__stripe_account_id=account_id).first()
-        
+
         
         if not sub:
             logger.warning(
@@ -337,43 +378,51 @@ def stripe_connected_webhook(request):
             logger.info(f"[invoice.paid] Invoice {invoice['id']} already processed, skipping")
             return HttpResponse(status=200)
 
+        email_items = []
+
+        primary_member_id = None
+        primary_plan_id = None
+
+        total_amount = invoice.get("amount_paid", 0)
+
         for line in invoice.get("lines", {}).get("data", []):
             metadata = line.get("metadata", {})
 
             charge_type = metadata.get("type")
             member_id = metadata.get("member_id")
             plan_id = metadata.get("plan_id")
+            
 
-            if charge_type == "joining_fee":
+            if member_id and not primary_member_id:
+                primary_member_id = member_id
+
+            if plan_id and not primary_plan_id:
+                primary_plan_id = plan_id
+
+            if charge_type == "joining fee":
+                email_items.append("入会金")
+
+            elif charge_type == "prorations":
+                email_items.append("日割り料金")
+
+
+
+            if charge_type == "joining fee":
                 member = Member.objects.filter(id=member_id).first()
                 if member and not member.has_paid_joining_fee:
                     member.has_paid_joining_fee = True
                     member.has_been_charged_joining_fee = True
                     member.save(update_fields=["has_paid_joining_fee", "has_been_charged_joining_fee"])
     
-            if charge_type in ["proration", "next_month_fee"]:
-                SubscriptionItem.objects.get_or_create(
-                    subscription=sub,
-                    member_id=member_id,
-                    plan_id=plan_id,
-                    defaults={
-                        "quantity": 1,
-                        "price_at_subscription": line["amount"],
-                        "stripe_price_id_at_subscription": None,
-                        "deleted_at": None,
-                    }
-                )
             
-            if charge_type == "resume_charge":
-                item = SubscriptionItem.objects.filter(
-                    subscription=sub,
-                    member_id=member_id,
-                    plan_id=plan_id
-                ).first()
+
+
+            
+
         
-                if item:
-                    item.monthly_double_resume_charge_prevention = True
-                    item.save(update_fields=["monthly_double_resume_charge_prevention"])
+
+
+        
 
         # -------- Extract period end from invoice lines --------
         periods = [
@@ -406,6 +455,30 @@ def stripe_connected_webhook(request):
                 member.has_been_charged_joining_fee = True
                 member.save(update_fields=["has_paid_joining_fee", "has_been_charged_joining_fee"])
                 logger.info(f"[invoice.paid] Marked member {member.id} as having paid joining fee")
+        
+        member = Member.objects.filter(id=primary_member_id).first()
+        plan = MembershipPlan.objects.filter(id=primary_plan_id).only("name").first()
+
+        if email_items and member and plan:
+            logger.info("[invoice.paid] QUEUING send_invoice_paid_email task")
+            send_invoice_paid_email.delay(
+                member_id=member.id,
+                amount=total_amount,
+                items=email_items,
+                period_end=sub.access_until,
+                plan_name=plan.name,
+            )
+        logger.info(
+            "[invoice.paid] Email debug → email_items=%s primary_member_id=%s primary_plan_id=%s",
+            email_items,
+            primary_member_id,
+            primary_plan_id,
+        )
+        logger.info(
+            "[invoice.paid] Resolved → member=%s plan=%s",
+            member.id if member else None,
+            plan.id if plan else None,
+        )
 
         logger.info(
             "[invoice.paid] Processed invoice %s for subscription %s (status=%s)",
@@ -414,10 +487,7 @@ def stripe_connected_webhook(request):
             sub.status
         )
 
-        if is_cycle:
-            SubscriptionItem.objects.filter(
-                subscription=sub
-            ).update(monthly_double_resume_charge_prevention=False)
+
     
     elif event["type"] == "invoice.payment_failed":
         invoice = event["data"]["object"]
