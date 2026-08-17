@@ -7,7 +7,20 @@ from datetime import date
 # PRORATION ENGINE
 # (moved OUT of billing.py because it's pricing logic)
 # =========================================================
+def get_effective_subscription_price(item):
+    """
+    Returns the billable base price for an existing subscription item.
 
+    - If the plan forces current pricing, use current plan price.
+    - Otherwise preserve grandfather pricing, but allow price reductions.
+    """
+    if item.plan.apply_current_price_to_existing:
+        return item.plan.price
+
+    return min(
+        item.price_at_subscription or item.plan.price,
+        item.plan.price,
+    )
 
 
 def calculate_monthly_proration(today: date, monthly_price: int):

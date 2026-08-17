@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import MembershipPlanGroup, MemberPricingAdjustment, Discount, DiscountCondition, Member, Club, Lesson, Participation, SlateImage, JoinRequest, Subscription, SubscriptionItem
+from .models import MembershipPlanGroup, MemberPricingAdjustment, Discount, DiscountCondition, Member, Club, Lesson, Participation, SlateImage, JoinRequest, InvoiceItem, Invoice, Subscription, SubscriptionItem
 
 from google.cloud import storage
 from django.db.models import Q
@@ -24,6 +24,49 @@ from .rules_plans import enforce_membership_plan_invariants
 from django.utils.timezone import now
 
 NOW = now()
+
+def get_visible_membership_plan_ids(club, request):
+    now = timezone.now()
+
+    # Always visible:
+    # every plan that has not been deleted.
+    visible_plan_ids = set(
+        club.membership_plans.filter(
+            is_deleted=False,
+        ).values_list("id", flat=True)
+    )
+
+    if not request or not request.user.is_authenticated:
+        return visible_plan_ids
+
+    user = request.user
+
+    # ---------------------------------------------------------
+    # Deleted plans that are still in an active/grace period
+    # ---------------------------------------------------------
+
+    qs = SubscriptionItem.objects.filter(
+        subscription__club=club,
+        plan__is_deleted=True,
+        access_until__gt=now,
+    )
+
+    # Club owner sees deleted plans still used by ANY member.
+    if user.id != club.owner_id:
+        # Normal user only sees deleted plans belonging to
+        # their own billing/subscription owner.
+        qs = qs.filter(
+            subscription__owner=user,
+        )
+
+    grace_plan_ids = qs.values_list(
+        "plan_id",
+        flat=True,
+    )
+
+    visible_plan_ids.update(grace_plan_ids)
+
+    return visible_plan_ids
 
 class MemberPricingAdjustmentSerializer(serializers.ModelSerializer):
     class Meta:
@@ -125,10 +168,24 @@ class DiscountSerializer(serializers.ModelSerializer):
             "plans", 
         ]
         read_only_fields = ["id", "club"]
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+
+        club_id = self.request.data.get("club") or self.request.query_params.get("club")
+        if club_id:
+            club = Club.objects.filter(id=club_id).first()
+            if club:
+                context["club"] = club
+
+        return context
     
     def validate(self, data):
+        club = self.context.get("club")
         discount_type = data.get("discount_type")
         value = data.get("value")
+        apply_to = data.get("apply_to")
+        plans = data.get("plans", [])
 
         if discount_type == "percentage":
             if value > 100:
@@ -146,6 +203,15 @@ class DiscountSerializer(serializers.ModelSerializer):
                     {"value": "割引額は0以上にしてください"}
                 )
 
+        if apply_to == "joining_fee" and plans:
+            raise serializers.ValidationError(
+                {
+                    "plans":
+                    "入会金割引は対象プランを指定できません。"
+                    "すべてのプランに適用されます。"
+                }
+            )
+
         conditions = data.get("conditions", [])
         types = [c.get("type") for c in conditions if c.get("type")]
 
@@ -157,6 +223,8 @@ class DiscountSerializer(serializers.ModelSerializer):
         return data
 
     def create(self, validated_data):
+
+
         conditions_data = validated_data.pop("conditions", [])
         plans = validated_data.pop("plans", [])
         discount = Discount.objects.create(**validated_data)
@@ -169,6 +237,7 @@ class DiscountSerializer(serializers.ModelSerializer):
         return discount
 
     def update(self, instance, validated_data):
+
         conditions_data = validated_data.pop("conditions", None)
         plans = validated_data.pop("plans", None)
 
@@ -185,6 +254,8 @@ class DiscountSerializer(serializers.ModelSerializer):
                 DiscountCondition.objects.create(discount=instance, **cond)
 
         return instance
+
+
 
 class SubscriptionItemSerializer(serializers.ModelSerializer):
     plan_id = serializers.IntegerField(source="plan.id", read_only=True)
@@ -204,7 +275,6 @@ class SubscriptionItemSerializer(serializers.ModelSerializer):
         fields = [
             "plan_id",
             "plan_name",
-            "quantity",
             "deleted_at",
             "access_until",
             "member_id",
@@ -262,6 +332,7 @@ class MemberSubscriptionSerializer(serializers.ModelSerializer):
             "billing_anchor_day",
             "billing_mode",
             "items",
+            "billing_method",
         ]
 
     def get_items(self, obj):
@@ -285,6 +356,7 @@ class SubscriptionSerializer(serializers.ModelSerializer):
             "billing_mode",
 
             "items",
+            "billing_method",
         ]
 
 
@@ -319,6 +391,7 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
             "merge_plan_id",
             "default_plan_id",
             "deleted_at",
+            "apply_current_price_to_existing",
         ]
         read_only_fields = [
             "id",
@@ -556,13 +629,172 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
 
 
 class MembershipPlanGroupSerializer(serializers.ModelSerializer):
-    plans = MembershipPlanSerializer(many=True, read_only=True)
     default_plan_id = serializers.IntegerField(required=False, allow_null=True)
-    
+    plans = serializers.SerializerMethodField()
+
     class Meta:
         model = MembershipPlanGroup
         fields = ["id", "plans", "default_plan_id"]
 
+    def get_plans(self, obj):
+        request = self.context.get("request")
+
+        visible_plan_ids = get_visible_membership_plan_ids(
+            obj.club,
+            request,
+        )
+
+        plans = obj.plans.filter(
+            id__in=visible_plan_ids,
+        )
+
+        return MembershipPlanSerializer(
+            plans,
+            many=True,
+            context=self.context,
+        ).data
+    
+class InvoiceItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = InvoiceItem
+        fields = [
+            "description",
+            "amount",
+        ]
+
+class PaymentHistoryInvoiceSerializer(serializers.ModelSerializer):
+    billing_member_name = serializers.SerializerMethodField()
+    billing_member_furigana = serializers.SerializerMethodField()
+    billing_method = serializers.SerializerMethodField()
+    items = InvoiceItemSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Invoice
+        fields = [
+            "id",
+            "billing_member_name",
+            "amount_due",
+            "amount_paid",
+            "billing_member_furigana",
+            "currency",
+            "status",
+            "billing_method",
+            "due_date",
+            "issued_at",
+            "billing_reason",
+            "items",
+        ]
+
+    def get_billing_member_name(self, obj):
+        if not obj.payer:
+            return obj.payer_name
+
+        member = Member.objects.filter(
+            user=obj.payer,
+            owner=obj.payer,
+            club=obj.club,
+        ).first()
+
+        if member:
+            return member.full_name
+
+        return obj.payer_name
+
+    def get_billing_member_furigana(self, obj):
+        if not obj.payer:
+            return None
+
+        member = Member.objects.filter(
+            user=obj.payer,
+            owner=obj.payer,
+            club=obj.club,
+        ).first()
+
+        if member:
+            return member.furigana
+
+        return None
+
+    def get_billing_method(self, obj):
+        if not obj.subscription:
+            return None
+
+        return obj.subscription.billing_method
+
+class InvoiceSerializer(serializers.ModelSerializer):
+    billing_member_name = serializers.SerializerMethodField()
+    billing_member_furigana = serializers.SerializerMethodField()
+    billing_method = serializers.SerializerMethodField()
+    billing_member_picture = serializers.SerializerMethodField()
+    items = InvoiceItemSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Invoice
+        fields = [
+            "id",
+            "billing_member_name",
+            "amount_due",
+            "billing_member_furigana",
+            "amount_paid",
+            "currency",
+            "status",
+            "billing_method",
+            "due_date",
+            "issued_at",
+            "items",
+            "billing_member_picture",
+        ]
+
+    def get_billing_member_picture(self, obj):
+        if not obj.payer:
+            return None
+
+        member = Member.objects.filter(
+            user=obj.payer,
+            owner=obj.payer,
+            club=obj.club,
+        ).first()
+
+        if member and member.picture:
+            return member.picture.url
+
+        return None
+
+    def get_billing_member_name(self, obj):
+        if not obj.payer:
+            return obj.payer_name
+
+        member = Member.objects.filter(
+            user=obj.payer,
+            owner=obj.payer,
+            club=obj.club,
+        ).first()
+
+        if member:
+            return member.full_name
+
+        return obj.payer_name
+
+    def get_billing_member_furigana(self, obj):
+        if not obj.payer:
+            return None
+
+        member = Member.objects.filter(
+            user=obj.payer,
+            owner=obj.payer,
+            club=obj.club,
+        ).first()
+
+        if member:
+            return member.furigana
+
+        return None
+
+    def get_billing_method(self, obj):
+        if not obj.subscription:
+            return None
+
+        return obj.subscription.billing_method
 
 class MyJoinRequestSerializer(serializers.ModelSerializer):
     class Meta:
@@ -573,6 +805,7 @@ class MyJoinRequestSerializer(serializers.ModelSerializer):
             "created_at",
             "owner",
             "user",
+            "already_subscribed_plans",
         ]
 
 
@@ -593,6 +826,7 @@ class JoinRequestSerializer(serializers.ModelSerializer):
             "created_at",
             "birth_date",
             "gender",
+            "already_subscribed_plans",
         ]
         read_only_fields = ["id", "status", "created_at"]
 
@@ -669,19 +903,28 @@ class MemberSerializer(serializers.ModelSerializer):
             "has_been_charged_joining_fee",
             "subscription_state",
             "subscription_items",
+            "counts_for_family_discount",
         ]
         read_only_fields = ["id", "user", "is_manager", "is_instructor",]
 
     
     def get_subscription_items(self, obj):
-        items = obj._prefetched_objects_cache.get(
+        items = getattr(
+            obj,
+            "_prefetched_objects_cache",
+            {}
+        ).get(
             "subscription_items",
             obj.subscription_items.all()
         )
         return SubscriptionItemSerializer(items, many=True).data
     
     def get_subscription_state(self, obj):
-        items = obj._prefetched_objects_cache.get(
+        items = getattr(
+            obj,
+            "_prefetched_objects_cache",
+            {}
+        ).get(
             "subscription_items",
             obj.subscription_items.select_related("subscription").all()
         )
@@ -708,6 +951,7 @@ class MemberSerializer(serializers.ModelSerializer):
             "cancel_at_period_end": sub.cancel_at_period_end,
             "billing_anchor_day": sub.billing_anchor_day,
             "billing_mode": sub.billing_mode,
+            "billing_method": sub.billing_method,
         }
 
     
@@ -886,8 +1130,9 @@ class ClubSerializer(serializers.ModelSerializer):
     slate_images = SlateImageSerializer(many=True, read_only=True)
     join_requests = serializers.SerializerMethodField()
     my_join_requests = serializers.SerializerMethodField()
-    membership_plans = MembershipPlanSerializer(many=True, read_only=True)
+    membership_plans = serializers.SerializerMethodField()
     membership_plan_groups = MembershipPlanGroupSerializer(many=True, read_only=True, source="membershipplangroup_set")
+    invoices = serializers.SerializerMethodField()
 
 
 
@@ -945,6 +1190,7 @@ class ClubSerializer(serializers.ModelSerializer):
             "membership_plans",
             "membership_plan_groups",
             "stripe_subscription_id",
+            "invoices",
         ]
         read_only_fields = [
             "id",
@@ -960,7 +1206,23 @@ class ClubSerializer(serializers.ModelSerializer):
             "stripe_subscription_id",
         ]
     
-
+    def get_membership_plans(self, club):
+        request = self.context.get("request")
+    
+        visible_plan_ids = get_visible_membership_plan_ids(
+            club,
+            request,
+        )
+    
+        plans = club.membership_plans.filter(
+            id__in=visible_plan_ids,
+        )
+    
+        return MembershipPlanSerializer(
+            plans,
+            many=True,
+            context=self.context,
+        ).data    
 
 
     def get_frozen(self, club):  
@@ -1118,6 +1380,33 @@ class ClubSerializer(serializers.ModelSerializer):
         ).order_by("-created_at")
 
         return MyJoinRequestSerializer(qs, many=True).data
+
+    def get_invoices(self, club):
+        request = self.context.get("request")
+
+        if not request or not request.user.is_authenticated:
+            return []
+
+        if request.user.id != club.owner_id:
+            return []
+
+        qs = Invoice.objects.filter(
+            club=club,
+            status="open",
+            subscription__billing_method__in=[
+                "cash",
+                "manual",
+                "bank_transfer",
+            ],
+        ).select_related(
+            "subscription",
+        )
+
+        return InvoiceSerializer(
+            qs,
+            many=True,
+            context=self.context
+        ).data
 
     def get_join_requests(self, club):
         request = self.context.get("request")

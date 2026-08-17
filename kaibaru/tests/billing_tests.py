@@ -6,11 +6,9 @@ from datetime import date, datetime, timezone as dt_timezone
 from kaibaru.billing import (
     get_next_month_start,
     get_next_billing_cycle_anchor,
-    get_cancel_quantity_action,
     should_set_monthly_resume_prevention,
     should_cancel_subscription,
     get_cancel_success_message,
-    get_resume_item_action,
     should_charge_resume_next_month,
     get_resume_charge_amount,
     get_resume_success_message,
@@ -349,17 +347,7 @@ class BillingRulesTests(SimpleTestCase):
 
         self.assertIsNone(result)
 
-    def test_get_cancel_quantity_action_delete(self):
-        self.assertEqual(
-            get_cancel_quantity_action(1),
-            ("delete", None)
-        )
 
-    def test_get_cancel_quantity_action_modify(self):
-        self.assertEqual(
-            get_cancel_quantity_action(3),
-            ("modify", 2)
-        )
 
     def test_should_set_monthly_resume_prevention_true(self):
         subscription = SimpleNamespace(
@@ -450,27 +438,6 @@ class BillingRulesTests(SimpleTestCase):
         )
 
         self.assertFalse(can_resume_subscription(item, now))
-
-    def test_get_resume_item_action_modify(self):
-        existing_item = {
-            "id": "si_123",
-            "quantity": 2,
-        }
-
-        result = get_resume_item_action(existing_item)
-
-        self.assertEqual(
-            result,
-            ("modify", "si_123", 3)
-        )
-
-    def test_get_resume_item_action_create(self):
-        result = get_resume_item_action(None)
-
-        self.assertEqual(
-            result,
-            ("create", None, 1)
-        )
 
     def test_should_charge_resume_next_month_true(self):
         subscription = SimpleNamespace(

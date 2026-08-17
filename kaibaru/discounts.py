@@ -132,6 +132,8 @@ def check_conditions(discount, member):
 
     owner = member.owner
 
+    club = member.club
+
     for cond in discount.conditions.all():
         ctype = cond.type
         value = cond.value
@@ -163,10 +165,16 @@ def check_conditions(discount, member):
         # -------------------------
         elif ctype == "is_family":
             # Count OTHER family members (excluding self)
-            count = Member.objects.filter(
-                owner=owner,
-                counts_for_family_discount=True
-            ).exclude(id=member.id).count()
+
+            if getattr(member, "is_preview", False):
+                count = member.family_count
+
+            else:
+                count = Member.objects.filter(
+                    owner=owner,
+                    club=club,
+                    counts_for_family_discount=True
+                ).exclude(id=member.id).count()
 
             if count < int(value):
                 return False
@@ -225,6 +233,13 @@ def calculate_discounted_amount(
     applicable = []
     for d in discounts:
         try:
+
+            if (
+                d.apply_to == "subscription"
+                and not d.conditions.exists()
+            ):
+                continue
+
             if not check_conditions(d, member):
                 continue
     
@@ -324,7 +339,15 @@ def apply_subscription_discount(club, member, amount):
 def calculate_discount_breakdown(*, club, member, base_amount, apply_to, proration_ratio=None):
     discounts = get_applicable_discounts(club, apply_to)
 
-    applicable = [d for d in discounts if check_conditions(d, member)]
+    applicable = [
+        d
+        for d in discounts
+        if not (
+            d.apply_to == "subscription"
+            and not d.conditions.exists()
+        )
+        and check_conditions(d, member)
+    ]
 
     amount = base_amount
     steps = []
@@ -433,6 +456,12 @@ def get_member_discounts(
 
     for d in discounts_list:
         passes = True
+
+        if (
+            d.apply_to == "subscription"
+            and not d.conditions.exists()
+        ):
+            continue
 
         for cond in d.conditions.all():
             ctype = cond.type

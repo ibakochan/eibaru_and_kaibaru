@@ -3,16 +3,17 @@ from rest_framework import viewsets, serializers, status
 from rest_framework.decorators import action
 from rest_framework.viewsets import ViewSet
 from rest_framework.response import Response
-from .models import MemberPricingAdjustment, Discount, DiscountCondition, SubscriptionItem, Member, Club, Lesson, Participation, SlateImage, JoinRequest, MembershipPlan, Subscription
+from .models import Invoice, MemberPricingAdjustment, Discount, DiscountCondition, SubscriptionItem, Member, Club, Lesson, Participation, SlateImage, JoinRequest, MembershipPlan, Subscription
 from accounts.models import CustomUser
 from django.contrib.auth import login
 import re
 import unicodedata
 import json
 import logging
-from django.db.models import Q
+from django.db.models import Q, F
 from datetime import date
 from django.db.models import Sum
+from .service_legacy_subscription import LegacySubscriptionService
 
 
 from collections import defaultdict
@@ -20,7 +21,7 @@ from collections import defaultdict
 import stripe
 from django.conf import settings
 from django.db.models import Prefetch
-
+from django.core.exceptions import ValidationError
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
 from .tasks_emails import send_plan_deletion_emails
@@ -31,9 +32,10 @@ import uuid
 from .pricing import (
     calculate_joining_fee,
     calculate_subscription_pricing,
+    get_effective_subscription_price,
 )
 
-from .serializers import MemberPricingAdjustmentSerializer, DiscountConditionSerializer, DiscountSerializer, MembershipPlanSerializer, MemberSerializer, ClubSerializer, LessonSerializer, ParticipationSerializer, SlateImageSerializer, JoinRequestSerializer
+from .serializers import PaymentHistoryInvoiceSerializer, MemberPricingAdjustmentSerializer, DiscountConditionSerializer, DiscountSerializer, MembershipPlanSerializer, MemberSerializer, ClubSerializer, LessonSerializer, ParticipationSerializer, SlateImageSerializer, JoinRequestSerializer
 from django.conf import settings
 from datetime import timedelta
 import hashlib
@@ -43,11 +45,43 @@ from django.db import transaction
 from .utils import sync_member_quantity
 from .rules_plans import would_break_any_bundle
 
+from .rules_subscriptions import validate_plan_set
+
 from django.core.files.base import ContentFile
 import os
 from django.utils.timezone import now
 from .service_subscription import SubscriptionItemService
 
+class PreviewMember:
+
+    def __init__(
+        self,
+        gender=None,
+        age=None,
+        family_count=None,
+    ):
+        self.id = -1
+        self.is_preview = True
+        self.gender = gender
+        self.owner_id = None
+        self.owner = None
+        self.has_been_charged_joining_fee = False
+        self.has_paid_joining_fee = False
+
+        if age not in [None, ""]:
+            today = date.today()
+            self.birth_date = date(
+                today.year - int(age),
+                today.month,
+                today.day
+            )
+        else:
+            self.birth_date = None
+
+        if family_count not in [None, ""]:
+            self.family_count = int(family_count)
+        else:
+            self.family_count = 0
 
 
 def build_member_adjustment_map(members):
@@ -63,7 +97,7 @@ def build_member_adjustment_map(members):
 
     return result
 
-def build_pricing_map(club, request_user):
+def build_pricing_map(club, request_user=None, preview_member=None):
     from .billing import compute_access_period_preview
     from collections import defaultdict
     from django.db.models import Q
@@ -83,18 +117,25 @@ def build_pricing_map(club, request_user):
     # -------------------------
     # ROLE LOGIC
     # -------------------------
-    is_club_owner = (club.owner_id == request_user.id)
+    is_club_owner = (request_user and club.owner_id == request_user.id)
     user_member = Member.objects.filter(club=club, user=request_user).first()
     is_manager = user_member.is_manager if user_member else False
     can_view_all = is_club_owner or is_manager
-    is_authenticated = request_user.is_authenticated
+    is_authenticated = (
+        request_user.is_authenticated
+        if request_user
+        else False
+    )
 
     # -------------------------
     # SHARED DATA FETCHING
     # -------------------------
-    members = list(
-        club.members.all().select_related("owner", "club")
-    )
+    if preview_member:
+        members = [preview_member]
+    else:
+        members = list(
+            club.members.all().select_related("owner", "club")
+        )
 
     member_adjustments = build_member_adjustment_map(members)
 
@@ -177,8 +218,9 @@ def build_pricing_map(club, request_user):
     pricing_map = {}
 
     for member in members:
-        if is_authenticated and not can_view_all and member.owner_id != request_user.id:
-            continue
+        if not getattr(member, "is_preview", False):
+            if is_authenticated and not can_view_all and member.owner_id != request_user.id:
+                continue
 
         member_data = {}
 
@@ -221,7 +263,7 @@ def build_pricing_map(club, request_user):
         # =========================================================
         # SELF VIEW
         # =========================================================
-        if is_authenticated and member.owner_id == request_user.id:
+        if preview_member or (is_authenticated and member.owner_id == request_user.id):
 
             # -------------------------
             # Joining fee
@@ -248,7 +290,7 @@ def build_pricing_map(club, request_user):
                 if not plan:
                     continue
 
-                base = item.price_at_subscription or plan.price
+                base = get_effective_subscription_price(item)
 
                 pricing_result = apply_discounts(
                     member=member,
@@ -364,7 +406,7 @@ def build_pricing_map(club, request_user):
                 if not plan:
                     continue
 
-                base = item.price_at_subscription or plan.price
+                base = get_effective_subscription_price(item)
 
                 pricing_result = apply_discounts(
                     member=member,
@@ -439,6 +481,66 @@ def slugify(value):
 
     return value.strip("-").lower()
 
+
+class InvoiceViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = PaymentHistoryInvoiceSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+
+        if not user.is_authenticated:
+            return Invoice.objects.none()
+
+        club_id = self.request.query_params.get("club")
+        member_id = self.request.query_params.get("member")
+
+        if not club_id or not member_id:
+            return Invoice.objects.none()
+
+        # Only the club owner can view payment history.
+        club = Club.objects.filter(
+            id=club_id,
+            owner=user,
+            is_deleted=False,
+        ).first()
+
+        if not club:
+            return Invoice.objects.none()
+
+        # Make sure the requested member belongs to this club.
+        member = Member.objects.filter(
+            id=member_id,
+            club=club,
+        ).first()
+
+        if not member:
+            return Invoice.objects.none()
+
+        # The member's subscription is the billing/family account.
+        subscription = Subscription.objects.filter(
+            owner=member.owner,
+            club=club,
+        ).order_by("-id").first()
+
+        if not subscription:
+            return Invoice.objects.none()
+
+        return (
+            Invoice.objects
+            .filter(
+                club=club,
+                subscription=subscription,
+                status="paid",
+            )
+            .select_related(
+                "subscription",
+                "payer",
+            )
+            .prefetch_related(
+                "items",
+            )
+            .order_by("-issued_at", "-id")
+        )
 
 class MemberPricingAdjustmentViewSet(viewsets.ModelViewSet):
     queryset = MemberPricingAdjustment.objects.all()
@@ -851,6 +953,55 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
                     {"detail": "You already have a pending request."}
                 )
 
+        selected_plans = serializer.validated_data.get(
+            "already_subscribed_plans",
+            []
+        )
+        
+        selected_plan_ids = {
+            plan.id
+            for plan in selected_plans
+        }
+        
+        # ---------------------------------------------------------
+        # Validate selected legacy plans
+        # ---------------------------------------------------------
+        
+        invalid_plans = [
+            plan
+            for plan in selected_plans
+            if (
+                plan.club_id != club.id
+                or plan.is_deleted
+                or not plan.active
+            )
+        ]
+        
+        if invalid_plans:
+            raise serializers.ValidationError(
+                {
+                    "already_subscribed_plans": (
+                        "One or more selected plans are invalid."
+                    )
+                }
+            )
+
+        # ---------------------------------------------------------
+        # Validate group/bundle rules across ALL selected plans
+        # ---------------------------------------------------------
+        
+        try:
+            validate_plan_set(
+                plan_ids=selected_plan_ids,
+                club=club,
+            )
+        except ValidationError as e:
+            raise serializers.ValidationError(
+                {
+                    "already_subscribed_plans": str(e)
+                }
+            )
+
             
         serializer.save(
             user=None if is_family else self.request.user,
@@ -879,8 +1030,16 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
                 {"detail": "No join requests found"},
                 status=status.HTTP_404_NOT_FOUND
             )
+
+        if join_requests.values("club_id").distinct().count() > 1:
+            return Response(
+                {"detail": "Please accept join requests from one club at a time."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
     
         created_member_ids = []
+
+        club = join_requests.first().club
     
         with transaction.atomic():
             for jr in join_requests:
@@ -912,11 +1071,24 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
                     picture=new_picture,
                     level=jr.level or 1,
                 )
+
+                legacy_plans = list(
+                    jr.already_subscribed_plans.all()
+                )
+
+                if legacy_plans:
+                    LegacySubscriptionService.create_legacy_subscription(
+                        club=jr.club,
+                        member=member,
+                        plans=legacy_plans,
+                    )
     
                 created_member_ids.append(member.id)
         
             # delete after processing
             join_requests.delete()
+        
+        sync_member_quantity(club)
     
         return Response(
             {
@@ -970,24 +1142,41 @@ class MemberViewSet(viewsets.ModelViewSet):
     def remove(self, request, pk=None):
         """Delete a member"""
         member = self.get_object()
+
+        if member.club.owner_id != request.user.id:
+            return Response(
+                {"detail": "許可なし"},
+                status=403
+            )
+        
+        active_subscription = Subscription.objects.filter(
+            owner=member.owner,
+            club=member.club,
+            status__in=[
+                "active",
+                "trialing",
+                "past_due",
+                "pending",
+            ],
+        ).exists()
+    
+        if active_subscription:
+            return Response(
+                {
+                    "detail": "有効なサブスクリプションが存在するため、この会員を削除できません。"
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         club = member.club
+
 
         member.delete()
         sync_member_quantity(club)
+
         return Response({"status": "deleted"}, status=status.HTTP_200_OK)
 
-    def perform_create(self, serializer):
-        subdomain = self.request.data.get("club_subdomain")
 
-        club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
-        if not club:
-            raise serializers.ValidationError({"club_subdomain": "Club not found."})
-        
-        existing_member = Member.objects.filter(club=club, user=self.request.user).first()
-
-
-        member = serializer.save(club=club, user=self.request.user, owner=self.request.user)
-        sync_member_quantity(member.club)
 
 
 class LessonViewSet(viewsets.ModelViewSet):
@@ -1014,7 +1203,7 @@ class LessonViewSet(viewsets.ModelViewSet):
         if instructor_id:
             try:
                 instructor_id = int(instructor_id)
-                instructor = Member.objects.filter(id=instructor_id, is_instructor=True).first()
+                instructor = Member.objects.filter(id=instructor_id, is_instructor=True, club=club).first()
             except ValueError:
                 raise serializers.ValidationError({"instructor_id": "Invalid ID."})
 
@@ -1027,123 +1216,173 @@ class ParticipationViewSet(viewsets.ModelViewSet):
     queryset = Participation.objects.all()
     serializer_class = ParticipationSerializer
 
-    @action(detail=False, methods=["post"], url_path="toggle-count")
-    def toggle_count(self, request):
-      with transaction.atomic():
+    def get_member_stats(self, member):
+        participations = member.participations.all()
 
-        member_id = request.data.get("member")
-        lesson_id = request.data.get("lesson")
+        total = (
+            member.manual_total_participation
+            + sum(p.total_count for p in participations)
+        )
 
-        if not member_id or not lesson_id:
-            return Response(
-                {"detail": "member and lesson are required"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        monthly = sum(
+            p.monthly_count for p in participations
+        )
 
-        member = Member.objects.filter(id=member_id).first()
-        lesson = Lesson.objects.filter(id=lesson_id).first()
+        return {
+            "total_participation": total,
+            "this_month_participation": monthly,
+            "level_participation": get_level_participation(member),
+        }
 
-        if not member or not lesson:
-            return Response(
-                {"detail": "Member or lesson not found"},
-                status=status.HTTP_404_NOT_FOUND
-            )
+    @action(detail=False, methods=["post"], url_path="bulk-create")
+    def bulk_create(self, request):
+        with transaction.atomic():
 
-        today = timezone.localtime(timezone.now()).date()
-        yesterday = today - timedelta(days=1)
-        level_key = str(member.level)
+            lesson_id = request.data.get("lesson")
+            member_ids = request.data.get("members", [])
 
-        participation = Participation.objects.filter(member=member, lesson=lesson).first()
-
-        if participation:
-            if participation.level_counts is None:
-                participation.level_counts = {}
-
-            if participation.last_participation_date == today:
-                participation.total_count = max(participation.total_count - 1, 0)
-                participation.monthly_count = max(participation.monthly_count - 1, 0)
-                participation.level_counts[level_key] = max(
-                    participation.level_counts.get(level_key, 0) - 1, 0
+            if not lesson_id or not member_ids:
+                return Response(
+                    {"detail": "lessonとmembersは必須です"},
+                    status=status.HTTP_400_BAD_REQUEST
                 )
-                if participation.level_counts[level_key] == 0:
-                    del participation.level_counts[level_key]
-                participation.last_participation_date = participation.second_last_participation_date
-            else:
+
+            lesson = Lesson.objects.filter(id=lesson_id).first()
+
+            if not lesson:
+                return Response(
+                    {"detail": "レッスンが存在しません"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            # permission
+            if lesson.club.owner_id != request.user.id:
+                return Response(
+                    {"detail": "許可されていません"},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+            members = Member.objects.filter(
+                id__in=member_ids,
+                club=lesson.club,
+            )
+
+            if not members.exists():
+                return Response(
+                    {"detail": "メンバーが存在しません"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            today = timezone.localtime(timezone.now()).date()
+
+            try:
+                milestones = lesson.club.level_milestones or {}
+
+                if isinstance(milestones, str):
+                    milestones = json.loads(milestones)
+
+            except Exception:
+                milestones = {}
+
+
+            leveled_up_members = []
+            created_members = []
+
+            updated_members = []
+
+            for member in members:
+
+                participation, created = Participation.objects.get_or_create(
+                    member=member,
+                    lesson=lesson,
+                    defaults={
+                        "total_count": 0,
+                        "monthly_count": 0,
+                        "level_counts": {},
+                    }
+                )
+
+
+                # already marked today
+                if participation.last_participation_date == today:
+                    stats = self.get_member_stats(member)
+
+                    updated_members.append({
+                        "id": member.id,
+                        **stats,
+                        "level": member.level,
+                    })
+
+                    continue
+
+
+                if participation.level_counts is None:
+                    participation.level_counts = {}
+
+
+                current_level = member.level
+                level_key = str(current_level)
+
+
                 participation.total_count += 1
                 participation.monthly_count += 1
-                participation.level_counts[level_key] = participation.level_counts.get(level_key, 0) + 1
-                if participation.second_last_participation_date != participation.last_participation_date:
-                    participation.second_last_participation_date = participation.last_participation_date
+
+                participation.level_counts[level_key] = (
+                    participation.level_counts.get(level_key, 0) + 1
+                )
+
+
                 participation.last_participation_date = today
 
-            participation.save()
-
-            club = member.club
-            try:
-                milestones = club.level_milestones or {}
-                if isinstance(milestones, str):
-                    milestones = json.loads(milestones)
-            except Exception:
-                milestones = {}
-
-            current_level_str = str(member.level)
-            next_level = member.level + 1
-            next_level_str = str(next_level)
-
-            level_totals = get_level_participation(member)
-            total_for_current_level = level_totals.get(member.level, 0)
-            required = milestones.get(str(member.level))
-            if required and total_for_current_level >= required:
-                member.level += 1
-                member.save()
+                participation.save()
 
 
-        else:
-            participation = Participation.objects.create(
-                member=member,
-                lesson=lesson,
-                total_count=1,
-                monthly_count=1,
-                level_counts={level_key: 1},
-                last_participation_date=today,
-                second_last_participation_date=yesterday
+                created_members.append(member.id)
+
+
+                # -------------------------
+                # LEVEL CHECK
+                # -------------------------
+
+                level_totals = get_level_participation(member)
+
+                total_for_current_level = level_totals.get(
+                    member.level,
+                    0
+                )
+
+                required = milestones.get(
+                    str(member.level)
+                )
+
+
+                if required and total_for_current_level >= required:
+
+                    member.level += 1
+                    member.save()
+
+                    leveled_up_members.append({
+                        "member_id": member.id,
+                        "new_level": member.level,
+                    })
+                
+                stats = self.get_member_stats(member)
+
+                updated_members.append({
+                    "id": member.id,
+                    **stats,
+                    "level": member.level,
+                })
+
+
+            return Response(
+                {
+                    "created": created_members,
+                    "level_ups": leveled_up_members,
+                    "updated_members": updated_members,
+                },
+                status=status.HTTP_201_CREATED
             )
-          
-
-            club = member.club
-
-            try:
-                milestones = club.level_milestones or {}
-                if isinstance(milestones, str):
-                    milestones = json.loads(milestones)
-            except Exception:
-                milestones = {}
-
-            current_level_str = str(member.level)
-            next_level = member.level + 1
-            next_level_str = str(next_level)
-
-            level_totals = get_level_participation(member)
-            total_for_current_level = level_totals.get(member.level, 0)
-
-            required = milestones.get(current_level_str)
-
-            if required and total_for_current_level >= required:
-                member.level = next_level
-                member.save()
-
-        serializer = ParticipationSerializer(participation)
-
-        response_data = serializer.data   
-        response_data["member_data"] = {
-            "milestones": milestones,
-            "current_level": member.level,
-            "current_count": total_for_current_level,
-            "required_for_next_level": required,
-            "level_totals": level_totals,
-            "level_up": bool(required and total_for_current_level >= required),
-        }
-        return Response(response_data, status=status.HTTP_200_OK)
 
 
 class ClubViewSet(viewsets.ModelViewSet):
@@ -1190,6 +1429,25 @@ class ClubViewSet(viewsets.ModelViewSet):
 
         serializer = self.get_serializer(club, context={"request": request})
         return Response(serializer.data)
+
+    @action(detail=True, methods=["post"], url_path="pricing_preview")
+    def pricing_preview(self, request, pk=None):
+    
+        club = self.get_object()
+    
+        preview_member = PreviewMember(
+            gender=request.data.get("gender"),
+            age=request.data.get("age"),
+            family_count=request.data.get("family_count", 0),
+        )
+    
+        data = build_pricing_map(
+            club,
+            request.user if request.user.is_authenticated else None,
+            preview_member=preview_member,
+        )
+
+        return Response(data[-1])
 
     @action(detail=True, methods=["get"])
     def pricing_map(self, request, pk=None):

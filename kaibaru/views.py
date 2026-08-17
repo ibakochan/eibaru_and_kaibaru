@@ -3,7 +3,7 @@ from django.views import View
 from allauth.socialaccount.models import SocialAccount
 from django.http import HttpResponseForbidden  
 from django.shortcuts import get_object_or_404
-from .models import Club, Participation, Member, JoinRequest
+from .models import Club, Participation, Member
 from django.shortcuts import redirect
 from urllib.parse import urlencode
 from urllib.parse import quote
@@ -28,6 +28,15 @@ from .utils import add_one_month
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
 import json
+
+from django.contrib.auth.decorators import login_required
+from django.views.decorators.http import require_POST
+from django.http import JsonResponse
+
+from .models import Invoice
+from .service_cash_invoice_payment import (
+    BulkCashInvoicePaymentService,
+)
 
 logger = logging.getLogger(__name__)
  
@@ -122,22 +131,7 @@ def update_club_billing_settings(request, club_id):
         "joining_fee": club.joining_fee,
     })
 
-@login_required
-@require_POST
-def create_join_request(request, club_subdomain):
-    club = get_object_or_404(Club, subdomain=club_subdomain, is_deleted=False)
-    
-    join_request, created = JoinRequest.objects.get_or_create(
-        user=request.user,
-        club=club,
-        defaults={"status": JoinRequest.Status.PENDING},
-    )
-    
-    return JsonResponse({
-        "id": join_request.id,
-        "status": join_request.status,
-        "created": created
-    })
+
 
 
 
@@ -186,4 +180,51 @@ class KaibaruPageView(View):
 
 
 
+
+@login_required
+@require_POST
+def bulk_mark_cash_invoices_paid(request):
+
+    data = json.loads(request.body)
+
+    invoice_ids = data.get("invoice_ids", [])
+
+
+    if not invoice_ids:
+        return JsonResponse(
+            {
+                "error": "No invoices selected"
+            },
+            status=400
+        )
+
+
+    invoices = (
+        Invoice.objects
+        .filter(
+            id__in=invoice_ids,
+            club__owner=request.user,
+            status="open",
+            subscription__billing_method__in=[
+                "cash",
+                "manual",
+                "bank_transfer",
+            ],
+        )
+        .select_related(
+            "subscription",
+            "club",
+        )
+    )
+
+
+    result = (
+        BulkCashInvoicePaymentService
+        .mark_paid_bulk(
+            invoices=invoices
+        )
+    )
+
+
+    return JsonResponse(result)
 

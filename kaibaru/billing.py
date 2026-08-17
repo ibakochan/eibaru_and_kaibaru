@@ -102,16 +102,7 @@ def get_next_billing_cycle_anchor(today, anchor_day):
 
 
 
-def get_cancel_quantity_action(current_qty):
-    """
-    Returns:
-        ("delete", None)
-        ("modify", new_qty)
-    """
-    if current_qty <= 1:
-        return ("delete", None)
 
-    return ("modify", current_qty - 1)
 
 
 
@@ -148,20 +139,7 @@ def get_cancel_success_message(subscription):
 
 
 
-def get_resume_item_action(existing_item):
-    """
-    Returns:
-        ("modify", stripe_item_id, new_qty)
-        ("create", None, 1)
-    """
-    if existing_item:
-        return (
-            "modify",
-            existing_item["id"],
-            existing_item["quantity"] + 1,
-        )
 
-    return ("create", None, 1)
 
 
 def should_charge_resume_next_month(today, subscription, item):

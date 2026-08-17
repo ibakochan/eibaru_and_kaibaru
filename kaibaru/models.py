@@ -221,6 +221,11 @@ class MembershipPlan(models.Model):
     is_deleted = models.BooleanField(default=False)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
+    apply_current_price_to_existing = models.BooleanField(
+        default=False,
+        help_text="If enabled, existing members will be charged the current plan price instead of their subscription price."
+    )
+
 
 
     
@@ -325,6 +330,8 @@ class Member(models.Model):
     def __str__(self):
         return f"{self.full_name} ({self.club.subdomain})"
 
+
+
 class OneTimeProduct(models.Model):
     club = models.ForeignKey(Club, on_delete=models.CASCADE)
     name = models.CharField(max_length=100)
@@ -360,12 +367,23 @@ class Subscription(models.Model):
     owner = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="subscriptions")
     club = models.ForeignKey(Club, on_delete=models.CASCADE)
 
-    stripe_subscription_id = models.CharField(max_length=255, unique=True)
+    stripe_subscription_id = models.CharField(max_length=255, unique=True, null=True, blank=True)
 
     BILLING_MODE_CHOICES = [
         ("monthly", "Fixed monthly"),
         ("regular", "Regular"),
     ]
+
+    billing_method = models.CharField(
+        max_length=20,
+        choices=[
+            ("stripe", "Stripe"),
+            ("cash", "Cash"),
+            ("bank_transfer", "Bank transfer"),
+            ("manual", "Manual"),
+        ],
+        default="stripe"
+    )
 
     billing_mode = models.CharField(
         max_length=20,
@@ -404,6 +422,8 @@ class Subscription(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     billing_lock_until = models.DateTimeField(null=True, blank=True)
+
+    needs_reconciliation = models.BooleanField(default=False)
     
 
 
@@ -411,7 +431,6 @@ class Subscription(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["owner", "club"],
-                condition=models.Q(status__in=["active", "trialing", "pending"]),
                 name="one_active_subscription_per_owner_club",
             )
         ]
@@ -447,20 +466,10 @@ class SubscriptionItem(models.Model):
 
     plan_change_locked = models.BooleanField(default=False)
 
-    quantity = models.PositiveIntegerField(default=1)
-
     created_at = models.DateTimeField(auto_now_add=True)
 
-    change_locked_until = models.DateTimeField(null=True, blank=True)
-    cancel_locked_until = models.DateTimeField(null=True, blank=True)
 
-    source_item = models.ForeignKey(
-        "self",
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="replacement_for"
-    )
+    source_item = models.ForeignKey("self", null=True, blank=True, on_delete=models.SET_NULL, related_name="replacement_for")
 
     class Meta:
         constraints = [
@@ -470,18 +479,115 @@ class SubscriptionItem(models.Model):
             )
         ]
 
+class SubscriptionMutation(models.Model):
+    class MutationType(models.TextChoices):
+        CANCEL = "cancel", "Cancel item"
+        RESUME = "resume", "Resume item"
+        CHANGE_PLAN = "change_plan", "Change plan"
+        CANCEL_CHANGE_PLAN = "cancel_change_plan", "Cancel plan change"
+        ADD_PLAN = "add_plan", "Add plan"
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        PROCESSING = "processing", "Processing"
+        SUCCEEDED = "succeeded", "Succeeded"
+        FAILED = "failed", "Failed"
+
+    class InvoiceStatus(models.TextChoices):
+        NOT_STARTED = "not_started", "Not started"
+        RETRY = "retry", "Retry required"
+        PAID = "paid", "Paid"
+        FAILED = "failed", "Failed"
+
+    subscription = models.ForeignKey(
+        "Subscription",
+        on_delete=models.CASCADE,
+        related_name="mutations"
+    )
+
+    item = models.ForeignKey(
+        "SubscriptionItem",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="mutations"
+    )
+
+    type = models.CharField(max_length=32, choices=MutationType.choices)
+
+    # 👇 this is the key part for change_plan
+    payload = models.JSONField(null=True, blank=True)
+
+    # optional safety/debugging
+    stripe_request_id = models.CharField(max_length=255, null=True, blank=True)
+
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True
+    )
+
+    invoice_status = models.CharField(
+        max_length=20,
+        choices=InvoiceStatus.choices,
+        null=True,
+        blank=True,
+        default=None,
+        db_index=True,
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    processed_at = models.DateTimeField(null=True, blank=True)
+
+    can_resume_until = models.DateTimeField(null=True, blank=True)
+
+    secondary_mutation_blocked_until = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["subscription", "status"]),
+            models.Index(fields=["created_at"]),
+        ]
 
 
 class Invoice(models.Model):
 
-    member = models.ForeignKey(Member, on_delete=models.CASCADE)
     club = models.ForeignKey(Club, on_delete=models.CASCADE)
+
+    mutation = models.ForeignKey(
+        SubscriptionMutation,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="invoices"
+    )
+
+
+    payer = models.ForeignKey(
+        CustomUser,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL
+    )
+
+    payer_name = models.CharField(
+        max_length=200,
+        blank=True,
+        null=True
+    )
+
+    payer_email = models.EmailField(
+        blank=True,
+        null=True
+    )
 
     subscription = models.ForeignKey(
         Subscription,
         on_delete=models.SET_NULL,
         null=True,
-        blank=True
+        blank=True,
+        related_name="invoices"
     )
 
     STATUS_CHOICES = [
@@ -496,7 +602,7 @@ class Invoice(models.Model):
     amount_due = models.IntegerField()
     amount_paid = models.IntegerField(default=0)
 
-    number = models.CharField(max_length=50, unique=True, blank=True)
+    number = models.CharField(max_length=50, unique=True, blank=True, null=True)
 
     currency = models.CharField(max_length=10, default="jpy")
 
@@ -506,12 +612,44 @@ class Invoice(models.Model):
 
     issued_at = models.DateTimeField(auto_now_add=True)
 
+    billing_reason = models.CharField(
+        max_length=50,
+        choices=[
+            ("initial_subscription", "Initial subscription"),
+            ("subscription_cycle", "Subscription cycle"),
+            ("add_plan", "Add plan"),
+        ],
+        null=True,
+        blank=True,
+    )
+
+    billing_cycle_key = models.CharField(
+        max_length=50,
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["subscription", "billing_cycle_key"],
+                name="unique_subscription_billing_cycle",
+            ),
+        ]
+
 class InvoiceItem(models.Model):
 
     invoice = models.ForeignKey(
         Invoice,
         on_delete=models.CASCADE,
         related_name="items"
+    )
+
+    member = models.ForeignKey(
+        Member,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True
     )
 
     description = models.CharField(max_length=255)
@@ -521,6 +659,8 @@ class InvoiceItem(models.Model):
     quantity = models.PositiveIntegerField(default=1)
 
     created_at = models.DateTimeField(auto_now_add=True)
+
+
 
 class Payment(models.Model):
 
@@ -538,7 +678,6 @@ class Payment(models.Model):
         ("refunded","Refunded"),
     ]
 
-    member = models.ForeignKey(Member, on_delete=models.CASCADE)
     club = models.ForeignKey(Club, on_delete=models.CASCADE)
 
     invoice = models.ForeignKey(
@@ -598,7 +737,6 @@ class PaymentMethod(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["member"],
-                condition=models.Q(is_default=True),
                 name="one_default_payment_method_per_member"
             )
         ]
@@ -671,6 +809,12 @@ class JoinRequest(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
 
+    already_subscribed_plans = models.ManyToManyField(
+        MembershipPlan,
+        blank=True,
+        related_name="legacy_join_requests",
+    )
+
     class Meta:
         unique_together = ("user", "club")
         indexes = [
@@ -684,7 +828,35 @@ class JoinRequest(models.Model):
 
 class StripeWebhookEvent(models.Model):
     event_id = models.CharField(max_length=255, unique=True)
+    STATUS_CHOICES = [
+        ("processing", "Processing"),
+        ("succeeded", "Succeeded"),
+        ("failed", "Failed"),
+    ]
+
+    stripe_subscription_id = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True
+    )
+
+    needs_reconciliation = models.BooleanField(default=False)
+
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="processing",
+    )
+
+    error = models.TextField(
+        null=True,
+        blank=True,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
+    processed_at = models.DateTimeField(
+        null=True,
+        blank=True
+    )
 
 
 
@@ -773,7 +945,7 @@ class MemberPricingAdjustment(models.Model):
 
     value = models.IntegerField()
 
-    reason = models.TextField(blank=True)  # 👈 your "note"
+    reason = models.TextField(blank=True)  
 
     active = models.BooleanField(default=True)
 

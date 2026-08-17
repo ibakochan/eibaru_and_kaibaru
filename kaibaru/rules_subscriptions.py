@@ -4,7 +4,50 @@ from django.db.models import Q
 from django.utils import timezone
 from django.core.exceptions import ValidationError
 
-from .models import SubscriptionItem, MembershipPlan
+from .models import SubscriptionItem, MembershipPlan, SubscriptionMutation
+
+
+def validate_plan_set(plan_ids, club):
+    """
+    Validate a complete set of plans that will exist together
+    on one subscription.
+
+    Used for:
+    - new subscriptions
+    - legacy JoinRequest imports
+    - potentially other subscription creation flows
+    """
+
+    plan_ids = set(plan_ids)
+
+    if not plan_ids:
+        return
+
+    plans = MembershipPlan.objects.filter(
+        id__in=plan_ids,
+        club=club,
+        is_deleted=False,
+    ).select_related("group")
+
+    plans_by_id = {plan.id: plan for plan in plans}
+
+    if len(plans_by_id) != len(plan_ids):
+        raise ValidationError(
+            "One or more plans are invalid for this club."
+        )
+
+    bundle_map = get_bundle_map(club)
+
+    validate_group_rule(
+        plan_ids,
+        plans_by_id,
+    )
+
+    validate_bundle_rule(
+        plan_ids,
+        bundle_map,
+    )
+
 
 def active_items_q(now=None):
     now = now or timezone.now()
@@ -118,7 +161,12 @@ def validate_bundle_rule(active_plan_ids, bundle_map):
         )
 
 
-def validate_subscription_transition(subscription, member, new_plan, old_plan_id=None):
+def validate_subscription_transition(
+    subscription,
+    member,
+    new_plan,
+    old_plan_id=None,
+):
     now = timezone.now()
 
     items = SubscriptionItem.objects.filter(
@@ -128,26 +176,20 @@ def validate_subscription_transition(subscription, member, new_plan, old_plan_id
         active_items_q(now)
     ).select_related("plan")
 
-    active_plan_ids = {i.plan_id for i in items}
+    active_plan_ids = {
+        i.plan_id
+        for i in items
+    }
 
-    # simulate transition (old item removed, new added)
     if old_plan_id:
         active_plan_ids.discard(old_plan_id)
 
     active_plan_ids.add(new_plan.id)
 
-    plans = MembershipPlan.objects.filter(
-        id__in=active_plan_ids
-    ).select_related("group")
-
-    plans_by_id = {p.id: p for p in plans}
-
-    bundle_map = get_bundle_map(new_plan.club)
-
-    validate_group_rule(active_plan_ids, plans_by_id)
-    validate_bundle_rule(active_plan_ids, bundle_map)
-
-
+    validate_plan_set(
+        plan_ids=active_plan_ids,
+        club=new_plan.club,
+    )
 
 def validate_plan_change_window(today, subscription):
     """
@@ -162,15 +204,6 @@ def validate_plan_change_window(today, subscription):
 
     anchor_day = subscription.billing_anchor_day
     current_period_end = subscription.current_period_end
-
-    # Monthly billing processing lock
-    if (
-        subscription.billing_mode == "monthly"
-        and today.day > anchor_day
-        and current_period_end
-        and current_period_end.month == today.month
-    ):
-        return "請求処理中のため、この期間はプランの変更ができません。しばらくしてからお試しください。"
 
     # Near anchor block
     if is_near_anchor(today, anchor_day) or not is_valid_billing_day(today):
@@ -193,13 +226,58 @@ def is_near_anchor(today, anchor_day):
 
     return abs((today - anchor_date).days) <= 1
 
-def can_resume_subscription(item, now):
-    return item_state(item) == "grace"
 
-def assert_item_unlocked(item):
-    if item.plan_change_locked:
-        return JsonResponse(
-            {"error": "このプランは請求処理中のためロックされています。しばらくしてからもう一度お試しください。"},
-            status=409
+
+def can_resume_subscription(item, now):
+
+    if item_state(item) != "grace":
+        return False
+
+    cancel_mutation = (
+        SubscriptionMutation.objects
+        .filter(
+            item=item,
+            type=SubscriptionMutation.MutationType.CANCEL,
+            status=SubscriptionMutation.Status.SUCCEEDED,
         )
-    return None
+        .order_by("-processed_at")
+        .first()
+    )
+
+    if not cancel_mutation:
+        return True
+
+    if (
+        cancel_mutation.can_resume_until
+        and now > cancel_mutation.can_resume_until
+    ):
+        return False
+
+    return True
+
+
+def get_resume_error_message(item):
+    subscription = item.subscription
+
+    if subscription.cancel_at_period_end:
+        end_date = (
+            subscription.current_period_end.strftime("%Y/%m/%d")
+            if subscription.current_period_end
+            else "次回更新日"
+        )
+
+        return (
+            f"この契約は解約予定です。"
+            f"{end_date}以降に再度お申し込みください。"
+        )
+
+    if item.access_until:
+        end_date = item.access_until.strftime("%Y/%m/%d")
+
+        return (
+            f"このプランは再開可能期間を過ぎています。"
+            f"{end_date}までは利用できますが、"
+            f"終了後は再度お申し込みください。"
+        )
+
+    return "このプランは再開できません。"

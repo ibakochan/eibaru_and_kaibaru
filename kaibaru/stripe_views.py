@@ -18,21 +18,33 @@ from django.core.cache import cache
 from django.db import transaction
 logger = logging.getLogger(__name__)
 from .service_subscription import SubscriptionItemService
+from .service_subscription_cash import CashSubscriptionItemService
+
+from .service_mutations import MutationLockedError
+
+from .service_member_checkout import MemberSubscriptionCheckoutService
+
+from .service_cash_subscription import MemberCashSubscriptionService
+
+from .service_add_plan_cash import CashAddPlanService
 
 from .models import Club, Member, MembershipPlan, SubscriptionItem, Subscription, StripeCustomer
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
 from .stripe_service import get_or_create_stripe_customer
+from .service_add_plan import SubscriptionAddPlanService
+
+from .locks_and_reconciliation import subscription_lock, CacheLockError, StripeSubscriptionReconciler, CheckoutSubscriptionReconciler
+
+import urllib.parse
 
 from .billing import (
     get_next_month_start,
     get_next_billing_cycle_anchor,
-    get_cancel_quantity_action,
     should_set_monthly_resume_prevention,
     should_cancel_subscription,
     get_cancel_success_message,
-    get_resume_item_action,
     should_charge_resume_next_month,
     get_resume_charge_amount,
     get_resume_success_message,
@@ -50,7 +62,7 @@ from .rules_subscriptions import (
     is_near_anchor,
     can_resume_subscription,
     item_state,
-    assert_item_unlocked,
+    get_resume_error_message,
 )
 
 
@@ -65,6 +77,82 @@ from .discounts import (
     apply_joining_fee_discount,
     apply_subscription_discount,
 )
+
+
+@login_required
+@require_POST
+def reconcile_subscription_mutations_manual(request, subscription_id):
+
+    subscription = get_object_or_404(
+        Subscription,
+        id=subscription_id,
+        owner=request.user,
+    )
+
+    club = subscription.club
+
+    try:
+        with subscription_lock(subscription.id, timeout=300):
+
+            result = StripeSubscriptionReconciler.reconcile(
+                subscription=subscription,
+                club=club,
+            )
+
+    except CacheLockError:
+        return JsonResponse(
+            {
+                "error": "Subscription is currently being reconciled"
+            },
+            status=429
+        )
+
+    except Exception as e:
+        logger.exception(
+            "Manual mutation reconciliation failed subscription=%s",
+            subscription.id,
+        )
+
+        return JsonResponse(
+            {
+                "error": str(e)
+            },
+            status=500
+        )
+
+    return JsonResponse(
+        {
+            "success": True,
+            "subscription_id": subscription.id,
+            "result": result,
+        }
+    )
+
+@login_required
+@require_POST
+def reconcile_checkout_subscriptions_manual(request):
+
+    try:
+        CheckoutSubscriptionReconciler.reconcile_recent_checkouts()
+
+    except Exception as e:
+        logger.exception(
+            "Manual checkout reconciliation failed"
+        )
+
+        return JsonResponse(
+            {
+                "error": str(e)
+            },
+            status=500
+        )
+
+    return JsonResponse(
+        {
+            "success": True,
+            "message": "Checkout reconciliation completed"
+        }
+    )
 
 @require_POST
 @login_required
@@ -190,24 +278,18 @@ def change_member_plan(request, item_id, new_plan_id):
     if state == "expired":
         return JsonResponse({"error": "このプランは変更できません（有効期限切れ）"}, status=400)
 
-    error_response = assert_item_unlocked(item)
-    if error_response:
-        return error_response
+
 
     now = timezone.now()
-    if item.change_locked_until and item.change_locked_until > now:
-        return JsonResponse(
-            {"error": "プラン変更は次の請求期間までロックされています"},
-            status=409
-        )
 
-
-
-    lock_key = f"change_item:{item.id}:{new_plan_id}"
-    if not cache.add(lock_key, True, timeout=10):
-        return JsonResponse({"error": "Please wait"}, status=429)
 
     subscription = item.subscription
+
+    if subscription.billing_method != "stripe":
+        return JsonResponse(
+            {"error": "Stripe subscription must use stripe operation"},
+            status=400
+        )
 
     club = subscription.club
     today = timezone.localtime().date()
@@ -220,6 +302,7 @@ def change_member_plan(request, item_id, new_plan_id):
         MembershipPlan,
         id=new_plan_id,
         club=club,
+        is_deleted=False,
         active=True
     )
 
@@ -244,12 +327,32 @@ def change_member_plan(request, item_id, new_plan_id):
 
     old_item_is_grace = (item_state(item) == "grace")
     try:
-        new_item = SubscriptionItemService.change_plan(
-            item=item,
-            new_plan=new_plan,
-            subscription=subscription,
-            club=club,
-            old_item_is_grace=old_item_is_grace
+        # ===============================
+        # 🔒 SINGLE SOURCE OF TRUTH LOCK
+        # ===============================
+        with subscription_lock(subscription.id, timeout=300):
+
+            new_item = SubscriptionItemService.change_plan(
+                item=item,
+                new_plan=new_plan,
+                subscription=subscription,
+                club=club,
+                old_item_is_grace=old_item_is_grace
+            )
+
+    except CacheLockError:
+        return JsonResponse(
+            {"error": "前回のリクエストがまだ処理中です。数分後に再度お試しください。"},
+            status=429
+        )
+    
+    except MutationLockedError as e:
+        return JsonResponse(
+            {
+                "error": str(e),
+                "blocked_until": e.blocked_until.isoformat() if e.blocked_until else None
+            },
+            status=409
         )
 
     except Exception as e:
@@ -278,25 +381,23 @@ def cancel_member_subscription(request, item_id):
     if state in ("grace", "expired"):
         return JsonResponse({"error": "このプランはすでにキャンセルされています"}, status=400)
 
-    error_response = assert_item_unlocked(item)
-    if error_response:
-        return error_response
+
 
     now = timezone.now()
-    if item.cancel_locked_until and item.cancel_locked_until > now:
-        return JsonResponse(
-            {"error": "解約は次の請求期間までロックされています"},
-            status=409
-        )
+
 
     if item.deleted_at is not None:
         return JsonResponse({"error": "このプランはすでに解約されています"}, status=400)
 
-    lock_key = f"cancel_item:{item.id}"
-    if not cache.add(lock_key, True, timeout=10):
-        return JsonResponse({"error": "Please wait"}, status=429)
+
 
     subscription = item.subscription
+
+    if subscription.billing_method != "stripe":
+        return JsonResponse(
+            {"error": "Stripe subscription must use stripe operation"},
+            status=400
+        )
 
     club = subscription.club
     today = timezone.localtime().date()
@@ -305,30 +406,40 @@ def cancel_member_subscription(request, item_id):
     if error:
         return JsonResponse({"error": error}, status=400)
 
-    try:
-        SubscriptionItemService.cancel_item(
-            item=item,
-            subscription=subscription,
-            club=club
-        )
 
+
+    try:
+        with subscription_lock(subscription.id, timeout=300):
+
+            SubscriptionItemService.cancel_item(
+                item=item,
+                subscription=subscription,
+                club=club
+            )
+
+    except CacheLockError:
+        return JsonResponse(
+            {"error": "前回のリクエストがまだ処理中です。数分後に再度お試しください。"},
+            status=429
+        )
+    
+    except MutationLockedError as e:
+        return JsonResponse(
+            {
+                "error": str(e),
+                "blocked_until": e.blocked_until.isoformat() if e.blocked_until else None
+            },
+            status=409
+        )
+    
     except Exception as e:
         logger.error(f"Stripe delete failed for item {item.id}: {e}")
         return JsonResponse({"error": str(e)}, status=500)
-
-    remaining_items = subscription.items.filter(
-        deleted_at__isnull=True
-    ).exclude(id=item.id)
-
-    if should_cancel_subscription(remaining_items.exists()):
-        subscription.cancel_at_period_end = True
-        subscription.save(update_fields=["cancel_at_period_end"])
 
     return JsonResponse({
         "success": True,
         "message": get_cancel_success_message(subscription)
     })
-
 
 
 
@@ -348,19 +459,15 @@ def resume_member_subscription(request, item_id):
     if state == "expired":
         return JsonResponse({"error": "このプランは変更できません（有効期限切れ）"}, status=400)
     
-    error_response = assert_item_unlocked(item)
-    if error_response:
-        return error_response
 
-    lock_key = f"resume_item:{item.id}"
-    if not cache.add(lock_key, True, timeout=10):
-        return JsonResponse({"error": "Please wait"}, status=429)
+
+
 
     now = timezone.now()
 
     if not can_resume_subscription(item, now):
         return JsonResponse(
-            {"error": "このプランは再開できません（再開可能期間を過ぎています）"},
+            {"error": get_resume_error_message(item)},
             status=400
         )
 
@@ -371,6 +478,13 @@ def resume_member_subscription(request, item_id):
         )
 
     subscription = item.subscription
+
+    if subscription.billing_method != "stripe":
+        return JsonResponse(
+            {"error": "Stripe subscription must use stripe operation"},
+            status=400
+        )
+
     club = subscription.club
     today = timezone.localtime().date()
 
@@ -388,68 +502,39 @@ def resume_member_subscription(request, item_id):
     )
 
     try:
-        stripe_sub = stripe.Subscription.retrieve(
-            subscription.stripe_subscription_id,
-            stripe_account=club.stripe_account_id,
-            expand=["items.data"],
-        )
+        with subscription_lock(subscription.id, timeout=300):
 
-        stripe_items = stripe_sub["items"]["data"]
-
-        existing_item = next(
-            (
-                i for i in stripe_items
-                if i["price"]["id"] == item.stripe_price_id_at_subscription
-            ),
-            None
-        )
-
-        action, stripe_item_id, qty = get_resume_item_action(existing_item)
-
-        if action == "modify":
-            stripe.SubscriptionItem.modify(
-                stripe_item_id,
-                quantity=qty,
-                proration_behavior="none",
-                stripe_account=club.stripe_account_id,
+            resumed_item = SubscriptionItemService.resume_item(
+                item=item,
+                subscription=subscription,
+                club=club
             )
 
-        else:
-            new_item = stripe.SubscriptionItem.create(
-                subscription=stripe_sub["id"],
-                price=item.stripe_price_id_at_subscription,
-                quantity=1,
-                proration_behavior="none",
-                stripe_account=club.stripe_account_id,
-            )
-            stripe_item_id = new_item["id"]
+            
 
-
-
-        item.deleted_at = None
-        item.access_until = None
-        item.stripe_subscription_item_id = stripe_item_id
-
-        item.save(update_fields=[
-            "stripe_subscription_item_id",
-            "deleted_at",
-            "access_until",
-        ])
+    except CacheLockError:
+        return JsonResponse(
+            {"error": "前回のリクエストがまだ処理中です。数分後に再度お試しください。"},
+            status=429
+        )
+    
+    except MutationLockedError as e:
+        return JsonResponse(
+            {
+                "error": str(e),
+                "blocked_until": e.blocked_until.isoformat() if e.blocked_until else None
+            },
+            status=409
+        )
 
     except Exception as e:
         logger.error(f"Failed to resume Stripe item {item.id}: {e}")
         return JsonResponse({"error": str(e)}, status=500)
 
-    if subscription.current_period_end:
-        item.cancel_locked_until = subscription.current_period_end
-        item.save(update_fields=["cancel_locked_until"])
-
-    subscription.cancel_at_period_end = False
-    subscription.save(update_fields=["cancel_at_period_end"])
-
     return JsonResponse({
         "success": True,
-        "message": get_resume_success_message()
+        "message": get_resume_success_message(),
+        "new_item_id": resumed_item.id
     })
 
 
@@ -468,108 +553,56 @@ def cancel_member_plan_change(request, new_item_id):
     if not new_item.source_item:
         return JsonResponse({"error": "このプランは変更対象ではありません"}, status=400)
 
-    lock_key = f"cancel_change:{new_item.id}"
-    if not cache.add(lock_key, True, timeout=10):
-        return JsonResponse({"error": "Please wait"}, status=429)
+
 
     old_item = new_item.source_item
 
-    error_response = assert_item_unlocked(old_item)
-    if error_response:
-        return error_response
+
    
     subscription = old_item.subscription
+
+    if subscription.billing_method != "stripe":
+        return JsonResponse(
+            {"error": "Stripe subscription must use stripe operation"},
+            status=400
+        )
 
     club = subscription.club
 
     old_plan_deleted = old_item.plan and old_item.plan.deleted_at is not None
 
     try:
-        stripe_sub = stripe.Subscription.retrieve(
-            subscription.stripe_subscription_id,
-            stripe_account=club.stripe_account_id,
-            expand=["items.data"]
-        )
-
-        # =========================================================
-        # 1. REMOVE NEW STRIPE ITEM (decrement or delete)
-        # =========================================================
-        new_stripe_item = next(
-            (i for i in stripe_sub["items"]["data"]
-             if i["id"] == new_item.stripe_subscription_item_id),
-            None
-        )
-
-        if new_stripe_item:
-            qty = new_stripe_item["quantity"]
-
-            if qty > 1:
-                stripe.SubscriptionItem.modify(
-                    new_stripe_item["id"],
-                    quantity=qty - 1,
-                    proration_behavior="none",
-                    stripe_account=club.stripe_account_id
-                )
-            else:
-                stripe.SubscriptionItem.delete(
-                    new_stripe_item["id"],
-                    proration_behavior="none",
-                    stripe_account=club.stripe_account_id
-                )
-
-        # =========================================================
-        # 2. RESTORE OLD STRIPE ITEM safely
-        # =========================================================
-        if not old_plan_deleted:
-            old_stripe_item = next(
-                (i for i in stripe_sub["items"]["data"]
-                 if i["price"]["id"] == old_item.plan.stripe_price_id),
-                None
+        with subscription_lock(subscription.id, timeout=300):
+            SubscriptionItemService.cancel_change(
+                new_item=new_item,
+                old_item=old_item,
+                subscription=subscription,
+                club=club,
+                old_plan_deleted=old_plan_deleted,
             )
 
-            if old_stripe_item:
-                stripe.SubscriptionItem.modify(
-                    old_stripe_item["id"],
-                    quantity=old_stripe_item["quantity"] + 1,
-                    proration_behavior="none",
-                    stripe_account=club.stripe_account_id
-                )
-                restored_id = old_stripe_item["id"]
-            else:
-                created = stripe.SubscriptionItem.create(
-                    subscription=subscription.stripe_subscription_id,
-                    price=old_item.plan.stripe_price_id,
-                    quantity=old_item.quantity or 1,
-                    proration_behavior="none",
-                    stripe_account=club.stripe_account_id
-                )
-                restored_id = created["id"]
+    except CacheLockError:
+        return JsonResponse(
+            {
+                "error": "前回のリクエストがまだ処理中です。数分後に再度お試しください。"
+            },
+            status=429
+        )
 
-            old_item.stripe_subscription_item_id = restored_id
-
-            # =========================================================
-            # 3. DB restore old item
-            # =========================================================
-            old_item.deleted_at = None
-            old_item.access_until = None
-            old_item.save(update_fields=[
-                "deleted_at",
-                "access_until",
-                "stripe_subscription_item_id"
-            ])
-
-        # =========================================================
-        # 4. remove scheduled item
-        # =========================================================
-        new_item.delete()
+    except MutationLockedError as e:
+        return JsonResponse(
+            {
+                "error": str(e),
+                "blocked_until": e.blocked_until.isoformat() if e.blocked_until else None
+            },
+            status=409
+        )
 
     except Exception as e:
         logger.error(f"Cancel plan change failed {new_item.id}: {e}")
         return JsonResponse({"error": str(e)}, status=500)
 
-    if subscription.current_period_end:
-        old_item.change_locked_until = subscription.current_period_end
-        old_item.save(update_fields=["change_locked_until"])
+
 
     return JsonResponse({
         "success": True,
@@ -578,7 +611,469 @@ def cancel_member_plan_change(request, new_item_id):
 
 
 
-import urllib.parse
+@login_required
+@require_POST
+def change_cash_member_plan(request, item_id, new_plan_id):
+
+    item = get_object_or_404(
+        SubscriptionItem,
+        id=item_id,
+        subscription__owner=request.user
+    )
+
+
+    state = item_state(item)
+
+    if state == "expired":
+        return JsonResponse(
+            {"error": "このプランは変更できません（有効期限切れ）"},
+            status=400
+        )
+
+
+    subscription = item.subscription
+
+
+    if subscription.billing_method == "stripe":
+        return JsonResponse(
+            {"error": "Non Stripe subscription can't use Stripe operation"},
+            status=400
+        )
+
+
+    club = subscription.club
+    today = timezone.localtime().date()
+
+
+    error = validate_plan_change_window(
+        today=today,
+        subscription=subscription,
+    )
+
+    if error:
+        return JsonResponse(
+            {"error": error},
+            status=400
+        )
+
+
+    new_plan = get_object_or_404(
+        MembershipPlan,
+        id=new_plan_id,
+        club=club,
+        is_deleted=False,
+        active=True
+    )
+
+
+    exists = SubscriptionItem.objects.filter(
+        subscription=subscription,
+        member=item.member,
+        plan=new_plan
+    ).filter(
+        active_items_q()
+    ).exists()
+
+
+    if exists:
+        return JsonResponse(
+            {"error": "このプランはすでに契約中です"},
+            status=400
+        )
+
+
+    if item.plan_id == new_plan.id:
+        return JsonResponse(
+            {"error": "同じプランには変更できません"},
+            status=400
+        )
+
+
+    validate_subscription_transition(
+        subscription=subscription,
+        member=item.member,
+        new_plan=new_plan,
+        old_plan_id=item.plan_id,
+    )
+
+
+    old_item_is_grace = (
+        item_state(item) == "grace"
+    )
+
+
+    try:
+
+        with subscription_lock(
+            subscription.id,
+            timeout=300
+        ):
+
+            new_item = CashSubscriptionItemService.change_plan(
+                item=item,
+                new_plan=new_plan,
+                subscription=subscription,
+                club=club,
+                old_item_is_grace=old_item_is_grace,
+            )
+
+
+    except CacheLockError:
+
+        return JsonResponse(
+            {
+                "error":
+                "前回のリクエストがまだ処理中です。数分後に再度お試しください。"
+            },
+            status=429
+        )
+
+
+    except Exception as e:
+
+        logger.error(
+            f"Cash plan change failed for item {item.id}: {e}"
+        )
+
+        return JsonResponse(
+            {"error": str(e)},
+            status=500
+        )
+
+
+    return JsonResponse(
+        {
+            "success": True,
+            "message": "プラン変更を予約しました",
+            "new_item_id": new_item.id,
+        }
+    )
+
+
+
+@login_required
+@require_POST
+def cancel_cash_member_subscription(request, item_id):
+
+    item = get_object_or_404(
+        SubscriptionItem,
+        id=item_id,
+        subscription__owner=request.user
+    )
+
+
+    state = item_state(item)
+
+    if state in ("grace", "expired"):
+        return JsonResponse(
+            {
+                "error":
+                "このプランはすでにキャンセルされています"
+            },
+            status=400
+        )
+
+
+    if item.deleted_at is not None:
+        return JsonResponse(
+            {
+                "error":
+                "このプランはすでに解約されています"
+            },
+            status=400
+        )
+
+
+    subscription = item.subscription
+
+
+    if subscription.billing_method == "stripe":
+        return JsonResponse(
+            {"error": "Non Stripe subscription can't use Stripe operation"},
+            status=400
+        )
+
+
+    club = subscription.club
+    today = timezone.localtime().date()
+
+
+    error = validate_plan_change_window(
+        today=today,
+        subscription=subscription,
+    )
+
+    if error:
+        return JsonResponse(
+            {"error": error},
+            status=400
+        )
+
+
+    try:
+
+        with subscription_lock(
+            subscription.id,
+            timeout=300
+        ):
+
+            CashSubscriptionItemService.cancel_item(
+                item=item,
+                subscription=subscription,
+                club=club,
+            )
+
+
+    except CacheLockError:
+
+        return JsonResponse(
+            {
+                "error":
+                "前回のリクエストがまだ処理中です。数分後に再度お試しください。"
+            },
+            status=429
+        )
+
+
+    except Exception as e:
+
+        logger.error(
+            f"Cash delete failed for item {item.id}: {e}"
+        )
+
+        return JsonResponse(
+            {"error": str(e)},
+            status=500
+        )
+
+
+    return JsonResponse(
+        {
+            "success": True,
+            "message": get_cancel_success_message(subscription),
+        }
+    )
+
+
+
+@login_required
+@require_POST
+def resume_cash_member_subscription(request, item_id):
+
+    item = get_object_or_404(
+        SubscriptionItem,
+        id=item_id,
+        subscription__owner=request.user
+    )
+
+
+    state = item_state(item)
+
+
+    if state == "expired":
+        return JsonResponse(
+            {
+                "error":
+                "このプランは変更できません（有効期限切れ）"
+            },
+            status=400
+        )
+
+
+    now = timezone.now()
+
+
+    if not can_resume_subscription(item, now):
+
+        return JsonResponse(
+            {
+                "error":
+                get_resume_error_message(item)
+            },
+            status=400
+        )
+
+
+    if item.deleted_at is None:
+
+        return JsonResponse(
+            {
+                "error":
+                "このプランは既に有効です"
+            },
+            status=400
+        )
+
+
+    subscription = item.subscription
+
+
+    if subscription.billing_method == "stripe":
+
+        return JsonResponse(
+            {"error": "Non Stripe subscription can't use Stripe operation"},
+            status=400
+        )
+
+
+    club = subscription.club
+    today = timezone.localtime().date()
+
+
+    error = validate_plan_change_window(
+        today=today,
+        subscription=subscription,
+    )
+
+
+    if error:
+        return JsonResponse(
+            {"error": error},
+            status=400
+        )
+
+
+    try:
+
+        with subscription_lock(
+            subscription.id,
+            timeout=300
+        ):
+
+            resumed_item = (
+                CashSubscriptionItemService.resume_item(
+                    item=item,
+                    subscription=subscription,
+                    club=club,
+                )
+            )
+
+
+    except CacheLockError:
+
+        return JsonResponse(
+            {
+                "error":
+                "前回のリクエストがまだ処理中です。数分後に再度お試しください。"
+            },
+            status=429
+        )
+
+
+    except Exception as e:
+
+        logger.error(
+            f"Failed to resume cash item {item.id}: {e}"
+        )
+
+        return JsonResponse(
+            {"error": str(e)},
+            status=500
+        )
+
+
+    return JsonResponse(
+        {
+            "success": True,
+            "message": get_resume_success_message(),
+            "new_item_id": resumed_item.id,
+        }
+    )
+
+
+
+@login_required
+@require_POST
+def cancel_cash_member_plan_change(request, new_item_id):
+
+    new_item = get_object_or_404(
+        SubscriptionItem,
+        id=new_item_id,
+        subscription__owner=request.user
+    )
+
+
+    if not new_item.source_item:
+
+        return JsonResponse(
+            {
+                "error":
+                "このプランは変更対象ではありません"
+            },
+            status=400
+        )
+
+
+    old_item = new_item.source_item
+
+
+    subscription = old_item.subscription
+
+
+    if subscription.billing_method == "stripe":
+
+        return JsonResponse(
+            {"error": "Non Stripe subscription can't use Stripe operation"},
+            status=400
+        )
+
+
+    club = subscription.club
+
+
+    old_plan_deleted = (
+        old_item.plan
+        and old_item.plan.deleted_at is not None
+    )
+
+
+    try:
+
+        with subscription_lock(
+            subscription.id,
+            timeout=300
+        ):
+
+            CashSubscriptionItemService.cancel_change(
+                new_item=new_item,
+                old_item=old_item,
+                subscription=subscription,
+                club=club,
+                old_plan_deleted=old_plan_deleted,
+            )
+
+
+    except CacheLockError:
+
+        return JsonResponse(
+            {
+                "error":
+                "前回のリクエストがまだ処理中です。数分後に再度お試しください。"
+            },
+            status=429
+        )
+
+
+    except Exception as e:
+
+        logger.error(
+            f"Cancel cash plan change failed {new_item.id}: {e}"
+        )
+
+        return JsonResponse(
+            {"error": str(e)},
+            status=500
+        )
+
+
+    return JsonResponse(
+        {
+            "success": True,
+            "message": "プラン変更を取り消しました"
+        }
+    )
+
+
 
 @login_required
 @require_POST
@@ -646,7 +1141,7 @@ def create_member_checkout_session(request, club_id, plan_id):
             status=400
         )
 
-    plan = get_object_or_404(MembershipPlan, id=plan_id, club=club, active=True)
+    plan = get_object_or_404(MembershipPlan, id=plan_id, club=club, is_deleted=False, active=True)
     if not plan.stripe_price_id:
         return JsonResponse({"error": "Plan not configured correctly"}, status=400)
 
@@ -678,8 +1173,18 @@ def create_member_checkout_session(request, club_id, plan_id):
     sub = Subscription.objects.filter(
         owner=member.owner,
         club=member.club,
-        status__in=["active", "trialing", "past_due", "incomplete", "pending"]
-    ).first()
+    ).order_by("-id").first()
+
+    ACTIVE_STATUSES = ["active", "trialing", "past_due", "incomplete", "pending"]
+    CANCELED_STATUSES = ["canceled"]
+
+    is_active_sub = sub and sub.status in ACTIVE_STATUSES
+    is_canceled_sub = sub and sub.status in CANCELED_STATUSES
+
+    if is_active_sub:
+        return JsonResponse({
+            "error": "もうすでに登録されています"
+        }, status=400)
 
     validate_subscription_transition(
         subscription=sub,
@@ -705,425 +1210,538 @@ def create_member_checkout_session(request, club_id, plan_id):
                 "error": "毎月2日〜27日のみ変更可能です。また、請求日の前後1日は変更できません。別の日にお試しください。"
             }, status=400)
 
-    # -------------------------
-    # CASE 1: Subscription exists → add item
-    # -------------------------
-    if sub:
-        lock_key = f"add_item:{member.id}:{plan.id}"
-        if not cache.add(lock_key, True, timeout=15):
-            return JsonResponse({"error": "Please wait"}, status=429)
-        
-        
-        stripe_customer_obj = get_or_create_stripe_customer(billing_user, club)
-    
-        # -------------------------
-        # REGULAR MODE
-        # -------------------------
-        if sub.billing_mode == "regular":
-    
-            
-
-
-            #yoyo
-            sub_data = stripe.Subscription.retrieve(
-                sub.stripe_subscription_id,
-                expand=["items.data"],
-                stripe_account=club.stripe_account_id
-            )
-        
-            # --- Check if the price already exists ---
-            existing_item = next(
-                (i for i in sub_data["items"]["data"]
-                 if i["price"]["id"] == plan.stripe_price_id),
-                None
-            )
-        
-            # --- If exists, modify (or increment quantity), else create new ---
-            if existing_item:
-                stripe_item_id = existing_item["id"]
-
-                stripe.SubscriptionItem.modify(
-                    stripe_item_id,
-                    quantity=existing_item["quantity"] + 1,
-                    proration_behavior="none",
-                    stripe_account=club.stripe_account_id
-                )
-
-            else:
-                # Create a new subscription item
-                stripe_item = stripe.SubscriptionItem.create(
-                    subscription=sub.stripe_subscription_id,
-                    price=plan.stripe_price_id,   # ✅ use SAME price always
-                    quantity=1,
-                    proration_behavior="none",
-                    stripe_account=club.stripe_account_id
-                )
-                stripe_item_id = stripe_item.id
-
-            if club.joining_fee > 0 and not member.has_been_charged_joining_fee:
-
-                final_amount = calculate_joining_fee(club, member)
-
-                if final_amount > 0:
-                    stripe.InvoiceItem.create(
-                        customer=stripe_customer_obj.stripe_customer_id,
-                        amount=final_amount,
-                        currency="jpy",
-                        description=f"{member.full_name} 入会金",
-                        metadata={
-                            "member_id": member.id,
-                            "club_id": club.id,
-                            "plan_id": plan.id,
-                            "type": "joining fee",
-                        },
-                        stripe_account=club.stripe_account_id
-                    )
-
-                member.has_been_charged_joining_fee = True
-                member.save(update_fields=["has_been_charged_joining_fee"])
-
-
-
-
-    
-            pricing = calculate_subscription_pricing(
-                club=club,
-                member=member,
-                plan=plan,
-                plan_price=plan.price,
-                today=today,
-                mode=sub.billing_mode,
-                anchor_day=sub.billing_anchor_day,
-            )
-
-            final_amount = pricing["final_amount"]
-            
-            # Charge for the remaining days until next anchor
-            if final_amount > 0:
-                stripe.InvoiceItem.create(
-                    customer=stripe_customer_obj.stripe_customer_id,
-                    amount=final_amount,
-                    currency="jpy",
-                    description=f"Prorated membership ({pricing['proration']['remaining_days']} days until next anchor)",
-                    metadata={
-                        "member_id": member.id,
-                        "club_id": club.id,
-                        "plan_id": plan.id,
-                        "type": "prorations",
-                    },
-                    stripe_account=club.stripe_account_id
-                )
-                            
-    
-    
-
-
-    
-        # -------------------------
-        # MONTHLY MODE
-        # -------------------------
-        else:
-
-            anchor_day = sub.billing_anchor_day
-    
-            # Disable Stripe proration
-            sub_data = stripe.Subscription.retrieve(
-                sub.stripe_subscription_id,
-                expand=["items.data"],
-                stripe_account=club.stripe_account_id
-            )
-        
-            # --- Check if the price already exists ---
-            existing_item = next(
-                (i for i in sub_data["items"]["data"]
-                 if i["price"]["id"] == plan.stripe_price_id),
-                None
-            )
-        
-            # --- If exists, modify (or increment quantity), else create new ---
-            if existing_item:
-                stripe_item_id = existing_item["id"]
-
-                stripe.SubscriptionItem.modify(
-                    stripe_item_id,
-                    quantity=existing_item["quantity"] + 1,
-                    proration_behavior="none",
-                    stripe_account=club.stripe_account_id
-                )
-            
-            else:
-                # Create a new subscription item
-                stripe_item = stripe.SubscriptionItem.create(
-                    subscription=sub.stripe_subscription_id,
-                    price=plan.stripe_price_id,   # ✅ use SAME price always
-                    quantity=1,
-                    proration_behavior="none",
-                    stripe_account=club.stripe_account_id
-                )
-                stripe_item_id = stripe_item.id
-
-            if club.joining_fee > 0 and not member.has_been_charged_joining_fee:
-
-                final_joining_amount = calculate_joining_fee(club, member)
-
-                if final_joining_amount > 0:
-                    stripe.InvoiceItem.create(
-                        customer=stripe_customer_obj.stripe_customer_id,
-                        amount=final_joining_amount,
-                        currency="jpy",
-                        description=f"{member.full_name} 入会金",
-                        metadata={
-                            "member_id": member.id,
-                            "club_id": club.id,
-                            "plan_id": plan.id,
-                            "type": "joining fee",
-                        },
-                        stripe_account=club.stripe_account_id
-                    )
-
-                member.has_been_charged_joining_fee = True
-                member.save(update_fields=["has_been_charged_joining_fee"])
-
-            
-
-
-
-    
-            pricing = calculate_subscription_pricing(
-                club=club,
-                member=member,
-                plan=plan,
-                plan_price=plan.price,
-                today=today,
-                mode="monthly",
-                anchor_day=sub.billing_anchor_day,
-            )
-
-            final_amount = pricing["final_amount"]
-    
-            # Charge remaining days of this month
-            if final_amount > 0:
-                stripe.InvoiceItem.create(
-                    customer=stripe_customer_obj.stripe_customer_id,
-                    amount=final_amount,
-                    currency="jpy",
-                    description=f"Prorated membership ({pricing['proration']['remaining_days']} days)",
-                    metadata={
-                        "member_id": member.id,
-                        "club_id": club.id,
-                        "plan_id": plan.id,
-                        "type": "prorations",
-                    },
-                    stripe_account=club.stripe_account_id
-                )
-        
-            if today.day > anchor_day:
-                final_next_month_amount = calculate_discounted_amount(
-                    club=club,
-                    member=member,
-                    plan=plan,
-                    base_amount=plan.price,
-                    apply_to="subscription",
-                )
-
-                stripe.InvoiceItem.create(
-                    customer=stripe_customer_obj.stripe_customer_id,
-                    amount=final_next_month_amount,
-                    currency="jpy",
-                    description=f"{plan.name} 翌月分前払い",
-                    metadata={
-                        "member_id": member.id,
-                        "club_id": club.id,
-                        "plan_id": plan.id,
-                        "type": "next month fee",
-                    },
-                    stripe_account=club.stripe_account_id
-                )
-
-
-        invoice = stripe.Invoice.create(
-            customer=stripe_customer_obj.stripe_customer_id,
-            subscription=sub.stripe_subscription_id,
-            auto_advance=True,
-            stripe_account=club.stripe_account_id
-        )
-
-        if invoice.amount_due > 0:
-            stripe.Invoice.pay(
-                invoice.id,
-                stripe_account=club.stripe_account_id
-            )
-
-        item = SubscriptionItem.objects.filter(
-            subscription=sub,
-            member=member,
-            plan=plan,
-        ).first()
-            
-
-            
-        if item:
-            item.deleted_at = None
-            item.quantity = 1
-            item.price_at_subscription = plan.price
-            item.stripe_price_id_at_subscription = plan.stripe_price_id
-            item.save()
-            
-        else:
-
-            SubscriptionItem.objects.create(
-                member=member,
-                subscription=sub,
-                plan=plan,
-                stripe_subscription_item_id=stripe_item_id,
-    
-                price_at_subscription=plan.price,
-                stripe_price_id_at_subscription=plan.stripe_price_id,
-                quantity=1,
-            )
-                
-
-
-
-        if sub.cancel_at_period_end:
-            # Re-fetch subscription items to get fresh state
-            fresh_sub = stripe.Subscription.retrieve(
-                sub.stripe_subscription_id,
-                expand=["items.data"],
-                stripe_account=club.stripe_account_id
-            )
-            
-            # Find ghost items: exist in Stripe but soft-deleted in our DB
-            active_price_ids = set(
-                SubscriptionItem.objects.filter(
-                    subscription=sub,
-                    deleted_at__isnull=True
-                ).exclude(id=item.id if 'item' in locals() else None)  # exclude the one we just added
-                .values_list("stripe_price_id_at_subscription", flat=True)
-            )
-            # Also include the new plan's price since we just added it
-            active_price_ids.add(plan.stripe_price_id)
-            
-            for stripe_item in fresh_sub["items"]["data"]:
-                if stripe_item["price"]["id"] not in active_price_ids:
-                    # This is a ghost item — delete it
-                    stripe.SubscriptionItem.delete(
-                        stripe_item["id"],
-                        proration_behavior="none",
-                        stripe_account=club.stripe_account_id
-                    )
-            
-            # Unset cancellation
-            stripe.Subscription.modify(
-                sub.stripe_subscription_id,
-                cancel_at_period_end=False,
-                stripe_account=club.stripe_account_id
-            )
-            sub.cancel_at_period_end = False
-            sub.save(update_fields=["cancel_at_period_end"])
-        
-
-    
-        return JsonResponse({
-            "success": True,
-            "message": "Plan added to existing subscription"
-        })
-
-    # -------------------------
-    # CASE 2: No subscription yet → Checkout
-    # -------------------------
-    
-    billing_cycle_anchor = get_next_billing_cycle_anchor(
-        today=today,
-        anchor_day=club.stripe_anchor_date
+    existing_stripe_subs = stripe.Subscription.list(
+        customer=stripe_customer_obj.stripe_customer_id,
+        status="all",
+        stripe_account=club.stripe_account_id,
+        limit=100,
     )
-        
-    subscription_data = {
-        "metadata": {
-            "member_id": member.id,
-            "club_id": club.id,
-            "plan_id": plan.id,
-            "type": "checkout",
-        },
-    }
-    if billing_cycle_anchor:
-        now = int(timezone.now().timestamp())
 
-        if billing_cycle_anchor <= now:
-            billing_cycle_anchor = now + 60
+    for stripe_sub in existing_stripe_subs.auto_paging_iter():
 
-    #    billing_cycle_anchor += 30 * 24 * 60 * 60
-        subscription_data["billing_cycle_anchor"] = billing_cycle_anchor
-        
-        subscription_data["proration_behavior"] = "none"
-
-
-    stripe_customer_obj = get_or_create_stripe_customer(billing_user, club)
+        if stripe_sub.status in [
+            "active",
+            "trialing",
+            "past_due",
+            "incomplete",
+        ]:
+            if stripe_sub.metadata.get("club_id") == str(club.id):
+                return JsonResponse(
+                    {"error": "現在、登録処理中の状態です。しばらくお待ちください。登録が正常に完了する場合がありますが、問題が発生した場合は最大2時間程度で自動的に解除され、その後再度お申し込みいただけます。"},
+                    status=400
+                )
     
-    line_items = [
-        {
-            "price": plan.stripe_price_id,
-            "quantity": 1,
-        }
-    ]
-
-    
-
-    pricing = calculate_subscription_pricing(
+    result = MemberSubscriptionCheckoutService.create_checkout_session(
         club=club,
         member=member,
         plan=plan,
-        plan_price=plan.price,
-        today=today,
-        mode=club.subscription_mode,
-        anchor_day=club.stripe_anchor_date,
+        billing_user=billing_user,
     )
+
+    return JsonResponse(result)
+
+
+@login_required
+@require_POST
+def create_member_cash_subscription(
+    request,
+    club_id,
+    plan_id,
+):
+
+    club = get_object_or_404(
+        Club,
+        id=club_id,
+        is_deleted=False,
+    )
+
+
+    if club.subscription_mode not in [
+        "regular",
+        "monthly",
+    ]:
+        return JsonResponse(
+            {"error": "Invalid billing configuration"},
+            status=400
+        )
+
+
+    if not club.stripe_anchor_date:
+        return JsonResponse(
+            {"error": "Billing anchor not configured"},
+            status=400
+        )
+
+
+    member_id = request.POST.get("member_id")
+
+    member = get_object_or_404(
+        Member,
+        id=member_id,
+        club=club,
+    )
+
+
+    if member.owner != request.user:
+        return JsonResponse(
+            {"error": "Not allowed"},
+            status=403
+        )
+
+
+    plan = get_object_or_404(
+        MembershipPlan,
+        id=plan_id,
+        club=club,
+        is_deleted=False,
+        active=True,
+    )
+
+
+    existing = SubscriptionItem.objects.filter(
+        member=member,
+        plan=plan,
+        subscription__club=club,
+    ).filter(
+        active_items_q()
+    ).exists()
+
+
+    if existing:
+        return JsonResponse(
+            {
+                "error":
+                "Already has this plan (active or grace period)"
+            },
+            status=400
+        )
+
+
+
+    sub = Subscription.objects.filter(
+        owner=member.owner,
+        club=club,
+    ).order_by("-id").first()
+
+
+
+    ACTIVE_STATUSES = [
+        "active",
+        "trialing",
+        "past_due",
+        "pending",
+    ]
+
+
+    if sub and sub.status in ACTIVE_STATUSES:
+        return JsonResponse(
+            {
+                "error":
+                "もうすでに登録されています"
+            },
+            status=400
+        )
+
+
+
+    validate_subscription_transition(
+        subscription=sub,
+        member=member,
+        new_plan=plan,
+        old_plan_id=None,
+    )
+
+
+    ensure_group_exclusive(
+        sub,
+        member,
+        plan,
+    )
+
+
+    today = timezone.localtime().date()
+
+
+    if sub:
+
+        if (
+            is_near_anchor(
+                today,
+                sub.billing_anchor_day
+            )
+            or not is_valid_billing_day(today)
+        ):
+            return JsonResponse(
+                {
+                    "error":
+                    "毎月2日〜27日のみ変更可能です"
+                },
+                status=400
+            )
+
+
+    else:
+
+        if (
+            is_near_anchor(
+                today,
+                club.stripe_anchor_date
+            )
+            or not is_valid_billing_day(today)
+        ):
+            return JsonResponse(
+                {
+                    "error":
+                    "毎月2日〜27日のみ変更可能です"
+                },
+                status=400
+            )
+
+
+    try:
+
+        with subscription_lock(
+            sub.id if sub else member.owner.id,
+            timeout=300,
+        ):
+
+            result = (
+                MemberCashSubscriptionService
+                .create_cash_subscription(
+                    club=club,
+                    member=member,
+                    plan=plan,
+                )
+            )
+
+
+    except CacheLockError:
+
+        return JsonResponse(
+            {
+                "error":
+                "前回のリクエストがまだ処理中です"
+            },
+            status=429
+        )
+
+
+    except Exception as e:
+
+        logger.exception(
+            "Cash subscription creation failed"
+        )
+
+        return JsonResponse(
+            {
+                "error": str(e)
+            },
+            status=500
+        )
+
+
+    return JsonResponse(result)
+
+
+
+@login_required
+@require_POST
+def add_plan_to_subscription_view(request, club_id, plan_id):
+
+    club = get_object_or_404(Club, id=club_id, is_deleted=False)
+
+    if club.subscription_mode not in ["regular", "monthly"]:
+        return JsonResponse({"error": "Invalid billing configuration"}, status=400)
+
+    if not club.stripe_anchor_date:
+        return JsonResponse({"error": "Billing anchor not configured"}, status=400)
+
+    if not club.stripe_account_id:
+        return JsonResponse({"error": "Club has no Stripe account"}, status=400)
+
+    member_id = request.POST.get("member_id")
+    member = get_object_or_404(Member, id=member_id, club=club)
+
+    today = timezone.localtime().date()
+
+    if member.owner != request.user:
+        return JsonResponse({"error": "Not allowed"}, status=403)
+
+    billing_user = member.owner
+
+    stripe_customer_obj = get_or_create_stripe_customer(billing_user, club)
+
+    if not billing_user:
+        return JsonResponse(
+            {"error": "No billing owner set for this member"},
+            status=400
+        )
+
+    plan = get_object_or_404(MembershipPlan, id=plan_id, club=club, is_deleted=False, active=True)
+
+    if not plan.stripe_price_id:
+        return JsonResponse({"error": "Plan not configured correctly"}, status=400)
+
+    existing = SubscriptionItem.objects.filter(
+        member=member,
+        plan=plan,
+        subscription__club=member.club,
+    ).filter(
+        active_items_q()
+    ).exists()
+
+    if existing:
+        return JsonResponse(
+            {"error": "Already has this plan (active or grace period)"},
+            status=400
+        )
+
+    sub = Subscription.objects.filter(
+        owner=member.owner,
+        club=member.club,
+        billing_method="stripe",
+        status__in=["active", "trialing", "past_due", "incomplete", "pending"]
+    ).first()
     
-    joining_fee = calculate_joining_fee(club, member)
-    prorated_amount = pricing["final_amount"]
-    remaining_days = pricing["proration"]["remaining_days"]
-    
-    next_month_amount = 0
-    if (today.day > club.stripe_anchor_date) and club.subscription_mode == "monthly":
-        next_month_amount = calculate_discounted_amount(
-            club=club,
-            member=member,
-            plan=plan,
-            base_amount=plan.price,
-            apply_to="subscription",
+    if not sub:
+        return JsonResponse(
+            {"error": "Stripe subscription not found"},
+            status=400
+        )
+
+
+
+    validate_subscription_transition(
+        subscription=sub,
+        member=member,
+        new_plan=plan,
+        old_plan_id=None
+    )
+
+    ensure_group_exclusive(sub, member, plan)
+
+    today = timezone.localtime().date()
+
+    if sub:
+        if is_near_anchor(today, sub.billing_anchor_day) or not is_valid_billing_day(today):
+            return JsonResponse({
+                "error": "毎月2日〜27日のみ変更可能です。また、請求日の前後1日は変更できません。別の日にお試しください。"
+            }, status=400)
+
+    else:
+        if is_near_anchor(today, club.stripe_anchor_date) or not is_valid_billing_day(today):
+            return JsonResponse({
+                "error": "毎月2日〜27日のみ変更可能です。また、請求日の前後1日は変更できません。別の日にお試しください。"
+            }, status=400)
+
+    try:
+        with subscription_lock(sub.id, timeout=300):
+
+            result = SubscriptionAddPlanService.add_plan_to_existing_subscription(
+                club=club,
+                member=member,
+                plan=plan,
+                subscription=sub,
+            )
+
+    except CacheLockError:
+        return JsonResponse(
+            {
+               "error": "前回のリクエストがまだ処理中です。数分後に再度お試しください。"
+            },
+            status=429
         )
     
-    
-    session = stripe.checkout.Session.create(
-        customer=stripe_customer_obj.stripe_customer_id,
-        mode="subscription",
-        payment_method_types=["card"],
-        line_items=line_items,
-        metadata={
-            "member_id": member.id,
-            "club_id": club.id,
-            "plan_id": plan.id,
-            "type": "checkout",
-        },
-        subscription_data=subscription_data,
-        success_url=f"https://{club.subdomain}.kaibaru.jp/?subscription=success",
-        cancel_url=f"https://{club.subdomain}.kaibaru.jp/?subscription=cancel",
-        stripe_account=club.stripe_account_id,
-
-        custom_text={
-            "submit": {
-                "message": (
-                    f"今回のお支払い予定:\n"
-                    f"・入会金: ¥{joining_fee}\n"
-                    f"・日割り料金 ({remaining_days}日): ¥{prorated_amount}\n"
-                    f"{'・翌月前払い: ¥' + str(next_month_amount) if next_month_amount else ''}\n\n"
-                    f"※最終金額はシステム計算に基づき確定されます"
+    except MutationLockedError as e:
+        return JsonResponse(
+            {
+                "error": str(e),
+                "blocked_until": (
+                    e.blocked_until.isoformat()
+                    if e.blocked_until
+                    else None
                 )
-            }
-        },
+            },
+            status=409
+        )
+    
+    except Exception as e:
+        logger.error(
+            f"Add plan failed for member {member.id}, plan {plan.id}: {e}"
+        )
+        return JsonResponse(
+            {"error": str(e)},
+            status=500
+        )
+        
+    return JsonResponse(
+        result,
+        status=result.get("status", 200)
     )
 
-    return JsonResponse({"id": session.id})
+
+@login_required
+@require_POST
+def add_plan_to_cash_subscription_view(
+    request,
+    club_id,
+    plan_id,
+):
+
+    club = get_object_or_404(
+        Club,
+        id=club_id,
+        is_deleted=False,
+    )
+
+
+    if club.subscription_mode not in [
+        "regular",
+        "monthly",
+    ]:
+        return JsonResponse(
+            {"error": "Invalid billing configuration"},
+            status=400
+        )
+
+
+    member_id = request.POST.get("member_id")
+
+
+    member = get_object_or_404(
+        Member,
+        id=member_id,
+        club=club,
+    )
+
+
+    if member.owner != request.user:
+
+        return JsonResponse(
+            {"error": "Not allowed"},
+            status=403
+        )
+
+
+
+    plan = get_object_or_404(
+        MembershipPlan,
+        id=plan_id,
+        club=club,
+        is_deleted=False,
+        active=True,
+    )
+
+
+
+    existing = SubscriptionItem.objects.filter(
+        member=member,
+        plan=plan,
+        subscription__club=club,
+    ).filter(
+        active_items_q()
+    ).exists()
+
+
+    if existing:
+
+        return JsonResponse(
+            {
+                "error":
+                "Already has this plan"
+            },
+            status=400
+        )
+
+
+
+    subscription = Subscription.objects.filter(
+        owner=member.owner,
+        club=club,
+        billing_method__in=[
+            "cash",
+            "bank_transfer",
+            "manual",
+        ],
+        status__in=[
+            "active",
+            "pending",
+        ],
+    ).first()
+
+    if not subscription:
+        return JsonResponse(
+            {"error": "Cash subscription not found"},
+            status=400
+        )
+
+    
+
+
+
+
+
+
+
+    validate_subscription_transition(
+        subscription=subscription,
+        member=member,
+        new_plan=plan,
+        old_plan_id=None,
+    )
+
+
+    ensure_group_exclusive(
+        subscription,
+        member,
+        plan,
+    )
+
+
+    try:
+
+        with subscription_lock(
+            subscription.id,
+            timeout=300,
+        ):
+
+            result = (
+                CashAddPlanService
+                .add_plan_to_existing_subscription(
+                    club=club,
+                    member=member,
+                    plan=plan,
+                    subscription=subscription,
+                )
+            )
+
+
+    except CacheLockError:
+
+        return JsonResponse(
+            {
+                "error":
+                "前回のリクエストがまだ処理中です"
+            },
+            status=429
+        )
+
+
+    except Exception as e:
+
+        logger.exception(
+            "Cash add plan failed"
+        )
+
+        return JsonResponse(
+            {
+                "error": str(e)
+            },
+            status=500
+        )
+
+
+    return JsonResponse(result)
 
 
 @login_required

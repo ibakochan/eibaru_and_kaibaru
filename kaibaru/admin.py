@@ -19,6 +19,7 @@ from .models import (
     Discount,
     DiscountCondition,
     MemberPricingAdjustment,
+    SubscriptionMutation,
 )
 
 admin.site.register([
@@ -41,4 +42,5 @@ admin.site.register([
     Discount,
     DiscountCondition,
     MemberPricingAdjustment,
+    SubscriptionMutation,
 ])

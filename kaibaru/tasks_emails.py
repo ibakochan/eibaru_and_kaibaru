@@ -2,7 +2,8 @@ from celery import shared_task
 from django.conf import settings
 from django.core.mail import send_mail
 from accounts.models import CustomUser
-
+import logging
+logger = logging.getLogger(__name__)
 
 from .models import Club, SubscriptionItem
  
@@ -14,6 +15,160 @@ def format_date(dt):
     if isinstance(dt, str):
         dt = datetime.fromisoformat(dt)
     return dt.strftime("%Y年%m月%d日")
+
+
+@shared_task(
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=60,
+    retry_kwargs={"max_retries": 5},
+)
+def send_invoice_created_email(self, invoice_id):
+    from .models import Invoice
+
+    invoice = (
+        Invoice.objects
+        .select_related(
+            "subscription",
+            "subscription__club",
+            "subscription__owner",
+            "payer",
+        )
+        .prefetch_related(
+            "items__member",
+        )
+        .filter(id=invoice_id)
+        .first()
+    )
+
+    if not invoice:
+        return
+
+    # ---------------------------------------------------------
+    # Recipient
+    # ---------------------------------------------------------
+
+    owner_email = invoice.payer_email
+
+    if not owner_email and invoice.subscription and invoice.subscription.owner:
+        owner_email = invoice.subscription.owner.email
+
+    if not owner_email:
+        logger.warning(
+            "[EMAIL] Invoice=%s has no recipient email. Skipping.",
+            invoice.id,
+        )
+        return
+
+    # ---------------------------------------------------------
+    # Club
+    # ---------------------------------------------------------
+
+    club = invoice.subscription.club if invoice.subscription else invoice.club
+
+    club_name = club.subdomain or "クラブ"
+
+    # ---------------------------------------------------------
+    # Recipient name
+    #
+    # Prefer the member whose user is the subscription owner.
+    # This handles the normal case where the account owner is
+    # also the member.
+    # ---------------------------------------------------------
+
+    subscription_owner_id = (
+        invoice.subscription.owner_id
+        if invoice.subscription
+        else None
+    )
+
+    invoice_items = list(invoice.items.all())
+
+    owner_member = next(
+        (
+            item.member
+            for item in invoice_items
+            if item.member
+            and item.member.user_id == subscription_owner_id
+        ),
+        None,
+    )
+
+    if owner_member:
+        recipient_name = owner_member.full_name
+    else:
+        recipient_name = (
+            invoice.payer_name
+            or (
+                invoice.subscription.owner.get_full_name()
+                if invoice.subscription
+                and invoice.subscription.owner
+                else None
+            )
+            or owner_email
+        )
+
+    # ---------------------------------------------------------
+    # Invoice items
+    # ---------------------------------------------------------
+
+    item_texts = []
+
+    for item in invoice_items:
+        if item.member:
+            member_name = item.member.full_name
+        else:
+            member_name = "ご利用料金"
+
+        item_texts.append(
+            f"{member_name} - {item.description} ¥{item.amount:,}"
+        )
+
+    item_text = (
+        "\n".join(item_texts)
+        if item_texts
+        else "ご利用料金"
+    )
+
+    # ---------------------------------------------------------
+    # Email
+    # ---------------------------------------------------------
+
+    send_mail(
+        subject=f"【{club_name}】お支払いについてのお知らせ",
+        message=(
+            f"{recipient_name} 様\n\n"
+            f"{club_name}より、今月のお支払いについてご案内いたします。\n\n"
+
+            f"■ ご利用内容\n"
+            f"{item_text}\n\n"
+
+            f"■ お支払い金額\n"
+            f"¥{invoice.amount_due:,}\n\n"
+
+            f"■ お支払い期限\n"
+            f"{format_date(invoice.due_date)}\n\n"
+
+            f"お支払いが確認されるまで、"
+            f"今回のご利用期間は延長されません。\n\n"
+
+            f"お支払い方法やご不明な点につきましては、"
+            f"{club_name}までお問い合わせください。\n\n"
+
+            f"{club_name}"
+        ),
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[owner_email],
+    )
+
+    logger.info(
+        "[EMAIL] Invoice payment reminder sent: "
+        "invoice=%s club=%s recipient=%s",
+        invoice.id,
+        club_name,
+        owner_email,
+    )
+
 
 @shared_task(
     bind=True,
