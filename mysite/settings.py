@@ -32,7 +32,7 @@ DEBUG = False
 
 
 
-ALLOWED_HOSTS = ["eibaru.jp", "www.eibaru.jp" '13.158.230.76']
+ALLOWED_HOSTS = ["eibaru.jp", "www.eibaru.jp", '13.158.230.76']
 
 
 AUTH_PASSWORD_VALIDATORS = []

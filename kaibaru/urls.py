@@ -57,6 +57,12 @@ urlpatterns = [
     ),
 
     path(
+        'migrate_cash_subscription_to_stripe/<int:club_id>/',
+        stripe_views.migrate_cash_subscription_to_stripe,
+        name='migrate_cash_subscription_to_stripe',
+    ),
+
+    path(
         "reconcile_checkout_subscriptions/",
         stripe_views.reconcile_checkout_subscriptions_manual,
         name="reconcile_checkout_subscriptions_manual",

@@ -19,6 +19,7 @@ from django.db.models.functions import TruncDate, Cast
 from .locks_and_reconciliation import (
     StripeSubscriptionReconciler,
     CheckoutSubscriptionReconciler,
+    StripeToCashInvoiceReconciler,
     subscription_lock, 
     CacheLockError,
 )
@@ -34,12 +35,50 @@ from .pricing import get_effective_subscription_price
 from .discounts import calculate_discounted_amount
 
 
+
 CASH_BILLING_METHODS = [
     "cash",
     "bank_transfer",
     "manual",
 ]
 
+@shared_task
+def reconcile_stripe_to_cash_invoices():
+    """
+    Periodic safety-net for Stripe → cash invoice transitions.
+
+    The actual reconciliation logic lives in
+    StripeToCashInvoiceReconciler.
+    """
+
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+
+    logger.info(
+        "[STRIPE TO CASH TASK] Starting reconciliation"
+    )
+
+    try:
+
+        result = (
+            StripeToCashInvoiceReconciler
+            .reconcile_recent_invoices()
+        )
+
+        logger.info(
+            "[STRIPE TO CASH TASK] Finished reconciliation "
+            "result=%s",
+            result,
+        )
+
+        return result
+
+    except Exception:
+
+        logger.exception(
+            "[STRIPE TO CASH TASK] Reconciliation failed"
+        )
+
+        raise
 
 @shared_task
 def schedule_cash_subscription_cycle_invoices():

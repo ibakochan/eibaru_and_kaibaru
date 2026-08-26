@@ -6,6 +6,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 from .models import Club, SubscriptionItem
+from django.db import transaction
  
 from datetime import datetime
 
@@ -394,3 +395,416 @@ def send_club_created_emails(self, club_id):
         from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=[owner.email],
     )
+
+
+@shared_task(
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=60,
+    retry_kwargs={"max_retries": 5},
+)
+def send_stripe_cash_transition_email(self, invoice_id):
+    """
+    Notify the billing user and club owner that an invoice or
+    subscription has been moved from Stripe collection to cash.
+
+    Member and owner emails are claimed independently.
+
+    This provides at-most-once delivery per recipient from the
+    application side:
+
+        stripe_cash_member_email_sent
+        stripe_cash_owner_email_sent
+
+    If one email succeeds and the other fails, Celery can retry
+    the task without sending the successful email again.
+    """
+
+    from .models import Invoice
+
+    # ---------------------------------------------------------
+    # LOAD INVOICE
+    # ---------------------------------------------------------
+
+    invoice = (
+        Invoice.objects
+        .select_related(
+            "subscription",
+            "subscription__owner",
+            "club",
+            "club__owner",
+        )
+        .filter(id=invoice_id)
+        .first()
+    )
+
+    if not invoice:
+        logger.warning(
+            "[EMAIL] Stripe→cash transition invoice=%s "
+            "does not exist.",
+            invoice_id,
+        )
+        return
+
+    if invoice.stripe_cash_transition_status != "succeeded":
+        logger.warning(
+            "[EMAIL] Stripe→cash transition invoice=%s "
+            "is not succeeded. status=%s. Skipping email.",
+            invoice.id,
+            invoice.stripe_cash_transition_status,
+        )
+        return
+
+    subscription = invoice.subscription
+    club = invoice.club
+
+    if not subscription:
+        logger.warning(
+            "[EMAIL] Stripe→cash transition invoice=%s "
+            "has no subscription.",
+            invoice.id,
+        )
+        return
+
+    billing_user = subscription.owner
+    club_owner = club.owner
+
+    # ---------------------------------------------------------
+    # TRANSITION TYPE
+    # ---------------------------------------------------------
+
+    is_subscription_level = invoice.billing_reason in [
+        "initial_subscription",
+        "subscription_cycle",
+    ]
+
+    club_name = club.subdomain or "クラブ"
+
+    member_name = (
+        billing_user.get_full_name()
+        if billing_user
+        else None
+    ) or (
+        invoice.payer_name
+        or invoice.payer_email
+        or "お客様"
+    )
+
+    owner_name = (
+        club_owner.get_full_name()
+        if club_owner
+        else "クラブ管理者"
+    )
+
+    amount_text = f"¥{invoice.amount_due:,}"
+    due_date_text = format_date(invoice.due_date)
+
+    # =========================================================
+    # 1. MEMBER EMAIL
+    # =========================================================
+
+    member_email = None
+
+    if billing_user and billing_user.email:
+        member_email = billing_user.email
+
+    elif invoice.payer_email:
+        member_email = invoice.payer_email
+
+    if member_email:
+
+        # -----------------------------------------------------
+        # CLAIM MEMBER EMAIL
+        #
+        # Only this recipient is locked/claimed.
+        # -----------------------------------------------------
+
+        with transaction.atomic():
+
+            invoice_for_claim = (
+                Invoice.objects
+                .select_for_update()
+                .get(id=invoice.id)
+            )
+
+            if (
+                invoice_for_claim
+                .stripe_cash_member_email_sent
+            ):
+                logger.info(
+                    "[EMAIL] Stripe→cash member email already sent "
+                    "invoice=%s. Skipping.",
+                    invoice.id,
+                )
+
+                member_email = None
+
+            else:
+
+                invoice_for_claim.stripe_cash_member_email_sent = True
+
+                invoice_for_claim.save(
+                    update_fields=[
+                        "stripe_cash_member_email_sent",
+                    ]
+                )
+
+        # -----------------------------------------------------
+        # SEND MEMBER EMAIL
+        # -----------------------------------------------------
+
+        if member_email:
+
+            member_subject = (
+                f"【{club_name}】お支払い方法変更のお知らせ"
+            )
+
+            if is_subscription_level:
+
+                member_message = (
+                    f"{member_name} 様\n\n"
+
+                    f"{club_name}のお支払いについて、"
+                    f"クレジットカードでのお支払いを確認できなかったため、"
+                    f"今後のお支払い方法を現金払いへ変更いたしました。\n\n"
+
+                    f"■ 変更内容\n"
+                    f"クレジットカード決済 → 現金払い\n\n"
+
+                    f"■ 今回のお支払い\n"
+                    f"{amount_text}\n\n"
+
+                    f"■ お支払い期限\n"
+                    f"{due_date_text}\n\n"
+
+                    f"今回のクレジットカード決済は終了しており、"
+                    f"今後のお支払いについては"
+                    f"{club_name}へ直接お支払いください。\n\n"
+
+                    f"お支払い方法や金額についてご不明な点がございましたら、"
+                    f"{club_name}までお問い合わせください。\n\n"
+
+                    f"{club_name}"
+                )
+
+            else:
+
+                member_message = (
+                    f"{member_name} 様\n\n"
+
+                    f"{club_name}のお支払いについて、"
+                    f"今回のクレジットカード決済を確認できなかったため、"
+                    f"この請求のお支払い方法を現金払いへ変更いたしました。\n\n"
+
+                    f"■ 変更内容\n"
+                    f"クレジットカード決済 → 現金払い\n\n"
+
+                    f"■ 今回のお支払い\n"
+                    f"{amount_text}\n\n"
+
+                    f"■ お支払い期限\n"
+                    f"{due_date_text}\n\n"
+
+                    f"今回のお支払いについては、"
+                    f"{club_name}へ直接お支払いください。\n\n"
+
+                    f"なお、今後の通常のサブスクリプションのお支払いは、"
+                    f"引き続きクレジットカードで処理されます。\n\n"
+
+                    f"お支払い方法や金額についてご不明な点がございましたら、"
+                    f"{club_name}までお問い合わせください。\n\n"
+
+                    f"{club_name}"
+                )
+
+            send_mail(
+                subject=member_subject,
+                message=member_message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[member_email],
+            )
+
+            logger.info(
+                "[EMAIL] Stripe→cash member email sent "
+                "invoice=%s recipient=%s subscription_level=%s",
+                invoice.id,
+                member_email,
+                is_subscription_level,
+            )
+
+    else:
+
+        logger.warning(
+            "[EMAIL] Stripe→cash invoice=%s "
+            "has no member/billing recipient email.",
+            invoice.id,
+        )
+
+    # =========================================================
+    # 2. CLUB OWNER EMAIL
+    # =========================================================
+
+    if not club_owner or not club_owner.email:
+
+        logger.warning(
+            "[EMAIL] Stripe→cash invoice=%s "
+            "has no club owner email.",
+            invoice.id,
+        )
+        return
+
+    owner_email = club_owner.email
+
+    # ---------------------------------------------------------
+    # CLAIM OWNER EMAIL
+    # ---------------------------------------------------------
+
+    with transaction.atomic():
+
+        invoice_for_claim = (
+            Invoice.objects
+            .select_for_update()
+            .get(id=invoice.id)
+        )
+
+        if invoice_for_claim.stripe_cash_owner_email_sent:
+
+            logger.info(
+                "[EMAIL] Stripe→cash owner email already sent "
+                "invoice=%s. Skipping.",
+                invoice.id,
+            )
+
+            owner_email = None
+
+        else:
+
+            invoice_for_claim.stripe_cash_owner_email_sent = True
+
+            invoice_for_claim.save(
+                update_fields=[
+                    "stripe_cash_owner_email_sent",
+                ]
+            )
+
+    # ---------------------------------------------------------
+    # SEND OWNER EMAIL
+    # ---------------------------------------------------------
+
+    if owner_email:
+
+        if is_subscription_level:
+
+            owner_subject = (
+                f"【{club_name}】会員の決済失敗に伴う"
+                f"現金払いへの変更について"
+            )
+
+            owner_message = (
+                f"{owner_name} 様\n\n"
+
+                f"会員「{member_name}」様のクレジットカード決済が"
+                f"一定期間にわたり完了しなかったため、"
+                f"対象の請求書を現金払いへ変更し、"
+                f"サブスクリプション全体の支払い方法も"
+                f"現金払いへ変更しました。\n\n"
+
+                f"■ 対象会員\n"
+                f"{member_name}\n\n"
+
+                f"■ 対象請求書\n"
+                f"{invoice.number or invoice.id}\n\n"
+
+                f"■ 請求金額\n"
+                f"{amount_text}\n\n"
+
+                f"■ 請求理由\n"
+                f"{invoice.billing_reason or '---'}\n\n"
+
+                f"■ 変更内容\n"
+                f"クレジットカード決済 → 現金払い\n"
+                f"サブスクリプション全体も現金払いへ変更\n\n"
+
+                f"今後、この会員様の請求は現金での回収となります。\n\n"
+
+                f"会員様から未払いの請求について現金でのお支払いを受けた場合は、"
+                f"管理画面から該当する請求書を「支払済み」として"
+                f"処理してください。\n\n"
+
+                f"未払いの請求書がすべて支払済みになった後は、"
+                f"「会員プラン」から会員様のサブスクリプションを"
+                f"クレジットカード決済（Stripe）へ戻すことができます。\n\n"
+
+                f"なお、未払いの請求書が残っている場合は、"
+                f"クレジットカード決済へ戻すことはできません。\n\n"
+
+                f"■ お支払い期限\n"
+                f"{due_date_text}\n\n"
+
+                f"ご確認のうえ、必要に応じて現金でのお支払いを"
+                f"ご案内ください。\n\n"
+
+                f"{club_name}"
+            )
+
+        else:
+
+            owner_subject = (
+                f"【{club_name}】会員の請求が現金払いへ変更されました"
+            )
+
+            owner_message = (
+                f"{owner_name} 様\n\n"
+
+                f"会員「{member_name}」様のクレジットカード決済が"
+                f"一定期間にわたり完了しなかったため、"
+                f"対象の請求書を現金払いへ変更しました。\n\n"
+
+                f"■ 対象会員\n"
+                f"{member_name}\n\n"
+
+                f"■ 対象請求書\n"
+                f"{invoice.number or invoice.id}\n\n"
+
+                f"■ 請求金額\n"
+                f"{amount_text}\n\n"
+
+                f"■ 請求理由\n"
+                f"{invoice.billing_reason or '---'}\n\n"
+
+                f"■ 変更内容\n"
+                f"クレジットカード決済 → 現金払い\n\n"
+
+                f"今回の請求のみ現金払いへ変更されており、"
+                f"会員様の通常のサブスクリプションは"
+                f"引き続きクレジットカード決済（Stripe）のままです。\n\n"
+
+                f"会員様から現金でのお支払いを受けた場合は、"
+                f"管理画面から該当する請求書を「支払済み」として"
+                f"処理してください。\n\n"
+
+                f"■ お支払い期限\n"
+                f"{due_date_text}\n\n"
+
+                f"ご確認のうえ、必要に応じて会員様へ"
+                f"現金でのお支払いをご案内ください。\n\n"
+
+                f"{club_name}"
+            )
+
+        send_mail(
+            subject=owner_subject,
+            message=owner_message,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[owner_email],
+        )
+
+        logger.info(
+            "[EMAIL] Stripe→cash owner email sent "
+            "invoice=%s billing_reason=%s recipient=%s "
+            "subscription_level=%s",
+            invoice.id,
+            invoice.billing_reason,
+            owner_email,
+            is_subscription_level,
+        )

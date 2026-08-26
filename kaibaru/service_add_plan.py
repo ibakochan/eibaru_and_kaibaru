@@ -16,6 +16,7 @@ from .service_mutations import (
     get_or_create_mutation_strict,
 )
 
+from .invoice_creation import create_local_invoice_from_stripe_invoice
 
 class SubscriptionAddPlanService:
 
@@ -351,6 +352,37 @@ class SubscriptionAddPlanService:
             stripe_account=club.stripe_account_id,
         )
 
+        invoice = stripe.Invoice.retrieve(
+            invoice.id,
+            expand=["lines.data"],
+            stripe_account=club.stripe_account_id,
+        )
+        
+        # ---------------------------------------------------------
+        # Create local invoice/payment BEFORE attempting payment.
+        #
+        # Local invoice = debt exists
+        # Local payment = payment pending
+        # This does NOT mean payment succeeded.
+        # ---------------------------------------------------------
+        local_invoice, local_payment = (
+            create_local_invoice_from_stripe_invoice(
+                stripe_invoice=invoice,
+                subscription=subscription,
+                billing_reason="add_plan",
+                initial_status="open",
+                mutation=mutation,
+            )
+        )
+        
+        mutation.invoice_status = (
+            SubscriptionMutation.InvoiceStatus.OPEN
+        )
+
+        mutation.save(
+            update_fields=["invoice_status"]
+        )
+
         if invoice.amount_due > 0:
             invoice = stripe.Invoice.pay(
                 invoice.id,
@@ -361,120 +393,11 @@ class SubscriptionAddPlanService:
                 ),
             )
 
-        invoice = stripe.Invoice.retrieve(
-            invoice.id,
-            expand=["lines.data"],
-            stripe_account=club.stripe_account_id,
-        )
-
-        if invoice.status != "paid":
-
-            try:
-                stripe.Invoice.void_invoice(
-                    invoice.id,
-                    stripe_account=club.stripe_account_id,
-                )
-
-            except stripe.error.InvalidRequestError:
-                # Could have become paid between retrieve and void
-                pass
 
 
-            invoice = stripe.Invoice.retrieve(
-                invoice.id,
-                expand=["lines.data"],
-                stripe_account=club.stripe_account_id,
-            )
 
 
-        if invoice.status != "paid":
 
-            mutation.invoice_status = (
-                SubscriptionMutation.InvoiceStatus.FAILED
-            )
-    
-            mutation.status = (
-                SubscriptionMutation.Status.FAILED
-            )
-    
-            mutation.payload["failure_reason"] = (
-                f"Invoice not paid. Final status: {invoice.status}"
-            )
-
-            mutation.save(
-                update_fields=[
-                    "invoice_status",
-                    "status",
-                    "payload",
-                ]
-            )
-    
-            return {
-                "success": False,
-                "message": "Invoice payment failed"
-            }
-       
-        if invoice.status == "paid":
-            local_invoice, created = Invoice.objects.get_or_create(
-                stripe_invoice_id=invoice.id,
-                defaults={
-                    "club": club,
-                    "mutation": mutation,
-                    "payer": subscription.owner,
-                    "payer_name": subscription.owner.get_full_name(),
-                    "payer_email": subscription.owner.email,
-                    "subscription": subscription,
-                    "status": "paid",
-                    "billing_reason": "add_plan",
-                    "amount_due": invoice.amount_due,
-                    "amount_paid": invoice.amount_paid,
-                    "currency": "jpy",
-                }
-            )
-    
-            if created:
-                for line in invoice.lines.data:
-    
-                    metadata = line.metadata or {}
-            
-                    member_id = metadata.get("member_id")
-            
-                    member_obj = None
-            
-                    if member_id:
-                        member_obj = Member.objects.filter(
-                            id=member_id
-                        ).first()
-            
-                    InvoiceItem.objects.create(
-                        invoice=local_invoice,
-                        member=member_obj,
-                        description=line.description,
-                        amount=line.amount,
-                        quantity=1,
-                    )
-    
-            Payment.objects.get_or_create(
-                invoice=local_invoice,
-                defaults={
-                    "club": club,
-                    "method": "stripe",
-                    "amount": invoice.amount_paid,
-                    "currency": "jpy",
-                    "status": "succeeded",
-                    "paid_at": timezone.now(),
-                }
-            )        
-
-            mutation.invoice_status = (
-                SubscriptionMutation.InvoiceStatus.PAID
-            )
-
-        mutation.save(
-            update_fields=[
-                "invoice_status",
-            ]
-        )
         
 
         

@@ -142,6 +142,172 @@ def stripe_connected_webhook(request):
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
 
+        metadata = session.get("metadata", {})
+
+
+        if metadata.get("type") == "cash_to_stripe":
+            local_subscription_id = metadata.get("local_subscription_id")
+            stripe_subscription_id = session.get("subscription")
+        
+            if not local_subscription_id:
+                logger.error(
+                    "[cash_to_stripe] Missing local_subscription_id "
+                    "for session=%s",
+                    session["id"],
+                )
+                return webhook_ok(event_record)
+        
+            if not stripe_subscription_id:
+                logger.error(
+                    "[cash_to_stripe] Missing Stripe subscription "
+                    "for session=%s",
+                    session["id"],
+                )
+                return webhook_ok(event_record)
+        
+            subscription = Subscription.objects.filter(
+                id=local_subscription_id,
+                club__stripe_account_id=account_id,
+            ).first()
+        
+            if not subscription:
+                logger.error(
+                    "[cash_to_stripe] Local subscription not found "
+                    "id=%s",
+                    local_subscription_id,
+                )
+                return webhook_ok(event_record)
+        
+            if subscription.billing_method != "cash":
+                logger.warning(
+                    "[cash_to_stripe] Subscription %s is already "
+                    "billing_method=%s",
+                    subscription.id,
+                    subscription.billing_method,
+                )
+                return webhook_ok(event_record)
+        
+            # ---------------------------------------------------------
+            # RETRIEVE STRIPE SUBSCRIPTION FOR AUDIT / LOGGING
+            # ---------------------------------------------------------
+        
+            stripe_sub = stripe.Subscription.retrieve(
+                stripe_subscription_id,
+                stripe_account=account_id,
+                expand=["items.data.price"],
+            )
+        
+            logger.info(
+                "[cash_to_stripe] Stripe subscription created: "
+                "stripe_subscription_id=%s status=%s customer=%s "
+                "collection_method=%s",
+                stripe_sub.id,
+                stripe_sub.status,
+                stripe_sub.customer,
+                stripe_sub.collection_method,
+            )
+        
+            # Log every Stripe subscription item and quantity
+            for stripe_item in stripe_sub["items"]["data"]:
+                price = stripe_item.get("price", {})
+        
+                logger.info(
+                    "[cash_to_stripe] Stripe subscription item: "
+                    "subscription_item_id=%s price_id=%s quantity=%s "
+                    "product_id=%s unit_amount=%s currency=%s",
+                    stripe_item["id"],
+                    price.get("id"),
+                    stripe_item.get("quantity"),
+                    price.get("product"),
+                    price.get("unit_amount"),
+                    price.get("currency"),
+                )
+
+            # ---------------------------------------------------------
+            # LINK EXISTING LOCAL SUBSCRIPTION ITEMS TO STRIPE ITEMS
+            # ---------------------------------------------------------
+
+            local_items = list(
+                subscription.items.filter(
+                    deleted_at__isnull=True,
+                )
+            )
+
+            with transaction.atomic():
+
+                for stripe_item in stripe_sub["items"]["data"]:
+                    stripe_price_id = stripe_item["price"]["id"]
+                    stripe_item_id = stripe_item["id"]
+                    stripe_quantity = stripe_item.get("quantity", 1)
+    
+                    matching_items = [
+                        item
+                        for item in local_items
+                        if (
+                            item.stripe_price_id_at_subscription
+                            == stripe_price_id
+                            and not item.stripe_subscription_item_id
+                        )
+                    ]
+    
+                    # One Stripe item can represent multiple local members
+                    # because the migration groups identical prices by quantity.
+                    for local_item in matching_items[:stripe_quantity]:
+                        local_item.stripe_subscription_item_id = stripe_item_id
+                        local_item.save(
+                            update_fields=[
+                                "stripe_subscription_item_id",
+                            ]
+                        )
+    
+                        logger.info(
+                            "[cash_to_stripe] Linked local "
+                            "SubscriptionItem=%s member=%s plan=%s "
+                            "to Stripe subscription_item=%s "
+                            "price=%s",
+                            local_item.id,
+                            local_item.member_id,
+                            local_item.plan_id,
+                            stripe_item_id,
+                            stripe_price_id,
+                        )
+            
+                # ---------------------------------------------------------
+                # UPDATE EXISTING LOCAL SUBSCRIPTION
+                # ---------------------------------------------------------
+            
+                subscription.stripe_subscription_id = stripe_subscription_id
+                subscription.billing_method = "stripe"
+            
+                subscription.save(
+                    update_fields=[
+                        "stripe_subscription_id",
+                        "billing_method",
+                    ]
+                )
+        
+            # ---------------------------------------------------------
+            # WEBHOOK EVENT
+            # ---------------------------------------------------------
+        
+            event_record.stripe_subscription_id = stripe_subscription_id
+            event_record.needs_reconciliation = False
+            event_record.save(
+                update_fields=[
+                    "stripe_subscription_id",
+                    "needs_reconciliation",
+                ]
+            )
+        
+            logger.info(
+                "[cash_to_stripe] Successfully migrated "
+                "local subscription=%s from cash to stripe. "
+                "No application invoice created.",
+                subscription.id,
+            )
+        
+            return webhook_ok(event_record)
+        
         member_id = session["metadata"].get("member_id")
         subscription_id = session.get("subscription")
 
@@ -374,8 +540,42 @@ def stripe_connected_webhook(request):
             )
 
             if invoice.amount_due > 0:
-                stripe.Invoice.pay(invoice.id, stripe_account=account_id, idempotency_key=f"{event_id}_pay_invoice")
-
+                try:
+                    stripe.Invoice.pay(
+                        invoice.id,
+                        stripe_account=account_id,
+                        idempotency_key=f"{event_id}_pay_invoice",
+                    )
+            
+                except stripe.error.CardError as e:
+                    logger.warning(
+                        "[checkout.session.completed] Payment attempted but failed "
+                        "invoice=%s code=%s message=%s",
+                        invoice.id,
+                        getattr(e, "code", None),
+                        str(e),
+                    )
+            
+                    return webhook_ok(event_record)
+            
+                except stripe.error.InvalidRequestError as e:
+                    logger.error(
+                        "[checkout.session.completed] Invalid Stripe request "
+                        "while paying invoice=%s error=%s",
+                        invoice.id,
+                        e,
+                    )
+            
+                    return HttpResponse(status=500)
+            
+                except stripe.error.StripeError as e:
+                    logger.exception(
+                        "[checkout.session.completed] Stripe error while paying "
+                        "invoice=%s",
+                        invoice.id,
+                    )
+            
+                    return HttpResponse(status=500)
 
                 
         if club.subscription_mode == "monthly":
@@ -504,10 +704,42 @@ def stripe_connected_webhook(request):
             )
         
             if invoice.amount_due > 0:
-                stripe.Invoice.pay(invoice.id, idempotency_key=f"{event_id}_invoice_pay", stripe_account=account_id)
-
-
-
+                try:
+                    stripe.Invoice.pay(
+                        invoice.id,
+                        stripe_account=account_id,
+                        idempotency_key=f"{event_id}_pay_invoice",
+                    )
+            
+                except stripe.error.CardError as e:
+                    logger.warning(
+                        "[checkout.session.completed] Payment attempted but failed "
+                        "invoice=%s code=%s message=%s",
+                        invoice.id,
+                        getattr(e, "code", None),
+                        str(e),
+                    )
+            
+                    return webhook_ok(event_record)
+            
+                except stripe.error.InvalidRequestError as e:
+                    logger.error(
+                        "[checkout.session.completed] Invalid Stripe request "
+                        "while paying invoice=%s error=%s",
+                        invoice.id,
+                        e,
+                    )
+            
+                    return HttpResponse(status=500)
+            
+                except stripe.error.StripeError as e:
+                    logger.exception(
+                        "[checkout.session.completed] Stripe error while paying "
+                        "invoice=%s",
+                        invoice.id,
+                    )
+            
+                    return HttpResponse(status=500)
 
 
             
@@ -560,54 +792,47 @@ def stripe_connected_webhook(request):
         
         invoice_type = invoice.get("metadata", {}).get("type")
 
-        if invoice_type == "initial_subscription":
-
-            logger.info(
-                "[invoice.paid] Processing initial subscription invoice=%s",
-                invoice["id"],
-            )
-        
-            local_invoice = Invoice.objects.filter(
-                stripe_invoice_id=invoice["id"],
-                subscription=sub,
-            ).first()
+    
+        logger.info(
+            "[invoice.paid] Processing invoice=%s type=%s billing_reason=%s",
+            invoice["id"],
+            invoice_type,
+            invoice.get("billing_reason"),
+        )
+    
+        local_invoice = Invoice.objects.filter(
+            stripe_invoice_id=invoice["id"],
+            subscription=sub,
+        ).first()
         
  
-            if not local_invoice:
-                logger.warning(
-                    "[invoice.paid] Local invoice missing for Stripe invoice=%s. "
-                    "Creating local invoice before marking it paid.",
-                    invoice["id"],
-                )
-        
-                local_invoice, _ = create_local_invoice_from_stripe_invoice(
-                    stripe_invoice=invoice,
-                    subscription=sub,
-                    billing_reason="initial_subscription",
-                    initial_status="open",
-                )
-
-
-
-            local_invoice, local_payment = mark_local_invoice_paid(
-                local_invoice=local_invoice,
-                stripe_invoice=invoice,
-            )
-
-            logger.info(
-                "[invoice.paid] Local invoice=%s marked paid, "
-                "payment=%s succeeded",
-                local_invoice.id,
-                local_payment.id,
-            )
-
-        else:        
-            logger.info(
-                "[invoice.paid] No initial-subscription local invoice handling "
-                "for invoice=%s billing_event=%s",
+        if not local_invoice:
+            logger.warning(
+                "[invoice.paid] Local invoice missing for Stripe invoice=%s. "
+                "Creating local invoice before marking it paid.",
                 invoice["id"],
-                invoice_type,
-            )  
+            )
+        
+            local_invoice, _ = create_local_invoice_from_stripe_invoice(
+                stripe_invoice=invoice,
+                subscription=sub,
+                billing_reason=invoice.get("billing_reason"),
+                initial_status="open",
+            )
+
+
+
+        local_invoice, local_payment = mark_local_invoice_paid(
+            local_invoice=local_invoice,
+            stripe_invoice=invoice,
+        )
+
+        logger.info(
+            "[invoice.paid] Local invoice=%s marked paid, "
+            "payment=%s succeeded",
+            local_invoice.id,
+            local_payment.id,
+        )
 
 
         
@@ -731,12 +956,55 @@ def stripe_connected_webhook(request):
     
     elif event["type"] == "invoice.payment_failed":
         invoice = event["data"]["object"]
-        sub = Subscription.objects.filter(
-            stripe_subscription_id=invoice.get("subscription"), club__stripe_account_id=account_id
+        
+        local_invoice = Invoice.objects.filter(
+            stripe_invoice_id=invoice.get("id"),
         ).first()
-        if sub:
-            sub.status = "past_due"
-            sub.save()
+    
+        if local_invoice:
+    
+            if not local_invoice.stripe_payment_failed_at:
+                local_invoice.stripe_payment_failed_at = timezone.now()
+    
+            local_invoice.save(
+                update_fields=[
+                    "stripe_payment_failed_at",
+                ]
+            )
+    
+        else:
+            logger.warning(
+                "[invoice.payment_failed] Local invoice not found "
+                "stripe_invoice=%s",
+                invoice.get("id"),
+            )
+    
+        # ---------------------------------------------------------
+        # ONLY make the subscription past_due for a normal
+        # recurring subscription-cycle invoice.
+        # ---------------------------------------------------------
+    
+        if invoice.get("billing_reason") == "subscription_cycle":
+    
+            sub = Subscription.objects.filter(
+                stripe_subscription_id=invoice.get("subscription"),
+                club__stripe_account_id=account_id,
+            ).first()
+    
+            if sub:
+                sub.status = "past_due"
+                sub.save(
+                    update_fields=[
+                        "status",
+                    ]
+                )
+    
+                logger.info(
+                    "[invoice.payment_failed] Subscription=%s "
+                    "marked past_due for cycle invoice=%s",
+                    sub.id,
+                    invoice.get("id"),
+                )
 
     elif event["type"] == "customer.subscription.deleted":
         stripe_sub = event["data"]["object"]
@@ -896,6 +1164,42 @@ def stripe_connected_webhook(request):
                     )
             
                     logger.info(f"[invoice.created] Applied delta adjustment: {-delta}")
+
+                invoice = stripe.Invoice.retrieve(
+                    invoice["id"],
+                    expand=["lines.data"],
+                    stripe_account=account_id,
+                )
+
+                # ------------------------------------------------------------
+                # 7. Create local invoice
+                #
+                # This represents the Stripe invoice/debt locally.
+                # It does NOT mean payment succeeded.
+                # invoice.paid will mark it paid later.
+                # ------------------------------------------------------------
+
+                local_invoice, local_payment = (
+                    create_local_invoice_from_stripe_invoice(
+                        stripe_invoice=invoice,
+                        subscription=sub,
+                        billing_reason="subscription_cycle",
+                        initial_status="open",
+                    )
+                )
+
+                logger.info(
+                    "[invoice.created] Local invoice created/found: "
+                    "local_invoice=%s stripe_invoice=%s "
+                    "payment=%s amount_due=%s payment_method=%s "
+                    "original_payment_method=%s",
+                    local_invoice.id,
+                    invoice["id"],
+                    local_payment.id,
+                    invoice.get("amount_due", 0),
+                    local_invoice.payment_method,
+                    local_invoice.original_payment_method,
+                )
             
         except CacheLockError:
             logger.info(

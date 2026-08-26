@@ -18,6 +18,7 @@ from django.core.cache import cache
 from django.db import transaction
 logger = logging.getLogger(__name__)
 from .service_subscription import SubscriptionItemService
+from .service_cash_to_stripe import CashToStripeSubscriptionService
 from .service_subscription_cash import CashSubscriptionItemService
 
 from .service_mutations import MutationLockedError
@@ -1740,6 +1741,350 @@ def add_plan_to_cash_subscription_view(
             status=500
         )
 
+
+    return JsonResponse(result)
+
+@login_required
+@require_POST
+def migrate_cash_subscription_to_stripe(request, club_id):
+  
+    """
+    Migrate an existing cash subscription to Stripe.
+
+    This does NOT create a new local Subscription.
+
+    It creates a Stripe Checkout session containing the plans
+    already present on the existing cash subscription.
+    """
+
+    # ---------------------------------------------------------
+    # CLUB
+    # ---------------------------------------------------------
+
+    club = get_object_or_404(
+        Club,
+        id=club_id,
+        is_deleted=False,
+    )
+
+
+
+    # ---------------------------------------------------------
+    # BASIC STRIPE CONFIGURATION
+    # ---------------------------------------------------------
+
+    if club.subscription_mode not in [
+        "regular",
+        "monthly",
+    ]:
+        return JsonResponse(
+            {"error": "Invalid billing configuration"},
+            status=400,
+        )
+
+    if not club.stripe_account_id:
+        return JsonResponse(
+            {"error": "Club has no Stripe account"},
+            status=400,
+        )
+
+    # ---------------------------------------------------------
+    # MEMBER
+    # ---------------------------------------------------------
+
+    member_id = request.POST.get("member_id")
+
+    if not member_id:
+        return JsonResponse(
+            {"error": "member_id is required"},
+            status=400,
+        )
+
+    member = get_object_or_404(
+        Member,
+        id=member_id,
+        club=club,
+    )
+
+    logger.info(
+        "[cash_to_stripe] Ownership check: member.owner=%s "
+        "(id=%s) request.user=%s (id=%s)",
+        member.owner,
+        member.owner.id if member.owner else None,
+        request.user,
+        request.user.id if request.user.is_authenticated else None,
+    )
+
+    if member.owner != request.user:
+        return JsonResponse(
+            {"error": "Not allowed"},
+            status=403,
+        )
+
+    billing_user = member.owner
+
+    if not billing_user:
+        return JsonResponse(
+            {"error": "No billing owner set for this member"},
+            status=400,
+        )
+
+    # ---------------------------------------------------------
+    # EXISTING LOCAL SUBSCRIPTION
+    # ---------------------------------------------------------
+
+    subscription = (
+        Subscription.objects
+        .filter(
+            owner=billing_user,
+            club=club,
+        )
+        .order_by("-id")
+        .first()
+    )
+
+    if not subscription:
+        return JsonResponse(
+            {"error": "No subscription found"},
+            status=400,
+        )
+
+    # ---------------------------------------------------------
+    # MUST CURRENTLY BE CASH
+    # ---------------------------------------------------------
+
+    if subscription.billing_method != "cash":
+        return JsonResponse(
+            {
+                "error": (
+                    "Only cash subscriptions can be "
+                    "migrated to Stripe"
+                )
+            },
+            status=400,
+        )
+
+    # ---------------------------------------------------------
+    # MUST NOT ALREADY HAVE STRIPE SUBSCRIPTION
+    # ---------------------------------------------------------
+
+    if subscription.stripe_subscription_id:
+        return JsonResponse(
+            {
+                "error": (
+                    "This subscription already has a "
+                    "Stripe subscription"
+                )
+            },
+            status=400,
+        )
+
+    # ---------------------------------------------------------
+    # IMPORTANT:
+    # DO NOT MIGRATE IF THERE IS AN OPEN LOCAL INVOICE
+    # ---------------------------------------------------------
+
+    open_invoice_exists = (
+        subscription.invoices
+        .filter(status="open")
+        .exists()
+    )
+
+    if open_invoice_exists:
+        return JsonResponse(
+            {
+                "error": (
+                    "このサブスクリプションには未払いの請求書があります。"
+                    "未払い請求書を処理してからStripeへ変更してください。"
+                )
+            },
+            status=400,
+        )
+
+    # ---------------------------------------------------------
+    # ACTIVE ITEMS
+    # ---------------------------------------------------------
+
+    active_items = (
+        subscription.items
+        .filter(deleted_at__isnull=True)
+        .select_related("member", "plan")
+    )
+
+    if not active_items.exists():
+        return JsonResponse(
+            {
+                "error": (
+                    "Cannot migrate a subscription "
+                    "with no active plans"
+                )
+            },
+            status=400,
+        )
+
+    # ---------------------------------------------------------
+    # MAKE SURE THE REQUESTED MEMBER ACTUALLY BELONGS
+    # TO THIS SUBSCRIPTION
+    # ---------------------------------------------------------
+
+    member_has_item = active_items.filter(
+        member=member,
+    ).exists()
+
+    if not member_has_item:
+        return JsonResponse(
+            {
+                "error": (
+                    "This member does not have an active "
+                    "item on the subscription"
+                )
+            },
+            status=400,
+        )
+
+    # ---------------------------------------------------------
+    # PREVENT DUPLICATE / CURRENT STRIPE CHECKOUT
+    # ---------------------------------------------------------
+
+    stripe_customer_obj = get_or_create_stripe_customer(
+        billing_user,
+        club,
+    )
+
+    existing_stripe_subs = stripe.Subscription.list(
+        customer=stripe_customer_obj.stripe_customer_id,
+        status="all",
+        stripe_account=club.stripe_account_id,
+        limit=100,
+    )
+
+    for stripe_sub in existing_stripe_subs.auto_paging_iter():
+
+        if stripe_sub.status not in [
+            "active",
+            "trialing",
+            "past_due",
+            "unpaid",
+            "incomplete",
+        ]:
+            continue
+
+        if stripe_sub.metadata.get("club_id") != str(club.id):
+            continue
+
+        if stripe_sub.metadata.get("type") == "cash_to_stripe":
+            return JsonResponse(
+                {
+                    "error": (
+                        "Stripe migration is already "
+                        "being processed"
+                    )
+                },
+                status=400,
+            )
+
+        return JsonResponse(
+            {
+                "error": (
+                    "An existing Stripe subscription "
+                    "already exists for this club"
+                )
+            },
+            status=400,
+        )
+
+    # ---------------------------------------------------------
+    # LOCK
+    # ---------------------------------------------------------
+
+    try:
+
+        with subscription_lock(
+            subscription.id,
+            timeout=300,
+        ):
+
+            # Re-check inside the lock.
+            subscription.refresh_from_db()
+
+            if subscription.billing_method != "cash":
+                return JsonResponse(
+                    {
+                        "error": (
+                            "Subscription is no longer "
+                            "a cash subscription"
+                        )
+                    },
+                    status=400,
+                )
+
+            if subscription.stripe_subscription_id:
+                return JsonResponse(
+                    {
+                        "error": (
+                            "Subscription already has "
+                            "a Stripe subscription"
+                        )
+                    },
+                    status=400,
+                )
+
+            # Re-check open invoices inside the lock.
+            if (
+                subscription.invoices
+                .filter(status="open")
+                .exists()
+            ):
+                return JsonResponse(
+                    {
+                        "error": (
+                            "このサブスクリプションには"
+                            "未払いの請求書があります。"
+                        )
+                    },
+                    status=400,
+                )
+
+            result = (
+                CashToStripeSubscriptionService
+                .create_checkout_session(
+                    club=club,
+                    subscription=subscription,
+                    billing_user=billing_user,
+                )
+            )
+
+    except CacheLockError:
+
+        return JsonResponse(
+            {
+                "error": (
+                    "前回のリクエストがまだ処理中です。"
+                    "数分後に再度お試しください。"
+                )
+            },
+            status=429,
+        )
+
+    except ValueError as e:
+
+        return JsonResponse(
+            {"error": str(e)},
+            status=400,
+        )
+
+    except Exception as e:
+
+        logger.exception(
+            "Cash to Stripe migration failed "
+            "subscription=%s",
+            subscription.id,
+        )
+
+        return JsonResponse(
+            {"error": str(e)},
+            status=500,
+        )
 
     return JsonResponse(result)
 

@@ -9,6 +9,7 @@ def create_local_invoice_from_stripe_invoice(
     subscription,
     billing_reason,
     initial_status="open",
+    mutation=None,
 ):
     """
     Create the local Invoice, InvoiceItems and Payment for a Stripe invoice.
@@ -24,9 +25,12 @@ def create_local_invoice_from_stripe_invoice(
             "payer": subscription.owner,
             "payer_name": subscription.owner.get_full_name(),
             "payer_email": subscription.owner.email,
+            "mutation": mutation,
             "subscription": subscription,
             "status": initial_status,
             "billing_reason": billing_reason,
+            "payment_method": "stripe",
+            "original_payment_method": "stripe",
             "amount_due": stripe_invoice.get("amount_due", 0),
             "amount_paid": (
                 stripe_invoice.get("amount_paid", 0)

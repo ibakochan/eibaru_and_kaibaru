@@ -494,6 +494,7 @@ class SubscriptionMutation(models.Model):
         FAILED = "failed", "Failed"
 
     class InvoiceStatus(models.TextChoices):
+        OPEN = "open", "Invoice open"
         NOT_STARTED = "not_started", "Not started"
         RETRY = "retry", "Retry required"
         PAID = "paid", "Paid"
@@ -598,6 +599,54 @@ class Invoice(models.Model):
     ]
 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES)
+
+    PAYMENT_METHOD_CHOICES = [
+        ("stripe", "Stripe"),
+        ("cash", "Cash"),
+        ("bank_transfer", "Bank transfer"),
+    ]
+
+    payment_method = models.CharField(
+        max_length=20,
+        choices=PAYMENT_METHOD_CHOICES,
+        default="cash",
+    )
+
+    original_payment_method = models.CharField(
+        max_length=20,
+        choices=PAYMENT_METHOD_CHOICES,
+        default="cash",
+    )
+
+
+    stripe_payment_failure_count = models.PositiveIntegerField(
+        default=0,
+    )
+
+    stripe_payment_failed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    stripe_cash_member_email_sent = models.BooleanField(
+        default=False,
+    )
+
+    stripe_cash_owner_email_sent = models.BooleanField(
+        default=False,
+    )
+
+    STRIPE_CASH_TRANSITION_STATUS_CHOICES = [
+        ("started", "Started"),
+        ("succeeded", "Succeeded"),
+    ]
+    
+    stripe_cash_transition_status = models.CharField(
+        max_length=20,
+        choices=STRIPE_CASH_TRANSITION_STATUS_CHOICES,
+        null=True,
+        blank=True,
+    )
     
     amount_due = models.IntegerField()
     amount_paid = models.IntegerField(default=0)
