@@ -28,17 +28,22 @@ from .service_member_checkout import MemberSubscriptionCheckoutService
 from .service_cash_subscription import MemberCashSubscriptionService
 
 from .service_add_plan_cash import CashAddPlanService
+from .service_reservation import MemberReservationService
 
-from .models import Club, Member, MembershipPlan, SubscriptionItem, Subscription, StripeCustomer
+from .models import TicketType, TicketPackage, Club, Member, MembershipPlan, SubscriptionItem, Subscription, StripeCustomer, Lesson
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
 from .stripe_service import get_or_create_stripe_customer
 from .service_add_plan import SubscriptionAddPlanService
 
+from .service_ticket_purchase import TicketPurchaseService
+
 from .locks_and_reconciliation import subscription_lock, CacheLockError, StripeSubscriptionReconciler, CheckoutSubscriptionReconciler
 
 import urllib.parse
+
+from .service_visitor_reservation import VisitorReservationService
 
 from .billing import (
     get_next_month_start,
@@ -1829,6 +1834,8 @@ def migrate_cash_subscription_to_stripe(request, club_id):
             status=400,
         )
 
+    
+
     # ---------------------------------------------------------
     # EXISTING LOCAL SUBSCRIPTION
     # ---------------------------------------------------------
@@ -1876,6 +1883,19 @@ def migrate_cash_subscription_to_stripe(request, club_id):
                     "Stripe subscription"
                 )
             },
+            status=400,
+        )
+
+    today = timezone.localtime().date()
+
+    error = validate_plan_change_window(
+        today=today,
+        subscription=subscription,
+    )
+
+    if error:
+        return JsonResponse(
+            {"error": error},
             status=400,
         )
 
@@ -2088,6 +2108,259 @@ def migrate_cash_subscription_to_stripe(request, club_id):
 
     return JsonResponse(result)
 
+@login_required
+@require_POST
+def change_stripe_payment_method(request, club_id):
+
+    # ---------------------------------------------------------
+    # CLUB
+    # ---------------------------------------------------------
+
+    club = get_object_or_404(
+        Club,
+        id=club_id,
+        is_deleted=False,
+    )
+
+
+
+    # ---------------------------------------------------------
+    # BASIC STRIPE CONFIGURATION
+    # ---------------------------------------------------------
+
+    if club.subscription_mode not in [
+        "regular",
+        "monthly",
+    ]:
+        return JsonResponse(
+            {"error": "Invalid billing configuration"},
+            status=400,
+        )
+
+    if not club.stripe_account_id:
+        return JsonResponse(
+            {"error": "Club has no Stripe account"},
+            status=400,
+        )
+
+    # ---------------------------------------------------------
+    # MEMBER
+    #
+    # Same ownership model as cash → Stripe migration.
+    # ---------------------------------------------------------
+
+    member_id = request.POST.get("member_id")
+
+    if not member_id:
+        return JsonResponse(
+            {"error": "member_id is required"},
+            status=400,
+        )
+
+    member = get_object_or_404(
+        Member,
+        id=member_id,
+        club=club,
+    )
+
+    if member.owner != request.user:
+        return JsonResponse(
+            {"error": "Not allowed"},
+            status=403,
+        )
+
+    billing_user = member.owner
+
+    if not billing_user:
+        return JsonResponse(
+            {"error": "No billing owner set for this member"},
+            status=400,
+        )
+
+    # ---------------------------------------------------------
+    # EXISTING LOCAL SUBSCRIPTION
+    # ---------------------------------------------------------
+
+    subscription = (
+        Subscription.objects
+        .filter(
+            owner=billing_user,
+            club=club,
+        )
+        .order_by("-id")
+        .first()
+    )
+
+    if not subscription:
+        return JsonResponse(
+            {"error": "No subscription found"},
+            status=400,
+        )
+
+    # ---------------------------------------------------------
+    # MUST CURRENTLY BE STRIPE
+    # ---------------------------------------------------------
+
+    if subscription.billing_method != "stripe":
+        return JsonResponse(
+            {
+                "error": (
+                    "Only Stripe subscriptions can "
+                    "change their payment method"
+                )
+            },
+            status=400,
+        )
+
+    # ---------------------------------------------------------
+    # MUST HAVE STRIPE SUBSCRIPTION
+    # ---------------------------------------------------------
+
+    if not subscription.stripe_subscription_id:
+        return JsonResponse(
+            {
+                "error": (
+                    "This subscription does not have "
+                    "a Stripe subscription"
+                )
+            },
+            status=400,
+        )
+
+    # ---------------------------------------------------------
+    # DO NOT ALLOW PAYMENT METHOD CHANGE WHILE
+    # SUBSCRIPTION IS SCHEDULED FOR CANCELLATION
+    # ---------------------------------------------------------
+
+    if subscription.cancel_at_period_end:
+        return JsonResponse(
+            {
+                "error": (
+                    "このサブスクリプションは解約予定のため、"
+                    "支払い方法を変更できません。"
+                )
+            },
+            status=400,
+        )
+
+    # ---------------------------------------------------------
+    # BILLING WINDOW VALIDATION
+    #
+    # Same rule used by the other subscription mutations.
+    # ---------------------------------------------------------
+
+    today = timezone.localtime().date()
+
+    error = validate_plan_change_window(
+        today=today,
+        subscription=subscription,
+    )
+
+    if error:
+        return JsonResponse(
+            {"error": error},
+            status=400,
+        )
+
+    # ---------------------------------------------------------
+    # STRIPE CUSTOMER
+    #
+    # Your existing helper handles:
+    # - local StripeCustomer lookup
+    # - deleted customer
+    # - missing customer
+    # - creation
+    # ---------------------------------------------------------
+
+    stripe_customer_obj = get_or_create_stripe_customer(
+        billing_user,
+        club,
+    )
+
+    # ---------------------------------------------------------
+    # VERIFY STRIPE SUBSCRIPTION
+    # ---------------------------------------------------------
+
+    try:
+
+        stripe_sub = stripe.Subscription.retrieve(
+            subscription.stripe_subscription_id,
+            stripe_account=club.stripe_account_id,
+        )
+
+    except stripe.error.StripeError as e:
+
+        logger.exception(
+            "[CHANGE PAYMENT METHOD] Failed to retrieve "
+            "Stripe subscription=%s",
+            subscription.stripe_subscription_id,
+        )
+
+        return JsonResponse(
+            {"error": str(e)},
+            status=400,
+        )
+
+    # ---------------------------------------------------------
+    # VERIFY STRIPE SUBSCRIPTION BELONGS TO EXPECTED CUSTOMER
+    # ---------------------------------------------------------
+
+    if (
+        stripe_sub.get("customer")
+        != stripe_customer_obj.stripe_customer_id
+    ):
+        logger.error(
+            "[CHANGE PAYMENT METHOD] Stripe customer mismatch "
+            "subscription=%s stripe_subscription=%s "
+            "local_customer=%s stripe_customer=%s",
+            subscription.id,
+            subscription.stripe_subscription_id,
+            stripe_customer_obj.stripe_customer_id,
+            stripe_sub.get("customer"),
+        )
+
+        return JsonResponse(
+            {"error": "Stripe customer mismatch"},
+            status=400,
+        )
+
+    # ---------------------------------------------------------
+    # CREATE STRIPE BILLING PORTAL SESSION
+    #
+    # The customer enters the new card on Stripe.
+    # Your application never receives card information.
+    # ---------------------------------------------------------
+
+    try:
+
+        session = stripe.billing_portal.Session.create(
+            customer=stripe_customer_obj.stripe_customer_id,
+            return_url=(
+                f"https://{club.subdomain}.kaibaru.jp/"
+                "?payment_method=updated"
+            ),
+            stripe_account=club.stripe_account_id,
+        )
+
+    except stripe.error.StripeError as e:
+
+        logger.exception(
+            "[CHANGE PAYMENT METHOD] Failed to create "
+            "Billing Portal session subscription=%s",
+            subscription.id,
+        )
+
+        return JsonResponse(
+            {"error": str(e)},
+            status=400,
+        )
+
+    return JsonResponse(
+        {
+            "url": session.url,
+        }
+    )
+
 
 @login_required
 def stripe_oauth_callback(request):
@@ -2160,3 +2433,400 @@ def stripe_oauth_callback(request):
     except stripe.error.StripeError as e:
         return JsonResponse({"error": str(e)}, status=400)
 
+
+@require_POST
+def create_visitor_reservation(
+    request,
+    lesson_id,
+):
+
+    lesson = get_object_or_404(
+        Lesson,
+        id=lesson_id,
+    )
+
+    
+
+    club = lesson.club
+
+    user = (
+        request.user
+        if request.user.is_authenticated
+        else None
+    )
+
+    if user:
+            member_exists = Member.objects.filter(
+                club=club,
+                user=request.user,
+            ).exists()
+        
+            if member_exists:
+                return JsonResponse(
+                    {
+                        "error": "会員の方は会員向けの予約方法をご利用ください。"
+                    },
+                    status=400,
+                )
+
+    if club.is_deleted:
+        return JsonResponse(
+            {
+                "error": "このクラブは利用できません。"
+            },
+            status=400,
+        )
+
+    full_name = request.POST.get(
+        "full_name",
+        "",
+    ).strip()
+
+    email = request.POST.get(
+        "email",
+        "",
+    ).strip()
+
+    phone_number = request.POST.get(
+        "phone_number",
+        "",
+    ).strip()
+
+    reservation_date = request.POST.get(
+        "reservation_date",
+        "",
+    ).strip()
+
+    if not full_name:
+        return JsonResponse(
+            {
+                "error": "お名前を入力してください。"
+            },
+            status=400,
+        )
+
+    if not user and not email:
+        return JsonResponse(
+            {
+                "error": (
+                    "メールアドレスを入力してください。"
+                )
+            },
+            status=400,
+        )
+
+    if user and not user.email:
+        return JsonResponse(
+            {
+                "error": (
+                    "アカウントにメールアドレスが"
+                    "登録されていません。"
+                )
+            },
+            status=400,
+        )
+
+    if not reservation_date:
+        return JsonResponse(
+            {
+                "error": "予約日を指定してください。"
+            },
+            status=400,
+        )
+
+    try:
+
+        reservation_date = datetime.strptime(
+            reservation_date,
+            "%Y-%m-%d",
+        ).date()
+
+    except ValueError:
+
+        return JsonResponse(
+            {
+                "error": "予約日の形式が正しくありません。"
+            },
+            status=400,
+        )
+
+    try:
+
+        result = VisitorReservationService.create_reservation(
+            club=club,
+            lesson=lesson,
+            reservation_date=reservation_date,
+            full_name=full_name,
+            email=email,
+            phone_number=phone_number,
+            user=user,
+        )
+
+    except ValueError as e:
+
+        return JsonResponse(
+            {
+                "error": str(e)
+            },
+            status=400,
+        )
+
+    except Exception:
+
+        logger.exception(
+            "Visitor reservation creation failed"
+        )
+
+        return JsonResponse(
+            {
+                "error": "予約処理中にエラーが発生しました。"
+            },
+            status=500,
+        )
+
+    return JsonResponse(result)
+
+@require_POST
+def create_member_reservation(
+    request,
+    lesson_id,
+):
+    if not request.user.is_authenticated:
+        return JsonResponse(
+            {
+                "error": (
+                    "会員予約にはログインが必要です。"
+                )
+            },
+            status=401,
+        )
+
+    lesson = get_object_or_404(
+        Lesson,
+        id=lesson_id,
+    )
+
+    club = lesson.club
+
+    member_id = request.POST.get(
+        "member_id"
+    )
+
+    if not member_id:
+        return JsonResponse(
+            {
+                "error": "会員を指定してください。"
+            },
+            status=400,
+        )
+
+    member = get_object_or_404(
+        Member,
+        id=member_id,
+        club=club,
+    )
+
+    payment_method = request.POST.get(
+        "payment_method",
+        "stripe",
+    ).strip()
+
+    if payment_method not in ("stripe", "ticket"):
+        return JsonResponse(
+            {
+                "error": "無効な支払い方法です。"
+            },
+            status=400,
+        )
+
+    # The logged-in user must either be the
+    # member or the owner managing that member.
+    if (
+        member.user_id != request.user.id
+        and member.owner_id != request.user.id
+    ):
+        return JsonResponse(
+            {
+                "error": (
+                    "この会員の予約を"
+                    "作成する権限がありません。"
+                )
+            },
+            status=403,
+        )
+
+    if club.is_deleted:
+        return JsonResponse(
+            {
+                "error": (
+                    "このクラブは利用できません。"
+                )
+            },
+            status=400,
+        )
+
+    reservation_date = request.POST.get(
+        "reservation_date",
+        "",
+    ).strip()
+
+    if not reservation_date:
+        return JsonResponse(
+            {
+                "error": "予約日を指定してください。"
+            },
+            status=400,
+        )
+
+    try:
+        reservation_date = datetime.strptime(
+            reservation_date,
+            "%Y-%m-%d",
+        ).date()
+
+    except ValueError:
+        return JsonResponse(
+            {
+                "error": (
+                    "予約日の形式が正しくありません。"
+                )
+            },
+            status=400,
+        )
+
+    try:
+        result = (
+            MemberReservationService
+            .create_reservation(
+                club=club,
+                lesson=lesson,
+                member=member,
+                reservation_date=reservation_date,
+                payment_method=payment_method,
+            )
+        )
+
+    except ValueError as e:
+        return JsonResponse(
+            {
+                "error": str(e)
+            },
+            status=400,
+        )
+
+    except Exception:
+        logger.exception(
+            "Member reservation creation failed"
+        )
+
+        return JsonResponse(
+            {
+                "error": (
+                    "予約処理中にエラーが発生しました。"
+                )
+            },
+            status=500,
+        )
+
+    return JsonResponse(result)
+
+
+@require_POST
+def create_ticket_purchase(
+    request,
+    package_id,
+):
+    if not request.user.is_authenticated:
+        return JsonResponse(
+            {
+                "error": "チケット購入にはログインが必要です。"
+            },
+            status=401,
+        )
+
+    package = get_object_or_404(
+        TicketPackage,
+        id=package_id,
+    )
+
+    club = package.club
+
+    if club.is_deleted:
+        return JsonResponse(
+            {
+                "error": "このクラブは利用できません。"
+            },
+            status=400,
+        )
+
+    member_id = request.POST.get("member_id")
+
+    if not member_id:
+        return JsonResponse(
+            {
+                "error": "会員を指定してください。"
+            },
+            status=400,
+        )
+
+    member = get_object_or_404(
+        Member,
+        id=member_id,
+        club=club,
+    )
+
+    # The logged-in user must either be the member
+    # or the owner managing that member.
+    if (
+        member.user_id != request.user.id
+        and member.owner_id != request.user.id
+    ):
+        return JsonResponse(
+            {
+                "error": (
+                    "この会員のチケットを"
+                    "購入する権限がありません。"
+                )
+            },
+            status=403,
+        )
+
+    try:
+
+        result = (
+            TicketPurchaseService
+            .create_purchase(
+                club=club,
+                package=package,
+                member=member,
+            )
+        )
+
+    except ValueError as e:
+
+        return JsonResponse(
+            {
+                "error": str(e)
+            },
+            status=400,
+        )
+
+    except Exception:
+
+        logger.exception(
+            "Ticket purchase creation failed"
+        )
+
+        return JsonResponse(
+            {
+                "error": (
+                    "チケット購入処理中に"
+                    "エラーが発生しました。"
+                )
+            },
+            status=500,
+        )
+
+    return JsonResponse(result)
+
+    

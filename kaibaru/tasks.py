@@ -4,19 +4,21 @@ from django.conf import settings
 import stripe
 import logging
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from .tasks_emails import send_subscription_activated_emails, send_club_deleted_emails, send_invoice_created_email
+
+from .tasks_emails import send_subscription_activated_emails, send_club_deleted_emails
 
 logger = logging.getLogger(__name__)
 
-from .models import Participation, Club, Subscription, SubscriptionItem, Invoice, InvoiceItem
+from .models import Participation, Club, Subscription, Invoice
 from .utils import sync_member_quantity
 from django.db.models import Exists, OuterRef, CharField
 from django.db.models.functions import TruncDate, Cast
 
 
 from .locks_and_reconciliation import (
+    MemberReservationPaymentReconciler,
     StripeSubscriptionReconciler,
     CheckoutSubscriptionReconciler,
     StripeToCashInvoiceReconciler,
@@ -24,15 +26,11 @@ from .locks_and_reconciliation import (
     CacheLockError,
 )
 
-
-from django.db import transaction, IntegrityError
-
-from datetime import timedelta
-
+from .service_cycle_invoice_create import (
+    CashSubscriptionCycleInvoiceService,
+)
 
 
-from .pricing import get_effective_subscription_price
-from .discounts import calculate_discounted_amount
 
 
 
@@ -41,6 +39,44 @@ CASH_BILLING_METHODS = [
     "bank_transfer",
     "manual",
 ]
+
+@shared_task
+def reconcile_externally_canceled_stripe_subscriptions():
+    """
+    Periodic safety-net for Stripe subscriptions that may have
+    been canceled directly in Stripe.
+
+    This is intentionally separate from payment-failure reconciliation.
+    """
+
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+
+    logger.info(
+        "[STRIPE CANCELED TASK] Starting reconciliation"
+    )
+
+    try:
+
+        result = (
+            StripeToCashInvoiceReconciler
+            .reconcile_canceled_stripe_subscriptions()
+        )
+
+        logger.info(
+            "[STRIPE CANCELED TASK] Finished reconciliation "
+            "result=%s",
+            result,
+        )
+
+        return result
+
+    except Exception:
+
+        logger.exception(
+            "[STRIPE CANCELED TASK] Reconciliation failed"
+        )
+
+        raise
 
 @shared_task
 def reconcile_stripe_to_cash_invoices():
@@ -147,373 +183,19 @@ def schedule_cash_subscription_cycle_invoices():
     retry_kwargs={"max_retries": 5},
 )
 def create_cash_subscription_cycle_invoice(self, subscription_id):
-    """
-    Create the recurring local invoice for one non-Stripe subscription.
-
-    Idempotency:
-        subscription + billing_cycle_key
-
-    The billing_cycle_key is the date represented by
-    subscription.current_period_end.
-
-    IMPORTANT:
-        Creating the invoice does NOT advance current_period_end.
-        The subscription period should only advance when payment
-        is actually recorded.
-    """
-
-    today = timezone.localdate()
 
     try:
-        with transaction.atomic():
+        return CashSubscriptionCycleInvoiceService.create(
+            subscription_id=subscription_id
+        )
 
-            # ---------------------------------------------------------
-            # 1. Lock the subscription
-            # ---------------------------------------------------------
-            subscription = (
-                Subscription.objects
-                .select_for_update()
-                .select_related(
-                    "club",
-                    "owner",
-                )
-                .get(id=subscription_id)
-            )
-
-            # ---------------------------------------------------------
-            # 2. Safety checks
-            # ---------------------------------------------------------
-
-            if subscription.billing_method not in CASH_BILLING_METHODS:
-                logger.info(
-                    "[CASH BILLING] Skipping subscription=%s "
-                    "billing_method=%s",
-                    subscription.id,
-                    subscription.billing_method,
-                )
-                return {
-                    "success": True,
-                    "skipped": True,
-                    "reason": "not_cash_billing",
-                }
-
-            if subscription.status != "active":
-                logger.info(
-                    "[CASH BILLING] Skipping subscription=%s "
-                    "status=%s",
-                    subscription.id,
-                    subscription.status,
-                )
-                return {
-                    "success": True,
-                    "skipped": True,
-                    "reason": "subscription_not_active",
-                }
-
-            if not subscription.current_period_end:
-                logger.warning(
-                    "[CASH BILLING] Subscription=%s has no "
-                    "current_period_end",
-                    subscription.id,
-                )
-                return {
-                    "success": False,
-                    "skipped": True,
-                    "reason": "missing_current_period_end",
-                }
-
-            # ---------------------------------------------------------
-            # 3. Determine billing cycle
-            # ---------------------------------------------------------
-
-            billing_cycle_start = timezone.localtime(
-                subscription.current_period_end
-            ).date()
-
-            # Not due yet.
-            if billing_cycle_start > today:
-                logger.debug(
-                    "[CASH BILLING] Subscription=%s not due. "
-                    "cycle=%s today=%s",
-                    subscription.id,
-                    billing_cycle_start,
-                    today,
-                )
-
-                return {
-                    "success": True,
-                    "skipped": True,
-                    "reason": "not_due",
-                }
-
-            billing_cycle_key = billing_cycle_start.isoformat()
-
-            # ---------------------------------------------------------
-            # 4. IDEMPOTENCY CHECK
-            # ---------------------------------------------------------
-
-            existing_invoice = (
-                Invoice.objects
-                .filter(
-                    subscription=subscription,
-                    billing_reason="subscription_cycle",
-                    billing_cycle_key=billing_cycle_key,
-                )
-                .first()
-            )
-
-            if existing_invoice:
-                logger.info(
-                    "[CASH BILLING] Invoice already exists. "
-                    "subscription=%s invoice=%s cycle=%s",
-                    subscription.id,
-                    existing_invoice.id,
-                    billing_cycle_key,
-                )
-
-                return {
-                    "success": True,
-                    "already_exists": True,
-                    "invoice_id": existing_invoice.id,
-                    "amount_due": existing_invoice.amount_due,
-                    "billing_cycle_key": billing_cycle_key,
-                }
-
-            # ---------------------------------------------------------
-            # 5. Load active subscription items
-            # ---------------------------------------------------------
-
-            subscription_items = list(
-                SubscriptionItem.objects
-                .filter(
-                    subscription=subscription,
-                    deleted_at__isnull=True,
-                )
-                .select_related(
-                    "member",
-                    "plan",
-                )
-                .order_by("id")
-            )
-
-            if not subscription_items:
-                logger.warning(
-                    "[CASH BILLING] Subscription=%s has no "
-                    "active subscription items",
-                    subscription.id,
-                )
-
-                return {
-                    "success": False,
-                    "skipped": True,
-                    "reason": "no_active_items",
-                }
-
-            # ---------------------------------------------------------
-            # 6. Calculate invoice items
-            #
-            # THIS IS THE SAME CALCULATION AS invoice.created
-            # ---------------------------------------------------------
-
-            calculated_items = []
-            total = 0
-
-            for subscription_item in subscription_items:
-
-                member = subscription_item.member
-                plan = subscription_item.plan
-
-                if not member:
-                    logger.warning(
-                        "[CASH BILLING] SubscriptionItem=%s "
-                        "has no member",
-                        subscription_item.id,
-                    )
-                    continue
-
-                if not plan:
-                    logger.warning(
-                        "[CASH BILLING] SubscriptionItem=%s "
-                        "has no plan",
-                        subscription_item.id,
-                    )
-                    continue
-
-                # Same as your Stripe invoice.created webhook.
-                base = get_effective_subscription_price(
-                    subscription_item
-                )
-
-                discounted = calculate_discounted_amount(
-                    club=subscription.club,
-                    member=member,
-                    plan=plan,
-                    base_amount=base,
-                    apply_to="subscription",
-                )
-
-                amount = max(0, int(discounted))
-
-                if amount <= 0:
-                    continue
-
-                calculated_items.append(
-                    {
-                        "member": member,
-                        "plan": plan,
-                        "amount": amount,
-                        "description": (
-                            f"{member.full_name} "
-                            f"{plan.name}"
-                        ),
-                    }
-                )
-
-                total += amount
-
-            total = max(0, int(total))
-
-            # ---------------------------------------------------------
-            # 7. Create Invoice
-            # ---------------------------------------------------------
-
-            invoice = Invoice.objects.create(
-                club=subscription.club,
-                mutation=None,
-
-                payer=subscription.owner,
-                payer_name=(
-                    subscription.owner.get_full_name()
-                    if subscription.owner
-                    else None
-                ),
-                payer_email=(
-                    subscription.owner.email
-                    if subscription.owner
-                    else None
-                ),
-
-                subscription=subscription,
-
-                status="open",
-
-                amount_due=total,
-                amount_paid=0,
-
-                currency="jpy",
-
-                due_date=subscription.current_period_end,
-
-                stripe_invoice_id=None,
-
-                billing_reason="subscription_cycle",
-
-                billing_cycle_key=billing_cycle_key,
-            )
-
-            # ---------------------------------------------------------
-            # 8. Create InvoiceItems
-            #
-            # All happen inside the same transaction.
-            # ---------------------------------------------------------
-
-            invoice_items = [
-                InvoiceItem(
-                    invoice=invoice,
-                    member=item["member"],
-                    description=item["description"],
-                    amount=item["amount"],
-                    quantity=1,
-                )
-                for item in calculated_items
-            ]
-
-            if invoice_items:
-                InvoiceItem.objects.bulk_create(
-                    invoice_items,
-                    batch_size=500,
-                )
-
-            transaction.on_commit(
-                lambda invoice_id=invoice.id:
-                    send_invoice_created_email.delay(invoice_id)
-            )
-
-            logger.info(
-                "[CASH BILLING] Created invoice=%s "
-                "subscription=%s cycle=%s amount=%s items=%s",
-                invoice.id,
-                subscription.id,
-                billing_cycle_key,
-                total,
-                len(invoice_items),
-            )
-
-            # ---------------------------------------------------------
-            # 9. DO NOT advance current_period_end here
-            # ---------------------------------------------------------
-            #
-            # Invoice creation means:
-            #
-            #     "Customer owes this amount."
-            #
-            # Payment should be responsible for:
-            #
-            #     current_period_end
-            #     access_until
-            #
-            # advancement.
-            # ---------------------------------------------------------
-
-            logger.info(
-                "[CASH BILLING] Created invoice=%s "
-                "subscription=%s cycle=%s amount=%s items=%s",
-                invoice.id,
-                subscription.id,
-                billing_cycle_key,
-                total,
-                len(invoice_items),
-            )
-
-            return {
-                "success": True,
-                "invoice_id": invoice.id,
-                "subscription_id": subscription.id,
-                "amount_due": total,
-                "invoice_item_count": len(invoice_items),
-                "billing_cycle_key": billing_cycle_key,
-            }
-
-    except IntegrityError:
-
-        # -------------------------------------------------------------
-        # The unique constraint is the final idempotency guarantee.
-        #
-        # This can happen if two workers somehow race despite the
-        # SELECT ... FOR UPDATE.
-        # -------------------------------------------------------------
-
-        logger.info(
-            "[CASH BILLING] Duplicate invoice prevented by "
-            "database constraint subscription=%s",
+    except Exception:
+        logger.exception(
+            "[CASH BILLING] Failed creating cycle invoice "
+            "subscription=%s",
             subscription_id,
         )
-
-        invoice = (
-            Invoice.objects
-            .filter(
-                subscription_id=subscription_id,
-                billing_reason="subscription_cycle",
-            )
-            .order_by("-id")
-            .first()
-        )
-
-        return {
-            "success": True,
-            "already_exists": True,
-            "invoice_id": invoice.id if invoice else None,
-        }
+        raise
 
 @shared_task
 def reconcile_subscription_mutations():
@@ -829,3 +511,258 @@ def reconcile_stripe_subscriptions():
 def cancel_stripe_subscription(self, subscription_id):
     stripe.api_key = settings.STRIPE_SECRET_KEY
     stripe.Subscription.delete(subscription_id)
+
+
+
+@shared_task
+def reconcile_expired_canceling_subscriptions():
+    """
+    Safety-net for subscriptions that were scheduled to cancel
+    at the end of their Stripe billing period.
+
+    Normal flow:
+        Stripe cancels subscription
+        -> customer.subscription.deleted webhook
+        -> local subscription is cleaned up
+
+    This task handles the case where that webhook was missed.
+
+    We intentionally do NOT cancel Stripe subscriptions here.
+    Stripe is allowed to perform its normal scheduled cancellation.
+
+    Once Stripe confirms the subscription is canceled, the local
+    subscription is updated accordingly.
+    """
+
+    cutoff = timezone.now() - timedelta(hours=24)
+
+    subscriptions = (
+        Subscription.objects
+        .filter(
+            cancel_at_period_end=True,
+            stripe_subscription_id__isnull=False,
+            current_period_end__isnull=False,
+            current_period_end__lte=cutoff,
+        )
+        .select_related("club")
+        .order_by("current_period_end", "id")
+    )
+
+    checked = 0
+    cleaned = 0
+    skipped = 0
+    failed = 0
+
+    for subscription in subscriptions:
+
+        checked += 1
+
+        try:
+
+            with subscription_lock(
+                subscription.id,
+                timeout=300,
+            ):
+
+                # Re-read inside the lock because the subscription may
+                # have changed since the queryset above was evaluated.
+                subscription.refresh_from_db()
+
+                if not subscription.cancel_at_period_end:
+                    skipped += 1
+                    continue
+
+                if not subscription.stripe_subscription_id:
+                    skipped += 1
+                    continue
+
+                if (
+                    not subscription.current_period_end
+                    or subscription.current_period_end > cutoff
+                ):
+                    skipped += 1
+                    continue
+
+                club = subscription.club
+
+                stripe_subscription_id = (
+                    subscription.stripe_subscription_id
+                )
+
+                logger.info(
+                    "[CANCEL RECONCILIATION] Checking subscription=%s "
+                    "stripe_subscription=%s period_end=%s",
+                    subscription.id,
+                    stripe_subscription_id,
+                    subscription.current_period_end,
+                )
+
+                # -------------------------------------------------
+                # Check Stripe's actual state.
+                #
+                # We do NOT cancel it here.
+                # -------------------------------------------------
+
+                stripe_sub = stripe.Subscription.retrieve(
+                    stripe_subscription_id,
+                    stripe_account=club.stripe_account_id,
+                )
+
+                logger.info(
+                    "[CANCEL RECONCILIATION] Stripe subscription=%s "
+                    "status=%s cancel_at_period_end=%s",
+                    stripe_subscription_id,
+                    stripe_sub.status,
+                    stripe_sub.cancel_at_period_end,
+                )
+
+                # -------------------------------------------------
+                # Stripe has already canceled it.
+                #
+                # This is the missed-webhook recovery path.
+                # -------------------------------------------------
+
+                if stripe_sub.status in [
+                    "canceled",
+                    "incomplete_expired",
+                ]:
+
+                    subscription.status = "canceled"
+                    subscription.stripe_subscription_id = None
+                    subscription.cancel_at_period_end = False
+
+                    subscription.save(
+                        update_fields=[
+                            "status",
+                            "stripe_subscription_id",
+                            "cancel_at_period_end",
+                        ]
+                    )
+
+                    cleaned += 1
+
+                    logger.warning(
+                        "[CANCEL RECONCILIATION] Repaired local "
+                        "subscription=%s after Stripe cancellation. "
+                        "stripe_subscription=%s",
+                        subscription.id,
+                        stripe_subscription_id,
+                    )
+
+                    continue
+
+                # -------------------------------------------------
+                # Stripe has not canceled it yet.
+                #
+                # Leave it alone. Stripe remains responsible for
+                # completing the scheduled cancellation.
+                # -------------------------------------------------
+
+                logger.info(
+                    "[CANCEL RECONCILIATION] Stripe subscription=%s "
+                    "is still active/status=%s. Leaving unchanged.",
+                    stripe_subscription_id,
+                    stripe_sub.status,
+                )
+
+                skipped += 1
+
+        except CacheLockError:
+
+            logger.info(
+                "[CANCEL RECONCILIATION] Subscription locked. "
+                "Skipping subscription=%s",
+                subscription.id,
+            )
+
+            skipped += 1
+
+        except stripe.error.InvalidRequestError:
+
+            logger.exception(
+                "[CANCEL RECONCILIATION] Stripe subscription=%s "
+                "could not be retrieved for local subscription=%s",
+                subscription.stripe_subscription_id,
+                subscription.id,
+            )
+
+            failed += 1
+
+        except Exception:
+
+            logger.exception(
+                "[CANCEL RECONCILIATION] Unexpected failure "
+                "subscription=%s",
+                subscription.id,
+            )
+
+            failed += 1
+
+    logger.info(
+        "[CANCEL RECONCILIATION] Finished "
+        "checked=%s cleaned=%s skipped=%s failed=%s",
+        checked,
+        cleaned,
+        skipped,
+        failed,
+    )
+
+    return {
+        "checked": checked,
+        "cleaned": cleaned,
+        "skipped": skipped,
+        "failed": failed,
+    }
+
+
+@shared_task
+def reconcile_member_reservation_payments():
+    """
+    Periodic safety-net for member reservations paid through
+    an existing Stripe customer/payment method.
+
+    Handles the failure window where:
+
+        Stripe PaymentIntent succeeds
+                ↓
+        application crashes
+                ↓
+        Reservation remains UNPAID
+
+    The reconciler checks Stripe directly and repairs the local
+    reservation state.
+
+    Old reservations with definitively failed PaymentIntents are
+    deleted.
+    """
+
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+
+    logger.info(
+        "[MEMBER RESERVATION TASK] "
+        "Starting payment reconciliation"
+    )
+
+    try:
+
+        result = (
+            MemberReservationPaymentReconciler
+            .reconcile_old_unpaid_reservations()
+        )
+
+        logger.info(
+            "[MEMBER RESERVATION TASK] "
+            "Finished payment reconciliation result=%s",
+            result,
+        )
+
+        return result
+
+    except Exception:
+
+        logger.exception(
+            "[MEMBER RESERVATION TASK] "
+            "Payment reconciliation failed"
+        )
+
+        raise

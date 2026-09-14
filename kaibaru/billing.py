@@ -12,36 +12,59 @@ def get_next_month_start(today: date):
     return date(today.year, today.month + 1, 1)
 
 
+def get_access_until(period_end, billing_mode):
+    if billing_mode == "regular":
+        return period_end
 
+    elif billing_mode == "monthly":
+        last_day = calendar.monthrange(
+            period_end.year,
+            period_end.month,
+        )[1]
+
+        return datetime(
+            period_end.year,
+            period_end.month,
+            last_day,
+            23,
+            59,
+            59,
+            tzinfo=dt_timezone.utc,
+        )
+
+    return None
 
 def resolve_and_apply_subscription_period(sub, period_end_ts, today):
-    period_end = datetime.fromtimestamp(period_end_ts, tz=dt_timezone.utc)
+    period_end = datetime.fromtimestamp(
+        period_end_ts,
+        tz=dt_timezone.utc,
+    )
 
     if abs((period_end.date() - today).days) <= 1:
-        anchor_ts = get_next_billing_cycle_anchor(today, sub.billing_anchor_day)
-        period_end = datetime.fromtimestamp(anchor_ts, tz=dt_timezone.utc)
+        anchor_ts = get_next_billing_cycle_anchor(
+            today,
+            sub.billing_anchor_day,
+        )
+        period_end = datetime.fromtimestamp(
+            anchor_ts,
+            tz=dt_timezone.utc,
+        )
 
     sub.current_period_end = period_end
-
-    if sub.billing_mode == "regular":
-        sub.access_until = period_end
-
-    elif sub.billing_mode == "monthly":
-        year = period_end.year
-        month = period_end.month
-        last_day = calendar.monthrange(year, month)[1]
-
-        sub.access_until = datetime(
-            year, month, last_day, 23, 59, 59, tzinfo=dt_timezone.utc
-        )
+    sub.access_until = get_access_until(
+        period_end,
+        sub.billing_mode,
+    )
 
     return {
         "access_start": today,
-        "access_end": sub.access_until.date() if sub.access_until else period_end.date(),
+        "access_end": (
+            sub.access_until.date()
+            if sub.access_until
+            else period_end.date()
+        ),
         "current_period_end": period_end.date(),
     }
-
-
 
 def extract_subscription_id_from_invoice(invoice):
     """

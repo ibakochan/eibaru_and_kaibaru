@@ -5,13 +5,14 @@ from django.conf import settings
 from django.http import HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 
-from .models import Club, Member, Subscription, SubscriptionItem, MembershipPlan, StripeWebhookEvent, StripeCustomer, Invoice, InvoiceItem, Payment
-from .tasks_emails import send_subscription_activated_emails, send_invoice_paid_email
+from .models import TicketPurchase, TicketGrant, Reservation, Club, Member, Subscription, SubscriptionItem, MembershipPlan, StripeWebhookEvent, StripeCustomer, Invoice, InvoiceItem, Payment, SubscriptionMutation
+from .tasks_emails import send_visitor_reservation_confirmation_email, send_stripe_payment_failure_warning_email, send_subscription_activated_emails, send_invoice_paid_email
 from django.db import transaction
 
 from datetime import datetime, timezone as dt_timezone
 from django.utils import timezone
 from datetime import timedelta
+
 
 import calendar
 from django.db import IntegrityError
@@ -21,10 +22,11 @@ logger = logging.getLogger(__name__)
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
-from .locks_and_reconciliation import subscription_lock, CacheLockError
+from .locks_and_reconciliation import subscription_lock, CacheLockError, StripeToCashInvoiceReconciler
 
 from .discounts import calculate_discounted_amount
 from .billing import (
+    get_access_until,
     get_next_month_start,
     get_next_billing_cycle_anchor,
     should_set_monthly_resume_prevention,
@@ -143,6 +145,329 @@ def stripe_connected_webhook(request):
         session = event["data"]["object"]
 
         metadata = session.get("metadata", {})
+
+        # =========================================================
+        # VISITOR RESERVATION CHECKOUT
+        # =========================================================
+
+        reservation_id = metadata.get("reservation_id")
+
+        if reservation_id:
+
+            # This checkout belongs to a visitor reservation.
+            # Do not process it as a membership checkout.
+
+            reservation = (
+                Reservation.objects
+                .filter(
+                    id=reservation_id,
+                    club__stripe_account_id=account_id,
+                )
+                .first()
+            )
+
+            if not reservation:
+                logger.error(
+                    "[VISITOR RESERVATION] Reservation not found "
+                    "reservation_id=%s session=%s account=%s",
+                    reservation_id,
+                    session["id"],
+                    account_id,
+                )
+
+                return webhook_ok(event_record)
+
+            # Make sure the Stripe session matches the
+            # reservation we created locally.
+            if (
+                reservation.stripe_checkout_session_id
+                and reservation.stripe_checkout_session_id
+                != session["id"]
+            ):
+                logger.error(
+                    "[VISITOR RESERVATION] Checkout session "
+                    "mismatch reservation=%s expected=%s actual=%s",
+                    reservation.id,
+                    reservation.stripe_checkout_session_id,
+                    session["id"],
+                )
+
+                return webhook_ok(event_record)
+
+            # -----------------------------------------------------
+            # Only mark the reservation paid when Stripe says
+            # the Checkout Session payment has actually succeeded.
+            # -----------------------------------------------------
+
+            if session.get("payment_status") != "paid":
+                logger.warning(
+                    "[VISITOR RESERVATION] Checkout completed "
+                    "but payment is not paid yet. "
+                    "reservation=%s payment_status=%s",
+                    reservation.id,
+                    session.get("payment_status"),
+                )
+
+                return webhook_ok(event_record)
+
+            payment_intent_id = session.get(
+                "payment_intent"
+            )
+
+            # -----------------------------------------------------
+            # Mark reservation paid.
+            #
+            # This is intentionally idempotent. Stripe can retry
+            # webhook events, so running this more than once must
+            # be harmless.
+            # -----------------------------------------------------
+            newly_paid = False
+
+            with transaction.atomic():
+
+                reservation = (
+                    Reservation.objects
+                    .select_for_update()
+                    .filter(
+                        id=reservation.id,
+                        club__stripe_account_id=account_id,
+                    )
+                    .first()
+                )
+            
+                if not reservation:
+                    logger.error(
+                        "[VISITOR RESERVATION] Reservation "
+                        "disappeared during processing. "
+                        "reservation_id=%s",
+                        reservation_id,
+                    )
+            
+                    return webhook_ok(event_record)
+            
+                if reservation.status == Reservation.Status.PAID:
+            
+                    logger.info(
+                        "[VISITOR RESERVATION] Reservation "
+                        "already paid. reservation=%s",
+                        reservation.id,
+                    )
+            
+                else:
+            
+                    reservation.status = (
+                        Reservation.Status.PAID
+                    )
+            
+                    reservation.paid_at = timezone.now()
+            
+                    if payment_intent_id:
+                        reservation.stripe_payment_intent_id = (
+                            payment_intent_id
+                        )
+            
+                    reservation.save(
+                        update_fields=[
+                            "status",
+                            "paid_at",
+                            "stripe_payment_intent_id",
+                        ]
+                    )
+            
+                    newly_paid = True
+
+                    if newly_paid:
+                        if reservation.reservation_type == Reservation.ReservationType.MEMBER:
+                            send_visitor_reservation_confirmation_email.delay(
+                                reservation.id
+                            )
+                        else:
+                            send_visitor_reservation_confirmation_email.delay(
+                                reservation.id
+                            )
+            
+                    logger.info(
+                        "[VISITOR RESERVATION] "
+                        "Reservation successfully paid. "
+                        "reservation=%s session=%s "
+                        "payment_intent=%s",
+                        reservation.id,
+                        session["id"],
+                        payment_intent_id,
+                    )
+
+            if newly_paid:
+                send_visitor_reservation_confirmation_email.delay(
+                    reservation.id
+                )
+            
+            return webhook_ok(event_record)
+
+        # =========================================================
+        # TICKET PURCHASE CHECKOUT
+        # =========================================================
+
+        ticket_purchase_id = metadata.get(
+            "ticket_purchase_id"
+        )
+
+        if ticket_purchase_id:
+
+            purchase = (
+                TicketPurchase.objects
+                .select_related(
+                    "member",
+                    "package",
+                    "package__ticket_type",
+                )
+                .filter(
+                    id=ticket_purchase_id,
+                    member__club__stripe_account_id=account_id,
+                )
+                .first()
+            )
+
+            if not purchase:
+                logger.error(
+                    "[TICKET PURCHASE] Purchase not found "
+                    "purchase_id=%s session=%s account=%s",
+                    ticket_purchase_id,
+                    session["id"],
+                    account_id,
+                )
+
+                return webhook_ok(event_record)
+
+            # -----------------------------------------------------
+            # Make sure the Stripe session matches the local
+            # purchase.
+            # -----------------------------------------------------
+
+            if (
+                purchase.stripe_checkout_session_id
+                and purchase.stripe_checkout_session_id
+                != session["id"]
+            ):
+                logger.error(
+                    "[TICKET PURCHASE] Checkout session mismatch "
+                    "purchase=%s expected=%s actual=%s",
+                    purchase.id,
+                    purchase.stripe_checkout_session_id,
+                    session["id"],
+                )
+
+                return webhook_ok(event_record)
+
+            # -----------------------------------------------------
+            # Only fulfill the purchase after Stripe confirms
+            # that the Checkout Session has actually been paid.
+            # -----------------------------------------------------
+
+            if session.get("payment_status") != "paid":
+
+                logger.warning(
+                    "[TICKET PURCHASE] Checkout completed but "
+                    "payment is not paid. purchase=%s "
+                    "payment_status=%s",
+                    purchase.id,
+                    session.get("payment_status"),
+                )
+
+                return webhook_ok(event_record)
+
+            payment_intent_id = session.get(
+                "payment_intent"
+            )
+
+            # -----------------------------------------------------
+            # Mark purchase paid and grant tickets.
+            #
+            # select_for_update() makes this idempotent if Stripe
+            # delivers the same event more than once.
+            # -----------------------------------------------------
+
+            with transaction.atomic():
+
+                purchase = (
+                    TicketPurchase.objects
+                    .select_for_update()
+                    .select_related(
+                        "member",
+                        "package",
+                        "package__ticket_type",
+                    )
+                    .filter(
+                        id=ticket_purchase_id,
+                        member__club__stripe_account_id=account_id,
+                    )
+                    .first()
+                )
+
+                if not purchase:
+                    logger.error(
+                        "[TICKET PURCHASE] Purchase disappeared "
+                        "during processing. purchase_id=%s",
+                        ticket_purchase_id,
+                    )
+
+                    return webhook_ok(event_record)
+
+                if (
+                    purchase.status
+                    == TicketPurchase.Status.PAID
+                ):
+
+                    logger.info(
+                        "[TICKET PURCHASE] Purchase already "
+                        "paid. purchase=%s",
+                        purchase.id,
+                    )
+
+                else:
+
+                    purchase.status = (
+                        TicketPurchase.Status.PAID
+                    )
+
+                    purchase.paid_at = timezone.now()
+
+                    if payment_intent_id:
+                        purchase.stripe_payment_intent_id = (
+                            payment_intent_id
+                        )
+
+                    purchase.save(
+                        update_fields=[
+                            "status",
+                            "paid_at",
+                            "stripe_payment_intent_id",
+                        ]
+                    )
+
+                    TicketGrant.objects.create(
+                        member=purchase.member,
+                        ticket_type=(
+                            purchase.package.ticket_type
+                        ),
+                        source=(
+                            TicketGrant.Source.PURCHASE
+                        ),
+                        package=purchase.package,
+                        quantity=purchase.quantity,
+                    )
+
+                    logger.info(
+                        "[TICKET PURCHASE] Purchase fulfilled. "
+                        "purchase=%s member=%s package=%s "
+                        "quantity=%s payment_intent=%s",
+                        purchase.id,
+                        purchase.member_id,
+                        purchase.package_id,
+                        purchase.quantity,
+                        payment_intent_id,
+                    )
+
+            return webhook_ok(event_record)
 
 
         if metadata.get("type") == "cash_to_stripe":
@@ -285,6 +610,16 @@ def stripe_connected_webhook(request):
                         "billing_method",
                     ]
                 )
+
+                migration_mutation = SubscriptionMutation.objects.create(
+                    subscription=subscription,
+                    item=None,
+                    type=SubscriptionMutation.MutationType.CASH_TO_STRIPE,
+                    payload={
+                        "checkout_session_id": session["id"],
+                        "stripe_subscription_id": stripe_subscription_id,
+                    },
+                )
         
             # ---------------------------------------------------------
             # WEBHOOK EVENT
@@ -356,6 +691,22 @@ def stripe_connected_webhook(request):
         if stripe_customer_obj.stripe_customer_id != sub.customer:
             stripe_customer_obj.stripe_customer_id = sub.customer
             stripe_customer_obj.save(update_fields=["stripe_customer_id"])
+
+
+        next_period_end_ts = get_next_billing_cycle_anchor(
+            today,
+            club.stripe_anchor_date,
+        )
+
+        next_period_end = datetime.fromtimestamp(
+            next_period_end_ts,
+            tz=dt_timezone.utc,
+        )
+
+        access_until = get_access_until(
+            next_period_end,
+            club.subscription_mode,
+        )
         
         with transaction.atomic():
             sub_obj, created = Subscription.objects.get_or_create(
@@ -364,7 +715,8 @@ def stripe_connected_webhook(request):
                 defaults={
                     "stripe_subscription_id": sub.id,
                     "status": sub.status,
-                    "current_period_end": None,
+                    "current_period_end": next_period_end,
+                    "access_until": access_until,
                     "billing_mode": club.subscription_mode,
                     "billing_anchor_day": club.stripe_anchor_date,
                 }
@@ -762,12 +1114,6 @@ def stripe_connected_webhook(request):
         invoice = event["data"]["object"]
         logger.info(f"[invoice.paid] Received invoice: {invoice.get('id')}")
 
-        
-        
-        is_cycle = invoice.get("billing_reason") == "subscription_cycle"
-        
-
-
         subscription_id = extract_subscription_id_from_invoice(invoice)
 
         if not subscription_id:
@@ -837,8 +1183,7 @@ def stripe_connected_webhook(request):
 
         
         
-        is_first_invoice = sub.last_invoice_id is None
-        should_update_period = is_first_invoice or is_cycle
+
 
         logger.info(f"[invoice.paid] Found subscription {sub.id} for invoice {invoice['id']}")
         
@@ -893,23 +1238,7 @@ def stripe_connected_webhook(request):
 
         
 
-        # -------- Extract period end from invoice lines --------
-        periods = [
-            line["period"]["end"]
-            for line in invoice.get("lines", {}).get("data", [])
-            if line.get("period") and line["period"].get("end")
-        ]
 
-        period_end_ts = max(periods) if periods else None
-        logger.info(f"[invoice.paid] Calculated period_end_ts: {period_end_ts}")
-
-        if period_end_ts and should_update_period:
-            resolve_and_apply_subscription_period(sub, period_end_ts, today)
-        else:
-            logger.info(
-                f"[invoice.paid] Skipping period update for invoice {invoice['id']} "
-                f"(period_end_ts={period_end_ts}, should_update_period={should_update_period})"
-            )
 
         # -------- Finalize --------
 
@@ -965,12 +1294,31 @@ def stripe_connected_webhook(request):
     
             if not local_invoice.stripe_payment_failed_at:
                 local_invoice.stripe_payment_failed_at = timezone.now()
+                local_invoice.stripe_payment_failure_count = 1
     
-            local_invoice.save(
-                update_fields=[
-                    "stripe_payment_failed_at",
-                ]
-            )
+                local_invoice.save(
+                    update_fields=[
+                        "stripe_payment_failed_at",
+                        "stripe_payment_failure_count",
+                    ]
+                )
+
+                transaction.on_commit(
+                    lambda invoice_id=local_invoice.id:
+                        send_stripe_payment_failure_warning_email.delay(
+                            invoice_id
+                        )
+                )
+
+            else:
+                # Subsequent payment failure / retry
+                local_invoice.stripe_payment_failure_count += 1
+
+                local_invoice.save(
+                    update_fields=[
+                        "stripe_payment_failure_count",
+                    ]
+                )
     
         else:
             logger.warning(
@@ -979,50 +1327,170 @@ def stripe_connected_webhook(request):
                 invoice.get("id"),
             )
     
-        # ---------------------------------------------------------
-        # ONLY make the subscription past_due for a normal
-        # recurring subscription-cycle invoice.
-        # ---------------------------------------------------------
-    
-        if invoice.get("billing_reason") == "subscription_cycle":
-    
-            sub = Subscription.objects.filter(
-                stripe_subscription_id=invoice.get("subscription"),
-                club__stripe_account_id=account_id,
-            ).first()
-    
-            if sub:
-                sub.status = "past_due"
-                sub.save(
-                    update_fields=[
-                        "status",
-                    ]
-                )
-    
-                logger.info(
-                    "[invoice.payment_failed] Subscription=%s "
-                    "marked past_due for cycle invoice=%s",
-                    sub.id,
-                    invoice.get("id"),
-                )
+
 
     elif event["type"] == "customer.subscription.deleted":
         stripe_sub = event["data"]["object"]
-        
-        sub = Subscription.objects.filter(stripe_subscription_id=stripe_sub["id"], club__stripe_account_id=account_id).first()
+
+        stripe_subscription_id = stripe_sub["id"]
+    
+        sub = Subscription.objects.filter(
+            stripe_subscription_id=stripe_subscription_id,
+            club__stripe_account_id=account_id,
+        ).first()
+    
         if sub:
             try:
                 with subscription_lock(sub.id, timeout=300):
-                    sub.status = "canceled"
-                    sub.save()
-
+    
+                    sub.refresh_from_db()
+    
+                    if sub.billing_method == "cash":
+    
+                        logger.info(
+                            "[SUBSCRIPTION DELETED] Stripe subscription=%s "
+                            "was canceled after Stripe → cash migration. "
+                            "Keeping local subscription active. subscription=%s",
+                            stripe_subscription_id,
+                            sub.id,
+                        )
+    
+                        sub.stripe_subscription_id = None
+                        sub.cancel_at_period_end = False
+                        sub.status = "active"
+    
+                        sub.save(
+                            update_fields=[
+                                "stripe_subscription_id",
+                                "cancel_at_period_end",
+                                "status",
+                            ]
+                        )
+    
+                    elif (
+                        sub.billing_method == "stripe"
+                        and sub.cancel_at_period_end
+                    ):
+    
+                        logger.info(
+                            "[SUBSCRIPTION DELETED] Stripe subscription=%s "
+                            "completed scheduled cancellation. "
+                            "Marking local subscription canceled. "
+                            "subscription=%s",
+                            stripe_subscription_id,
+                            sub.id,
+                        )
+    
+                        sub.stripe_subscription_id = None
+                        sub.cancel_at_period_end = False
+                        sub.status = "canceled"
+    
+                        sub.save(
+                            update_fields=[
+                                "stripe_subscription_id",
+                                "cancel_at_period_end",
+                                "status",
+                            ]
+                        )
+    
+                    elif (
+                        sub.billing_method == "stripe"
+                        and not sub.cancel_at_period_end
+                    ):
+    
+                        logger.warning(
+                            "[SUBSCRIPTION DELETED] Stripe subscription=%s "
+                            "was canceled externally. "
+                            "Local subscription=%s will be converted to cash.",
+                            stripe_subscription_id,
+                            sub.id,
+                        )
+    
+                        # Don't call the lock-taking public method here.
+                        #
+                        # Instead, mark that this subscription needs the
+                        # targeted Stripe → cash transition after leaving
+                        # the lock.
+                        externally_canceled = True
+    
+                    else:
+    
+                        logger.warning(
+                            "[SUBSCRIPTION DELETED] Unexpected local state "
+                            "for subscription=%s billing_method=%s",
+                            sub.id,
+                            sub.billing_method,
+                        )
+    
+                        externally_canceled = False
+    
             except CacheLockError:
+    
                 logger.info(
-                    "Subscription locked, retrying webhook later subscription=%s",
+                    "[SUBSCRIPTION DELETED] Subscription locked. "
+                    "Returning 409 so Stripe can retry. subscription=%s",
                     sub.id,
                 )
+    
                 return HttpResponse(status=409)
-
+    
+            except Exception:
+    
+                logger.exception(
+                    "[SUBSCRIPTION DELETED] Failed handling "
+                    "Stripe subscription=%s local_subscription=%s",
+                    stripe_subscription_id,
+                    sub.id,
+                )
+    
+                return HttpResponse(status=500)
+    
+            # ---------------------------------------------------------
+            # Targeted Stripe → cash reconciliation.
+            #
+            # IMPORTANT:
+            # This happens OUTSIDE the lock above because the reconciler
+            # acquires the same subscription lock itself.
+            # ---------------------------------------------------------
+    
+            if externally_canceled:
+    
+                try:
+                    result = (
+                        StripeToCashInvoiceReconciler
+                        .reconcile_canceled_subscription(
+                            subscription_id=sub.id,
+                        )
+                    )
+    
+                    logger.info(
+                        "[SUBSCRIPTION DELETED] Targeted Stripe → cash "
+                        "reconciliation completed. subscription=%s result=%s",
+                        sub.id,
+                        result,
+                    )
+    
+                except CacheLockError:
+    
+                    logger.info(
+                        "[SUBSCRIPTION DELETED] Targeted reconciliation "
+                        "could not acquire lock. Returning 409. "
+                        "subscription=%s",
+                        sub.id,
+                    )
+    
+                    return HttpResponse(status=409)
+    
+                except Exception:
+    
+                    logger.exception(
+                        "[SUBSCRIPTION DELETED] Targeted Stripe → cash "
+                        "reconciliation failed. subscription=%s",
+                        sub.id,
+                    )
+    
+                    return HttpResponse(status=500)
+        
     
     elif event["type"] == "invoice.created":
         invoice = event["data"]["object"]
@@ -1178,27 +1646,62 @@ def stripe_connected_webhook(request):
                 # It does NOT mean payment succeeded.
                 # invoice.paid will mark it paid later.
                 # ------------------------------------------------------------
-
-                local_invoice, local_payment = (
-                    create_local_invoice_from_stripe_invoice(
-                        stripe_invoice=invoice,
-                        subscription=sub,
-                        billing_reason="subscription_cycle",
-                        initial_status="open",
+                with transaction.atomic():
+                    local_invoice, local_payment = (
+                        create_local_invoice_from_stripe_invoice(
+                            stripe_invoice=invoice,
+                            subscription=sub,
+                            billing_reason="subscription_cycle",
+                            initial_status="open",
+                        )
                     )
-                )
+
+                    periods = [
+                        line["period"]["end"]
+                        for line in invoice.get("lines", {}).get("data", [])
+                        if line.get("period") and line["period"].get("end")
+                    ]
+
+                    period_end_ts = max(periods) if periods else None
+
+                    if not period_end_ts:
+                        logger.error(
+                            "[invoice.created] No subscription line period found "
+                            "for invoice=%s subscription=%s",
+                            invoice["id"],
+                            sub.id,
+                        )
+                        raise ValueError(
+                            f"No subscription period found for invoice {invoice['id']}"
+                        )
+                
+                    resolve_and_apply_subscription_period(
+                        sub,
+                        period_end_ts,
+                        today,
+                    )
+                
+                    sub.save(
+                        update_fields=[
+                            "current_period_end",
+                            "access_until",
+                        ]
+                    )
 
                 logger.info(
-                    "[invoice.created] Local invoice created/found: "
+                    "[invoice.created] Processed subscription cycle: "
                     "local_invoice=%s stripe_invoice=%s "
+                    "period_end=%s access_until=%s "
                     "payment=%s amount_due=%s payment_method=%s "
                     "original_payment_method=%s",
                     local_invoice.id,
                     invoice["id"],
+                    sub.current_period_end,
+                    sub.access_until,
                     local_payment.id,
                     invoice.get("amount_due", 0),
                     local_invoice.payment_method,
-                    local_invoice.original_payment_method,
+                                    local_invoice.original_payment_method,
                 )
             
         except CacheLockError:
@@ -1320,7 +1823,7 @@ def stripe_platform_webhook(request):
         if club:
             club.subscription_active = False
             club.is_deleted = True
-            club.deleted_at = dj_timezone.localdate()
+            club.deleted_at = timezone.localtime().date()
             club.save()
 
     return webhook_ok(event_record) 

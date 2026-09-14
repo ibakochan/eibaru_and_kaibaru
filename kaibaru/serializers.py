@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import MembershipPlanGroup, MemberPricingAdjustment, Discount, DiscountCondition, Member, Club, Lesson, Participation, SlateImage, JoinRequest, InvoiceItem, Invoice, Subscription, SubscriptionItem
+from .models import TicketType, TicketPackage, Reservation, MembershipPlanGroup, MemberPricingAdjustment, Discount, DiscountCondition, Member, Club, Lesson, Participation, SlateImage, JoinRequest, InvoiceItem, Invoice, Subscription, SubscriptionItem
 
 from google.cloud import storage
 from django.db.models import Q
@@ -392,6 +392,11 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
             "default_plan_id",
             "deleted_at",
             "apply_current_price_to_existing",
+            "plan_type",
+            "ticket_type",
+            "ticket_quantity",
+            "ticket_expiration_mode",
+            "ticket_expiration_days",
         ]
         read_only_fields = [
             "id",
@@ -872,6 +877,7 @@ class MemberSerializer(serializers.ModelSerializer):
     age = serializers.SerializerMethodField()
     subscription_state = serializers.SerializerMethodField()
     subscription_items = serializers.SerializerMethodField()
+    tickets = serializers.SerializerMethodField()
 
     class Meta:
         model = Member
@@ -904,10 +910,62 @@ class MemberSerializer(serializers.ModelSerializer):
             "subscription_state",
             "subscription_items",
             "counts_for_family_discount",
+            "tickets",
         ]
         read_only_fields = ["id", "user", "is_manager", "is_instructor",]
 
+    def get_tickets(self, obj):
+        grants = getattr(
+            obj,
+            "_prefetched_objects_cache",
+            {},
+        ).get(
+            "ticket_grants",
+            obj.ticket_grants.all(),
+        )
     
+        now = timezone.now()
+    
+        result = []
+    
+        for grant in grants:
+            if not grant.ticket_type.active:
+                continue
+    
+            if (
+                grant.expires_at is not None
+                and grant.expires_at < now
+            ):
+                continue
+    
+            used_quantity = sum(
+                usage.quantity
+                for usage in grant.usages.all()
+                if usage.refunded_at is None
+            )
+    
+            remaining_quantity = (
+                grant.quantity - used_quantity
+            )
+    
+            if remaining_quantity <= 0:
+                continue
+    
+            result.append({
+                "id": grant.id,
+                "ticket_type_id": grant.ticket_type_id,
+                "eligible_plan_ids": list(
+                    grant.ticket_type.eligible_plans.values_list(
+                        "id",
+                        flat=True,
+                    )
+                ),
+                "remaining_quantity": remaining_quantity,
+                "expires_at": grant.expires_at,
+            })
+    
+        return result   
+
     def get_subscription_items(self, obj):
         items = getattr(
             obj,
@@ -1069,6 +1127,11 @@ class LessonSerializer(serializers.ModelSerializer):
     instructor_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
     club = serializers.PrimaryKeyRelatedField(read_only=True)
 
+    allowed_plans = serializers.PrimaryKeyRelatedField(many=True, queryset=MembershipPlan.objects.all(), required=False)
+
+    # NEW: Lesson background color.
+    background_color = serializers.CharField(max_length=7, required=False, default="#FFFFFF")
+
     total_participation = serializers.SerializerMethodField()
     monthly_participation = serializers.SerializerMethodField()
     monthly_average = serializers.SerializerMethodField()
@@ -1091,9 +1154,158 @@ class LessonSerializer(serializers.ModelSerializer):
             "total_participation",
             "monthly_participation",
             "monthly_average",
+            "background_color",
+
+            "allowed_plans",
+            "reservation_limit",
+            "reservation_only",
+            "trial_price",
+            "trial_disabled",
+
+
+            # Visitor
+            "visitor_reservation_price",
+            "visitor_reservation_disabled",
+
+            # Member
+            "member_reservation_price",
+            "member_reservation_disabled",
+            
         ]
         read_only_fields = ["id"]
 
+    def validate(self, attrs):
+        club = (
+            self.instance.club
+            if self.instance
+            else self.context.get("club")
+        )
+
+        if not club:
+            raise serializers.ValidationError({
+                "club": "Club is required."
+            })
+
+        allowed_plans = attrs.get(
+            "allowed_plans",
+            list(self.instance.allowed_plans.all())
+            if self.instance
+            else []
+        )
+
+
+
+        reservation_only = attrs.get(
+            "reservation_only",
+            self.instance.reservation_only
+            if self.instance
+            else False
+        )
+
+        reservation_limit = attrs.get(
+            "reservation_limit",
+            self.instance.reservation_limit
+            if self.instance
+            else None
+        )
+
+        invalid_plans = [
+            plan
+            for plan in allowed_plans
+            if plan.club_id != club.id
+        ]
+
+        if invalid_plans:
+            raise serializers.ValidationError({
+                "allowed_plans": (
+                    "All selected plans must belong to the same club "
+                    "as the lesson."
+                )
+            })
+
+        bundle_plans = [
+            plan
+            for plan in allowed_plans
+            if plan.bundled_plans.exists()
+        ]
+
+        if bundle_plans:
+            raise serializers.ValidationError({
+                "allowed_plans": (
+                    "Bundle plans cannot be used as required plans "
+                    "for lessons."
+                )
+            })
+
+
+
+        if (
+            reservation_limit is not None
+            and reservation_limit < 1
+        ):
+            raise serializers.ValidationError({
+                "reservation_limit": (
+                    "Reservation limit must be at least 1."
+                )
+            })
+
+
+        if reservation_only and allowed_plans:
+            raise serializers.ValidationError({
+                "allowed_plans": (
+                    "Reservation-only lessons cannot have "
+                    "membership plans."
+                )
+            })
+
+        start_time = attrs.get(
+            "start_time",
+            self.instance.start_time if self.instance else None
+        )
+
+        end_time = attrs.get(
+            "end_time",
+            self.instance.end_time if self.instance else None
+        )
+
+        section_id = attrs.get(
+            "section_id",
+            self.instance.section_id if self.instance else None
+        )
+
+        weekday = attrs.get(
+            "weekday",
+            self.instance.weekday if self.instance else None
+        )
+
+        if start_time is not None and end_time is not None:
+            if start_time >= end_time:
+                raise serializers.ValidationError({
+                    "end_time": "終了時間は開始時間より後にしてください。"
+                })
+
+            overlapping_lessons = Lesson.objects.filter(
+                club=club,
+                section_id=section_id,
+                weekday=weekday,
+                start_time__lt=end_time,
+                end_time__gt=start_time,
+            )
+
+            if self.instance:
+                overlapping_lessons = overlapping_lessons.exclude(
+                    id=self.instance.id
+                )
+
+            if overlapping_lessons.exists():
+                raise serializers.ValidationError({
+                    "start_time": (
+                        "同じ曜日・セクションに、時間が重なるレッスンが既にあります。"
+                    )
+                })
+
+        return attrs  
+  
     def get_instructor(self, obj):
         if obj.instructor:
             return {"id": obj.instructor.id, "full_name": obj.instructor.full_name}
@@ -1115,6 +1327,28 @@ class LessonSerializer(serializers.ModelSerializer):
         months = max(days / 30, 1)  
         return round(total / months, 2)
 
+    def update(self, instance, validated_data):
+        clear_allowed_plans = self.initial_data.get(
+            "clear_allowed_plans"
+        )
+
+        allowed_plans = validated_data.pop(
+            "allowed_plans",
+            None
+        )
+
+        instance = super().update(
+            instance,
+            validated_data
+        )
+
+        if clear_allowed_plans == "true":
+            instance.allowed_plans.clear()
+        elif allowed_plans is not None:
+            instance.allowed_plans.set(allowed_plans)
+
+        return instance
+
 
 
 
@@ -1131,6 +1365,8 @@ class ClubSerializer(serializers.ModelSerializer):
     join_requests = serializers.SerializerMethodField()
     my_join_requests = serializers.SerializerMethodField()
     membership_plans = serializers.SerializerMethodField()
+    ticket_types = serializers.SerializerMethodField()
+    ticket_packages = serializers.SerializerMethodField()
     membership_plan_groups = MembershipPlanGroupSerializer(many=True, read_only=True, source="membershipplangroup_set")
     invoices = serializers.SerializerMethodField()
 
@@ -1191,6 +1427,16 @@ class ClubSerializer(serializers.ModelSerializer):
             "membership_plan_groups",
             "stripe_subscription_id",
             "invoices",
+            "trial_price",
+            "trials_disabled",
+            "visitor_reservation_price",
+            "visitor_reservations_disabled",
+
+            "member_reservation_price",
+            "member_reservations_disabled",
+
+            "ticket_types",
+            "ticket_packages",
         ]
         read_only_fields = [
             "id",
@@ -1224,6 +1470,29 @@ class ClubSerializer(serializers.ModelSerializer):
             context=self.context,
         ).data    
 
+    def get_ticket_types(self, club):
+        return TicketTypeSerializer(
+            club.ticket_types.filter(
+                active=True,
+            ).prefetch_related(
+                "eligible_plans",
+            ),
+            many=True,
+            context=self.context,
+        ).data
+    
+    
+    def get_ticket_packages(self, club):
+        return TicketPackageSerializer(
+            club.ticket_packages.filter(
+                active=True,
+            ).select_related(
+                "ticket_type",
+            ),
+            many=True,
+            context=self.context,
+        ).data
+    
 
     def get_frozen(self, club):  
         if not club.expiration_date:
@@ -1426,3 +1695,294 @@ class ClubSerializer(serializers.ModelSerializer):
         ).data
 
  
+
+class TicketTypeSerializer(serializers.ModelSerializer):
+    eligible_plans = serializers.PrimaryKeyRelatedField(
+        many=True,
+        queryset=MembershipPlan.objects.all(),
+        required=True,
+    )
+
+    class Meta:
+        model = TicketType
+        fields = [
+            "id",
+            "club",
+            "name",
+            "description",
+            "eligible_plans",
+            "active",
+            "created_at",
+        ]
+        read_only_fields = [
+            "id",
+            "club",
+            "created_at",
+        ]
+
+    def validate_name(self, value):
+        value = value.strip()
+
+        if not value:
+            raise serializers.ValidationError(
+                "チケット名を入力してください。"
+            )
+
+        return value
+
+    def validate(self, attrs):
+        club = (
+            self.instance.club
+            if self.instance
+            else self.context.get("club")
+        )
+
+        if not club:
+            raise serializers.ValidationError({
+                "club_subdomain": "Club is required."
+            })
+
+        eligible_plans = attrs.get(
+            "eligible_plans",
+            list(self.instance.eligible_plans.all())
+            if self.instance
+            else []
+        )
+
+        if not eligible_plans:
+            raise serializers.ValidationError({
+                "eligible_plans": (
+                    "少なくとも1つの対象プランを選択してください。"
+                )
+            })
+
+        invalid_plans = [
+            plan
+            for plan in eligible_plans
+            if (
+                plan.club_id != club.id
+                or plan.is_deleted
+                or not plan.active
+            )
+        ]
+
+        if invalid_plans:
+            raise serializers.ValidationError({
+                "eligible_plans": (
+                    "対象プランには同じクラブの有効なプランのみ "
+                    "指定できます。"
+                )
+            })
+
+        return attrs
+
+class TicketPackageSerializer(serializers.ModelSerializer):
+    ticket_type_name = serializers.CharField(
+        source="ticket_type.name",
+        read_only=True,
+    )
+
+    class Meta:
+        model = TicketPackage
+        fields = [
+            "id",
+            "club",
+            "ticket_type",
+            "ticket_type_name",
+            "name",
+            "description",
+            "quantity",
+            "price",
+            "currency",
+            "stripe_price_id",
+            "active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "club",
+            "stripe_price_id",
+            "created_at",
+            "updated_at",
+        ]
+
+    def validate_name(self, value):
+        value = value.strip()
+
+        if not value:
+            raise serializers.ValidationError(
+                "パッケージ名を入力してください。"
+            )
+
+        return value
+
+    def validate_quantity(self, value):
+        if value <= 0:
+            raise serializers.ValidationError(
+                "チケット枚数は1以上にしてください。"
+            )
+
+        return value
+
+    def validate_price(self, value):
+        if value <= 0:
+            raise serializers.ValidationError(
+                "価格は1円以上にしてください。"
+            )
+
+        return value
+
+    def validate(self, attrs):
+        club = (
+            self.instance.club
+            if self.instance
+            else self.context.get("club")
+        )
+
+        if not club:
+            raise serializers.ValidationError({
+                "club_subdomain": "Club is required."
+            })
+
+        ticket_type = attrs.get(
+            "ticket_type",
+            self.instance.ticket_type
+            if self.instance
+            else None,
+        )
+
+        if not ticket_type:
+            raise serializers.ValidationError({
+                "ticket_type": "チケットタイプを選択してください。"
+            })
+
+        # -----------------------------------------
+        # Same club
+        # -----------------------------------------
+
+        if ticket_type.club_id != club.id:
+            raise serializers.ValidationError({
+                "ticket_type": (
+                    "チケットタイプは同じクラブに所属している必要があります。"
+                )
+            })
+
+        # -----------------------------------------
+        # Ticket type must be active
+        # -----------------------------------------
+
+        if not ticket_type.active:
+            raise serializers.ValidationError({
+                "ticket_type": (
+                    "このチケットタイプは現在無効です。"
+                )
+            })
+
+        # -----------------------------------------
+        # Ticket type cannot be changed on update
+        # -----------------------------------------
+
+        if (
+            self.instance
+            and ticket_type.id != self.instance.ticket_type_id
+        ):
+            raise serializers.ValidationError({
+                "ticket_type": (
+                    "チケットパッケージの対象チケットタイプは "
+                    "変更できません。"
+                )
+            })
+
+        # -----------------------------------------
+        # Currency
+        # -----------------------------------------
+
+        currency = attrs.get(
+            "currency",
+            self.instance.currency
+            if self.instance
+            else "jpy",
+        )
+
+        if currency.lower() != "jpy":
+            raise serializers.ValidationError({
+                "currency": "現在はJPYのみ対応しています。"
+            })
+
+        return attrs
+
+class ReservationSerializer(serializers.ModelSerializer):
+    lesson_title = serializers.CharField(
+        source="lesson.title",
+        read_only=True,
+    )
+
+    lesson_weekday = serializers.IntegerField(
+        source="lesson.weekday",
+        read_only=True,
+    )
+
+    lesson_start_time = serializers.TimeField(
+        source="lesson.start_time",
+        read_only=True,
+    )
+
+    lesson_end_time = serializers.TimeField(
+        source="lesson.end_time",
+        read_only=True,
+    )
+
+    instructor = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Reservation
+        fields = [
+            "id",
+
+            # Lesson information
+            "lesson",
+            "lesson_title",
+            "lesson_weekday",
+            "lesson_start_time",
+            "lesson_end_time",
+            "instructor",
+
+            # Ownership
+            "club",
+            "member",
+            "user",
+
+            # Reservation
+            "reservation_type",
+            "status",
+            "reservation_date",
+
+            # Customer information
+            "full_name",
+            "email",
+            "phone_number",
+
+            # Payment
+            "amount",
+            "currency",
+            "paid_at",
+
+            # Metadata
+            "created_at",
+        ]
+
+        read_only_fields = fields
+
+    def get_instructor(self, obj):
+        instructor = obj.lesson.instructor
+
+        if not instructor:
+            return None
+
+        return {
+            "id": instructor.id,
+            "full_name": instructor.full_name,
+        }
+
+

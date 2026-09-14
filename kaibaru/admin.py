@@ -20,6 +20,12 @@ from .models import (
     DiscountCondition,
     MemberPricingAdjustment,
     SubscriptionMutation,
+    Reservation,
+    TicketType,
+    TicketPackage,
+    TicketPurchase,
+    TicketGrant,
+    TicketUsage,
 )
 
 admin.site.register([
@@ -43,4 +49,10 @@ admin.site.register([
     DiscountCondition,
     MemberPricingAdjustment,
     SubscriptionMutation,
+    Reservation,
+    TicketType,
+    TicketPackage,
+    TicketPurchase,
+    TicketGrant,
+    TicketUsage,
 ])

@@ -4,7 +4,6 @@ from django.db import transaction
 from django.utils import timezone
 
 from .models import Payment
-from .billing import resolve_and_apply_subscription_period
 from .tasks_emails import send_invoice_paid_email
 
 
@@ -45,7 +44,6 @@ class CashInvoicePaymentService:
             )
 
 
-        today = timezone.localtime().date()
 
 
         with transaction.atomic():
@@ -65,27 +63,6 @@ class CashInvoicePaymentService:
                 }
             )
 
-
-            # -------------------------
-            # Update subscription period
-            # -------------------------
-
-            if (
-                invoice.billing_reason
-                in [
-                    "initial_subscription",
-                    "subscription_cycle",
-                ]
-                and subscription.current_period_end
-            ):
-
-                resolve_and_apply_subscription_period(
-                    subscription,
-                    int(subscription.current_period_end.timestamp()),
-                    today,
-                )
-
-
             # -------------------------
             # Mark invoice paid
             # -------------------------
@@ -97,15 +74,6 @@ class CashInvoicePaymentService:
                 update_fields=[
                     "status",
                     "amount_paid",
-                ]
-            )
-
-
-            subscription.status = "active"
-
-            subscription.save(
-                update_fields=[
-                    "status",
                 ]
             )
 

@@ -3,7 +3,7 @@ from rest_framework import viewsets, serializers, status
 from rest_framework.decorators import action
 from rest_framework.viewsets import ViewSet
 from rest_framework.response import Response
-from .models import Invoice, MemberPricingAdjustment, Discount, DiscountCondition, SubscriptionItem, Member, Club, Lesson, Participation, SlateImage, JoinRequest, MembershipPlan, Subscription
+from .models import TicketGrant, TicketType, TicketPackage, Reservation, Invoice, MemberPricingAdjustment, Discount, DiscountCondition, SubscriptionItem, Member, Club, Lesson, Participation, SlateImage, JoinRequest, MembershipPlan, Subscription
 from accounts.models import CustomUser
 from django.contrib.auth import login
 import re
@@ -35,7 +35,7 @@ from .pricing import (
     get_effective_subscription_price,
 )
 
-from .serializers import PaymentHistoryInvoiceSerializer, MemberPricingAdjustmentSerializer, DiscountConditionSerializer, DiscountSerializer, MembershipPlanSerializer, MemberSerializer, ClubSerializer, LessonSerializer, ParticipationSerializer, SlateImageSerializer, JoinRequestSerializer
+from .serializers import TicketTypeSerializer, TicketPackageSerializer, ReservationSerializer, PaymentHistoryInvoiceSerializer, MemberPricingAdjustmentSerializer, DiscountConditionSerializer, DiscountSerializer, MembershipPlanSerializer, MemberSerializer, ClubSerializer, LessonSerializer, ParticipationSerializer, SlateImageSerializer, JoinRequestSerializer
 from django.conf import settings
 from datetime import timedelta
 import hashlib
@@ -1177,11 +1177,635 @@ class MemberViewSet(viewsets.ModelViewSet):
         return Response({"status": "deleted"}, status=status.HTTP_200_OK)
 
 
+class TicketTypeViewSet(viewsets.ModelViewSet):
+    serializer_class = TicketTypeSerializer
+    queryset = TicketType.objects.all()
 
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+
+        if self.request.method in ["POST", "PUT", "PATCH"]:
+            subdomain = self.request.data.get("club_subdomain")
+        else:
+            subdomain = self.request.query_params.get("club_subdomain")
+
+        club = Club.objects.filter(
+            subdomain=subdomain,
+            is_deleted=False,
+        ).first()
+
+        context["club"] = club
+
+        return context
+
+    def get_queryset(self):
+        qs = (
+            TicketType.objects
+            .select_related("club")
+            .prefetch_related("eligible_plans")
+            .order_by("name")
+        )
+
+        subdomain = (
+            self.request.query_params.get("club_subdomain")
+        )
+
+        if subdomain:
+            qs = qs.filter(
+                club__subdomain=subdomain,
+                club__is_deleted=False,
+            )
+
+        # Only show ticket types belonging to clubs
+        # owned by the requesting user.
+        if self.request.user.is_authenticated:
+            qs = qs.filter(
+                club__owner=self.request.user
+            )
+        else:
+            qs = qs.none()
+
+        return qs
+
+    def perform_create(self, serializer):
+        subdomain = self.request.data.get("club_subdomain")
+
+        if not subdomain:
+            raise serializers.ValidationError({
+                "club_subdomain": "This field is required."
+            })
+
+        club = Club.objects.filter(
+            subdomain=subdomain,
+            is_deleted=False,
+        ).first()
+
+        if not club:
+            raise serializers.ValidationError({
+                "club_subdomain": "Club not found."
+            })
+
+        if club.owner_id != self.request.user.id:
+            raise serializers.ValidationError({
+                "detail": "Only owner can create ticket types."
+            })
+
+        serializer.save(club=club)
+
+    def perform_update(self, serializer):
+        ticket_type = self.get_object()
+
+        if ticket_type.club.owner_id != self.request.user.id:
+            raise serializers.ValidationError({
+                "detail": "Only owner can update ticket types."
+            })
+
+        serializer.save(club=ticket_type.club)
+
+    def perform_destroy(self, instance):
+        if instance.club.owner_id != self.request.user.id:
+            raise serializers.ValidationError({
+                "detail": "Only owner can delete ticket types."
+            })
+
+        # Don't actually delete it if packages/grants may reference it.
+        instance.active = False
+        instance.save(update_fields=["active"])
+
+class TicketPackageViewSet(viewsets.ModelViewSet):
+    serializer_class = TicketPackageSerializer
+    queryset = TicketPackage.objects.all()
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+
+        if self.request.method in ["POST", "PUT", "PATCH"]:
+            subdomain = self.request.data.get("club_subdomain")
+        else:
+            subdomain = self.request.query_params.get("club_subdomain")
+
+        club = Club.objects.filter(
+            subdomain=subdomain,
+            is_deleted=False,
+        ).first()
+
+        context["club"] = club
+
+        return context
+
+    def get_queryset(self):
+        qs = (
+            TicketPackage.objects
+            .select_related(
+                "club",
+                "ticket_type",
+            )
+            .order_by("price", "name")
+        )
+
+        subdomain = self.request.query_params.get(
+            "club_subdomain"
+        )
+
+        if subdomain:
+            qs = qs.filter(
+                club__subdomain=subdomain,
+                club__is_deleted=False,
+            )
+
+        if self.request.user.is_authenticated:
+            qs = qs.filter(
+                club__owner=self.request.user
+            )
+        else:
+            qs = qs.none()
+
+        return qs
+
+    def perform_create(self, serializer):
+        subdomain = self.request.data.get("club_subdomain")
+
+        if not subdomain:
+            raise serializers.ValidationError({
+                "club_subdomain": "This field is required."
+            })
+
+        club = Club.objects.filter(
+            subdomain=subdomain,
+            is_deleted=False,
+        ).first()
+
+        if not club:
+            raise serializers.ValidationError({
+                "club_subdomain": "Club not found."
+            })
+
+        if club.owner_id != self.request.user.id:
+            raise serializers.ValidationError({
+                "detail": "Only owner can create ticket packages."
+            })
+
+        if not club.stripe_account_id:
+            raise serializers.ValidationError({
+                "detail": (
+                    "このクラブではオンライン決済が設定されていません。"
+                )
+            })
+
+        package = serializer.save(
+            club=club,
+            currency="jpy",
+        )
+
+        try:
+            product_data = {
+                "name": package.name,
+                "metadata": {
+                    "club_id": str(club.id),
+                    "ticket_package_id": str(package.id),
+                    "ticket_type_id": str(package.ticket_type_id),
+                },
+            }
+
+            if package.description:
+                product_data["description"] = package.description
+
+            product = stripe.Product.create(
+                **product_data,
+                stripe_account=club.stripe_account_id,
+            )
+
+            stripe_price = stripe.Price.create(
+                product=product.id,
+                unit_amount=int(package.price),
+                currency=package.currency,
+                stripe_account=club.stripe_account_id,
+            )
+
+            package.stripe_price_id = stripe_price.id
+            package.stripe_product_id = product.id
+
+            package.save(
+                update_fields=[
+                    "stripe_price_id",
+                    "stripe_product_id"
+                ]
+            )
+
+        except Exception:
+            package.delete()
+            raise
+
+    def perform_update(self, serializer):
+        package = self.get_object()
+
+        if package.club.owner_id != self.request.user.id:
+            raise serializers.ValidationError({
+                "detail": "Only owner can update ticket packages."
+            })
+
+        old_name = package.name
+        old_description = package.description
+        old_price = package.price
+        old_currency = package.currency
+        old_stripe_price_id = package.stripe_price_id
+
+        updated_package = serializer.save(
+            club=package.club,
+        )
+
+        club = package.club
+
+        if not club.stripe_account_id:
+            raise serializers.ValidationError({
+                "detail": (
+                    "このクラブではオンライン決済が設定されていません。"
+                )
+            })
+
+        stripe_account = club.stripe_account_id
+
+        # -----------------------------------------
+        # Update Stripe Product
+        # -----------------------------------------
+
+        # We need the product ID. Since your current
+        # TicketPackage only stores stripe_price_id,
+        # we should retrieve the Price to find the product.
+        # -----------------------------------------
+
+        if old_stripe_price_id:
+            stripe_price = stripe.Price.retrieve(
+                old_stripe_price_id,
+                stripe_account=stripe_account,
+            )
+
+            product_id = stripe_price.product
+
+            if (
+                old_name != updated_package.name
+                or old_description != updated_package.description
+            ):
+                stripe.Product.modify(
+                    product_id,
+                    name=updated_package.name,
+                    description=updated_package.description or "",
+                    stripe_account=stripe_account,
+                )
+
+            # -----------------------------------------
+            # Price changed → create a NEW Stripe Price
+            # -----------------------------------------
+
+            if (
+                old_price != updated_package.price
+                or old_currency != updated_package.currency
+            ):
+                new_price = stripe.Price.create(
+                    product=product_id,
+                    unit_amount=int(updated_package.price),
+                    currency=updated_package.currency,
+                    stripe_account=stripe_account,
+                )
+
+                # Disable the old price.
+                stripe.Price.modify(
+                    old_stripe_price_id,
+                    active=False,
+                    stripe_account=stripe_account,
+                )
+
+                updated_package.stripe_price_id = new_price.id
+
+                updated_package.save(
+                    update_fields=[
+                        "stripe_price_id",
+                    ]
+                )
+
+    def perform_destroy(self, instance):
+        if instance.club.owner_id != self.request.user.id:
+            raise serializers.ValidationError({
+                "detail": "Only owner can delete ticket packages."
+            })
+    
+        instance.active = False
+        instance.save(update_fields=["active"])
+    
+        if instance.stripe_price_id and instance.club.stripe_account_id:
+            try:
+                stripe.Price.modify(
+                    instance.stripe_price_id,
+                    active=False,
+                    stripe_account=instance.club.stripe_account_id,
+                )
+            except stripe.error.StripeError:
+                # Don't destroy the local package just because
+                # Stripe archival failed.
+                raise serializers.ValidationError({
+                    "detail": (
+                        "Stripe上の価格を無効化できなかったため、"
+                        "パッケージを無効化できませんでした。"
+                    )
+                })
+    
+class ReservationViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = ReservationSerializer
+
+    # ---------------------------------------------------------
+    # Shared queryset optimization
+    # ---------------------------------------------------------
+
+    def get_base_queryset(self):
+        return (
+            Reservation.objects
+            .select_related(
+                "club",
+                "lesson",
+                "lesson__instructor",
+                "lesson__instructor__user",
+                "member",
+                "user",
+            )
+            .filter(
+                status=Reservation.Status.PAID,
+            )
+            .order_by(
+                "reservation_date",
+                "lesson__start_time",
+                "id",
+            )
+        )
+
+    # ---------------------------------------------------------
+    # Default queryset
+    #
+    # We don't expose a generic unfiltered reservation list.
+    # ---------------------------------------------------------
+
+    def get_queryset(self):
+        return Reservation.objects.none()
+
+    # =========================================================
+    # MY RESERVATIONS
+    #
+    # Works for:
+    # - regular members
+    # - logged-in non-members
+    #
+    # Both are identified by Reservation.user.
+    #
+    # GET:
+    # /api/reservations/my/<club_id>/
+    # =========================================================
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path=r"my/(?P<club_id>\d+)",
+    )
+    def my_reservations(
+        self,
+        request,
+        club_id=None,
+    ):
+        if not request.user.is_authenticated:
+            return Response(
+                {
+                    "detail":
+                        "ログインが必要です。"
+                },
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        club = (
+            Club.objects
+            .filter(
+                id=club_id,
+                is_deleted=False,
+            )
+            .first()
+        )
+
+        if not club:
+            return Response(
+                {
+                    "detail":
+                        "クラブが見つかりません。"
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        qs = (
+            self.get_base_queryset()
+            .filter(
+                club=club,
+                user=request.user,
+                reservation_date__gte=timezone.localdate(),
+            )
+        )
+
+        serializer = self.get_serializer(
+            qs,
+            many=True,
+        )
+
+        return Response(
+            serializer.data,
+            status=status.HTTP_200_OK,
+        )
+
+    # =========================================================
+    # CLUB RESERVATIONS
+    #
+    # Owner only.
+    #
+    # Includes recent history + future reservations.
+    #
+    # GET:
+    # /api/reservations/club/<club_id>/
+    # =========================================================
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path=r"club/(?P<club_id>\d+)",
+    )
+    def club_reservations(
+        self,
+        request,
+        club_id=None,
+    ):
+        if not request.user.is_authenticated:
+            return Response(
+                {
+                    "detail":
+                        "ログインが必要です。"
+                },
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        club = (
+            Club.objects
+            .filter(
+                id=club_id,
+                owner=request.user,
+                is_deleted=False,
+            )
+            .first()
+        )
+
+        if not club:
+            return Response(
+                {
+                    "detail":
+                        "このクラブの予約情報を"
+                        "閲覧する権限がありません。"
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        history_start = (
+            timezone.localdate()
+            - timezone.timedelta(
+                days=183
+            )
+        )
+
+        qs = (
+            self.get_base_queryset()
+            .filter(
+                club=club,
+                reservation_date__gte=history_start,
+            )
+        )
+
+        serializer = self.get_serializer(
+            qs,
+            many=True,
+        )
+
+        return Response(
+            serializer.data,
+            status=status.HTTP_200_OK,
+        )
+
+    # =========================================================
+    # INSTRUCTOR RESERVATIONS
+    #
+    # Only reservations for lessons taught by the requesting
+    # instructor.
+    #
+    # Instructor check:
+    #
+    # request.user == reservation.lesson.instructor.user
+    #
+    # GET:
+    # /api/reservations/instructor/<club_id>/
+    # =========================================================
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path=r"instructor/(?P<club_id>\d+)",
+    )
+    def instructor_reservations(
+        self,
+        request,
+        club_id=None,
+    ):
+        if not request.user.is_authenticated:
+            return Response(
+                {
+                    "detail":
+                        "ログインが必要です。"
+                },
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        club = (
+            Club.objects
+            .filter(
+                id=club_id,
+                is_deleted=False,
+            )
+            .first()
+        )
+
+        if not club:
+            return Response(
+                {
+                    "detail":
+                        "クラブが見つかりません。"
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # -----------------------------------------------------
+        # Make sure the requesting user is actually an
+        # instructor belonging to this club.
+        #
+        # We use the same relationship you described:
+        #
+        # request.user == reservation.lesson.instructor.user
+        # -----------------------------------------------------
+
+        instructor_member = (
+            Member.objects
+            .filter(
+                club=club,
+                user=request.user,
+                is_instructor=True,
+            )
+            .first()
+        )
+
+        if not instructor_member:
+            return Response(
+                {
+                    "detail":
+                        "この予約情報を閲覧する権限がありません。"
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        qs = (
+            self.get_base_queryset()
+            .filter(
+                club=club,
+                reservation_date__gte=timezone.localdate(),
+            )
+        )
+
+        serializer = self.get_serializer(
+            qs,
+            many=True,
+        )
+
+        return Response(
+            serializer.data,
+            status=status.HTTP_200_OK,
+        )
 
 class LessonViewSet(viewsets.ModelViewSet):
     queryset = Lesson.objects.all()
     serializer_class = LessonSerializer
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+
+        subdomain = self.request.data.get("club_subdomain")
+
+        # NEW: Find the club from the submitted subdomain.
+        club = Club.objects.filter(
+            subdomain=subdomain,
+            is_deleted=False
+        ).first()
+
+        # NEW: Pass the club into LessonSerializer.
+        context["club"] = club
+
+        return context
 
     def perform_create(self, serializer):
         subdomain = self.request.data.get("club_subdomain")
@@ -1211,6 +1835,8 @@ class LessonViewSet(viewsets.ModelViewSet):
                 raise serializers.ValidationError({"instructor_id": "Instructor not found or not valid."})
 
         serializer.save(club=club, instructor=instructor, section_id=section_id)
+
+
 
 class ParticipationViewSet(viewsets.ModelViewSet):
     queryset = Participation.objects.all()
@@ -1406,6 +2032,17 @@ class ClubViewSet(viewsets.ModelViewSet):
                                 Q(deleted_at__isnull=True) |
                                 Q(deleted_at__isnull=False, access_until__gt=now()),
                                 subscription__status__in=["active", "trialing", "pending"],
+                            ),
+                        ),
+                        Prefetch(
+                            "ticket_grants",
+                            queryset=(
+                                TicketGrant.objects
+                                .select_related("ticket_type")
+                                .prefetch_related(
+                                    "ticket_type__eligible_plans",
+                                    "usages",
+                                )
                             ),
                         ),
                     ),

@@ -5,10 +5,10 @@ from accounts.models import CustomUser
 import logging
 logger = logging.getLogger(__name__)
 
-from .models import Club, SubscriptionItem
+from .models import Club, SubscriptionItem, Member
 from django.db import transaction
  
-from datetime import datetime
+from datetime import datetime, timedelta
 
 def format_date(dt):
     if not dt:
@@ -479,16 +479,30 @@ def send_stripe_cash_transition_email(self, invoice_id):
     ]
 
     club_name = club.subdomain or "クラブ"
+    
 
-    member_name = (
-        billing_user.get_full_name()
-        if billing_user
-        else None
-    ) or (
-        invoice.payer_name
-        or invoice.payer_email
-        or "お客様"
+    member = (
+        Member.objects
+        .filter(
+            club=club,
+            user=billing_user,
+            owner=billing_user,
+        )
+            .first()
     )
+
+    if member:
+        member_name = member.full_name
+    else:
+        member_name = (
+            billing_user.get_full_name()
+            if billing_user
+            else None
+        ) or (
+            invoice.payer_name
+            or invoice.payer_email
+            or "お客様"
+        )
 
     owner_name = (
         club_owner.get_full_name()
@@ -497,7 +511,6 @@ def send_stripe_cash_transition_email(self, invoice_id):
     )
 
     amount_text = f"¥{invoice.amount_due:,}"
-    due_date_text = format_date(invoice.due_date)
 
     # =========================================================
     # 1. MEMBER EMAIL
@@ -566,27 +579,33 @@ def send_stripe_cash_transition_email(self, invoice_id):
 
                     f"{club_name}のお支払いについて、"
                     f"クレジットカードでのお支払いを確認できなかったため、"
-                    f"今後のお支払い方法を現金払いへ変更いたしました。\n\n"
-
+                    f"今回の請求を現金払いへ変更し、"
+                    f"今後のお支払い方法も現金払いへ変更いたしました。\n\n"
+                
                     f"■ 変更内容\n"
-                    f"クレジットカード決済 → 現金払い\n\n"
-
+                    f"今回の請求：クレジットカード決済 → 現金払い\n"
+                    f"今後のお支払い：現金払い\n\n"
+                
                     f"■ 今回のお支払い\n"
                     f"{amount_text}\n\n"
-
-                    f"■ お支払い期限\n"
-                    f"{due_date_text}\n\n"
-
-                    f"今回のクレジットカード決済は終了しており、"
-                    f"今後のお支払いについては"
+                
+                    f"今回の請求については、"
                     f"{club_name}へ直接お支払いください。\n\n"
-
+                
+                    f"未払いの請求書をすべてお支払いいただいた後は、"
+                    f"ログイン後、{club_name}のホームページの「会員プラン」から"
+                    f"お支払い方法をクレジットカード決済（Stripe）へ"
+                    f"戻すことができます。\n\n"
+                
+                    f"なお、未払いの請求書が残っている場合は、"
+                    f"クレジットカード決済（Stripe）へ戻すことはできません。\n\n"
+                
                     f"お支払い方法や金額についてご不明な点がございましたら、"
                     f"{club_name}までお問い合わせください。\n\n"
-
+                
                     f"{club_name}"
-                )
-
+                )                
+                
             else:
 
                 member_message = (
@@ -601,9 +620,6 @@ def send_stripe_cash_transition_email(self, invoice_id):
 
                     f"■ 今回のお支払い\n"
                     f"{amount_text}\n\n"
-
-                    f"■ お支払い期限\n"
-                    f"{due_date_text}\n\n"
 
                     f"今回のお支払いについては、"
                     f"{club_name}へ直接お支払いください。\n\n"
@@ -708,45 +724,44 @@ def send_stripe_cash_transition_email(self, invoice_id):
                 f"対象の請求書を現金払いへ変更し、"
                 f"サブスクリプション全体の支払い方法も"
                 f"現金払いへ変更しました。\n\n"
-
+            
                 f"■ 対象会員\n"
                 f"{member_name}\n\n"
-
+            
                 f"■ 対象請求書\n"
                 f"{invoice.number or invoice.id}\n\n"
-
+            
                 f"■ 請求金額\n"
                 f"{amount_text}\n\n"
-
+            
                 f"■ 請求理由\n"
                 f"{invoice.billing_reason or '---'}\n\n"
-
+            
                 f"■ 変更内容\n"
                 f"クレジットカード決済 → 現金払い\n"
                 f"サブスクリプション全体も現金払いへ変更\n\n"
-
+            
                 f"今後、この会員様の請求は現金での回収となります。\n\n"
-
+            
                 f"会員様から未払いの請求について現金でのお支払いを受けた場合は、"
                 f"管理画面から該当する請求書を「支払済み」として"
                 f"処理してください。\n\n"
-
+            
                 f"未払いの請求書がすべて支払済みになった後は、"
-                f"「会員プラン」から会員様のサブスクリプションを"
+                f"会員様ご本人がログインし、"
+                f"{club_name}のホームページの「会員プラン」から"
+                f"サブスクリプションのお支払い方法を"
                 f"クレジットカード決済（Stripe）へ戻すことができます。\n\n"
-
+            
                 f"なお、未払いの請求書が残っている場合は、"
-                f"クレジットカード決済へ戻すことはできません。\n\n"
-
-                f"■ お支払い期限\n"
-                f"{due_date_text}\n\n"
-
+                f"クレジットカード決済（Stripe）へ戻すことはできません。\n\n"
+            
                 f"ご確認のうえ、必要に応じて現金でのお支払いを"
                 f"ご案内ください。\n\n"
-
+            
                 f"{club_name}"
             )
-
+            
         else:
 
             owner_subject = (
@@ -783,9 +798,6 @@ def send_stripe_cash_transition_email(self, invoice_id):
                 f"管理画面から該当する請求書を「支払済み」として"
                 f"処理してください。\n\n"
 
-                f"■ お支払い期限\n"
-                f"{due_date_text}\n\n"
-
                 f"ご確認のうえ、必要に応じて会員様へ"
                 f"現金でのお支払いをご案内ください。\n\n"
 
@@ -808,3 +820,488 @@ def send_stripe_cash_transition_email(self, invoice_id):
             owner_email,
             is_subscription_level,
         )
+
+@shared_task(
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=60,
+    retry_kwargs={"max_retries": 5},
+)
+def send_stripe_payment_failure_warning_email(self, invoice_id):
+    """
+    Notify the member that a Stripe payment failed.
+
+    This is the initial warning only.
+
+    For subscription-level invoices:
+        - initial_subscription
+        - subscription_cycle
+
+    the member is warned that if the payment is not resolved
+    within 10 days, the invoice and the subscription billing
+    method will be moved to cash.
+
+    For other invoices:
+        - only the affected invoice will be moved to cash.
+
+    The email is claimed before sending so that the same warning
+    cannot be sent twice by concurrent Celery workers.
+    """
+
+    from .models import Invoice
+
+    # ---------------------------------------------------------
+    # LOAD INVOICE
+    # ---------------------------------------------------------
+
+    invoice = (
+        Invoice.objects
+        .select_related(
+            "subscription",
+            "subscription__owner",
+            "club",
+        )
+        .filter(id=invoice_id)
+        .first()
+    )
+
+    if not invoice:
+        logger.warning(
+            "[EMAIL] Stripe payment failure warning invoice=%s "
+            "does not exist.",
+            invoice_id,
+        )
+        return
+
+    # ---------------------------------------------------------
+    # SAFETY CHECKS
+    # ---------------------------------------------------------
+
+    if not invoice.stripe_payment_failed_at:
+        logger.warning(
+            "[EMAIL] Stripe payment failure warning invoice=%s "
+            "has no stripe_payment_failed_at. Skipping.",
+            invoice.id,
+        )
+        return
+
+    if invoice.stripe_payment_failure_email_sent:
+        logger.info(
+            "[EMAIL] Stripe payment failure warning already sent "
+            "invoice=%s. Skipping.",
+            invoice.id,
+        )
+        return
+
+    subscription = invoice.subscription
+    club = invoice.club
+
+    if not subscription:
+        logger.warning(
+            "[EMAIL] Stripe payment failure warning invoice=%s "
+            "has no subscription. Skipping.",
+            invoice.id,
+        )
+        return
+
+    billing_user = subscription.owner
+
+    # ---------------------------------------------------------
+    # FIND THE ACTUAL MEMBER
+    # ---------------------------------------------------------
+
+    member = (
+        Member.objects
+        .filter(
+            club=club,
+            user=billing_user,
+            owner=billing_user,
+        )
+        .first()
+    )
+
+    if not member:
+        logger.warning(
+            "[EMAIL] Stripe payment failure warning invoice=%s "
+            "could not find member for club=%s billing_user=%s.",
+            invoice.id,
+            club.id,
+            billing_user.id if billing_user else None,
+        )
+        return
+
+    # ---------------------------------------------------------
+    # MEMBER EMAIL
+    # ---------------------------------------------------------
+
+    member_email = (
+        member.owner.email
+        if member.owner and member.owner.email
+        else None
+    )
+
+    if not member_email:
+        logger.warning(
+            "[EMAIL] Stripe payment failure warning invoice=%s "
+            "member=%s has no email. Skipping.",
+            invoice.id,
+            member.id,
+        )
+        return
+
+    member_name = (
+        member.full_name
+        or (
+            member.owner.get_full_name()
+            if member.owner
+            else None
+        )
+        or member_email
+    )
+
+    club_name = club.subdomain or "クラブ"
+
+    # ---------------------------------------------------------
+    # TRANSITION TYPE
+    # ---------------------------------------------------------
+
+    is_subscription_level = invoice.billing_reason in [
+        "initial_subscription",
+        "subscription_cycle",
+    ]
+
+    # ---------------------------------------------------------
+    # FAILURE DEADLINE
+    #
+    # The 10 days starts from the FIRST payment failure.
+    # ---------------------------------------------------------
+
+    fallback_at = (
+        invoice.stripe_payment_failed_at
+        + timedelta(days=10)
+    )
+
+    fallback_date_text = format_date(fallback_at)
+
+    amount_text = f"¥{invoice.amount_due:,}"
+
+    # =========================================================
+    # SUBSCRIPTION-LEVEL WARNING
+    # =========================================================
+
+    if is_subscription_level:
+
+        subject = (
+            f"【{club_name}】クレジットカード決済についての重要なお知らせ"
+        )
+
+        message = (
+            f"{member_name} 様\n\n"
+            
+            f"{club_name}のお支払いについて、"
+            f"クレジットカードでの決済が正常に完了しませんでした。\n\n"
+            
+            f"今後10日間、お支払いの再試行が行われます。"
+            f"クレジットカード情報をご確認いただき、"
+            f"必要に応じてカード情報を更新してください。\n\n"
+            
+            f"■ 今回のお支払い\n"
+            f"{amount_text}\n\n"
+            
+            f"■ お支払い方法\n"
+            f"クレジットカード決済\n\n"
+        
+            f"最初の決済失敗から10日以内にお支払いが完了しない場合、"
+            f"今回の請求は現金払いへ変更され、"
+            f"今後の会員プランのお支払い方法も"
+            f"現金払いへ変更されます。\n\n"
+            
+            f"今回の請求は現金払いへ変更された後、"
+            f"{club_name}へ直接お支払いいただく必要があります。\n\n"
+            
+            f"■ 現金払いへの変更予定日\n"
+            f"{fallback_date_text}\n\n"
+            
+            f"期限までにクレジットカードでのお支払いが完了した場合は、"
+            f"現金払いへの変更は行われません。\n\n"
+            
+            f"お支払い方法やカード情報についてご不明な点がございましたら、"
+            f"{club_name}までお問い合わせください。\n\n"
+            
+            f"{club_name}"
+        )
+
+    # =========================================================
+    # INVOICE-ONLY WARNING
+    # =========================================================
+
+    else:
+
+        subject = (
+            f"【{club_name}】クレジットカード決済についてのお知らせ"
+        )
+
+        message = (
+            f"{member_name} 様\n\n"
+
+            f"{club_name}のお支払いについて、"
+            f"今回のクレジットカード決済が正常に完了しませんでした。\n\n"
+
+            f"今後10日間、お支払いの再試行が行われます。"
+            f"クレジットカード情報をご確認いただき、"
+            f"必要に応じてカード情報を更新してください。\n\n"
+        
+            f"■ 今回のお支払い\n"
+            f"{amount_text}\n\n"
+        
+            f"■ お支払い方法\n"
+            f"クレジットカード決済\n\n"
+        
+            f"最初の決済失敗から10日以内にお支払いが完了しない場合、"
+            f"今回の請求はクレジットカード決済から"
+            f"現金払いへ変更されます。\n\n"
+        
+            f"現金払いへ変更された場合は、"
+            f"{club_name}へ直接お支払いいただく必要があります。\n\n"
+        
+            f"■ 現金払いへの変更予定日\n"
+            f"{fallback_date_text}\n\n"
+        
+            f"期限までにクレジットカードでのお支払いが完了した場合は、"
+            f"現金払いへの変更は行われません。\n\n"
+        
+            f"お支払い方法やカード情報についてご不明な点がございましたら、"
+            f"{club_name}までお問い合わせください。\n\n"
+        
+            f"{club_name}"
+        )
+
+    # =========================================================
+    # CLAIM EMAIL
+    #
+    # Claim immediately before sending.
+    # =========================================================
+
+    with transaction.atomic():
+
+        invoice_for_claim = (
+            Invoice.objects
+            .select_for_update()
+            .get(id=invoice.id)
+        )
+
+        if invoice_for_claim.stripe_payment_failure_email_sent:
+            logger.info(
+                "[EMAIL] Stripe payment failure warning already "
+                "claimed invoice=%s. Skipping.",
+                invoice.id,
+            )
+            return
+
+        invoice_for_claim.stripe_payment_failure_email_sent = True
+
+        invoice_for_claim.save(
+            update_fields=[
+                "stripe_payment_failure_email_sent",
+            ]
+        )
+
+    # =========================================================
+    # SEND
+    # =========================================================
+
+    send_mail(
+        subject=subject,
+        message=message,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[member_email],
+    )
+
+    logger.info(
+        "[EMAIL] Stripe payment failure warning sent "
+        "invoice=%s member=%s recipient=%s "
+        "subscription_level=%s fallback_date=%s",
+        invoice.id,
+        member.id,
+        member_email,
+        is_subscription_level,
+        fallback_date_text,
+    )
+
+@shared_task(
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=30,
+    retry_kwargs={"max_retries": 5},
+)
+def send_visitor_reservation_confirmation_email(
+    self,
+    reservation_id,
+):
+    from .models import Reservation
+
+    reservation = (
+        Reservation.objects
+        .select_related(
+            "club",
+            "club__owner",
+            "lesson",
+        )
+        .filter(id=reservation_id)
+        .first()
+    )
+
+    if not reservation:
+        logger.warning(
+            "[EMAIL] Visitor reservation=%s "
+            "does not exist.",
+            reservation_id,
+        )
+        return
+
+    if reservation.status != Reservation.Status.PAID:
+        logger.warning(
+            "[EMAIL] Visitor reservation=%s "
+            "is not paid. Skipping confirmation.",
+            reservation.id,
+        )
+        return
+
+    if not reservation.email:
+        logger.warning(
+            "[EMAIL] Visitor reservation=%s "
+            "has no email.",
+            reservation.id,
+        )
+        return
+
+    # ---------------------------------------------------------
+    # Claim the email before sending.
+    #
+    # This prevents duplicate emails if the webhook/task
+    # is retried.
+    # ---------------------------------------------------------
+
+    with transaction.atomic():
+
+        reservation_for_claim = (
+            Reservation.objects
+            .select_for_update()
+            .get(id=reservation.id)
+        )
+
+        if reservation_for_claim.confirmation_email_sent:
+            logger.info(
+                "[EMAIL] Visitor reservation=%s "
+                "confirmation already sent. Skipping.",
+                reservation.id,
+            )
+            return
+
+        reservation_for_claim.confirmation_email_sent = True
+
+        reservation_for_claim.save(
+            update_fields=[
+                "confirmation_email_sent",
+            ]
+        )
+
+    club = reservation.club
+    lesson = reservation.lesson
+
+    club_name = (
+        club.title
+        or club.subdomain
+        or "クラブ"
+    )
+
+    recipient_name = (
+        reservation.full_name
+        or reservation.email
+    )
+
+    weekday_names = [
+        "月曜日",
+        "火曜日",
+        "水曜日",
+        "木曜日",
+        "金曜日",
+        "土曜日",
+        "日曜日",
+    ]
+
+    weekday = weekday_names[
+        reservation.reservation_date.weekday()
+    ]
+
+    reservation_date = (
+        reservation.reservation_date.strftime(
+            "%Y年%m月%d日"
+        )
+    )
+
+    start_time = reservation.lesson.start_time.strftime(
+        "%H:%M"
+    )
+
+    end_time = reservation.lesson.end_time.strftime(
+        "%H:%M"
+    )
+
+    amount_text = (
+        f"¥{reservation.amount:,}"
+    )
+
+    subject = (
+        f"【{club_name}】ご予約・お支払い完了のお知らせ"
+    )
+
+    message = (
+        f"{recipient_name} 様\n\n"
+
+        f"{club_name}へのご予約ありがとうございます。\n"
+        f"お支払いが完了し、ご予約が確定しました。\n\n"
+
+        f"■ ご予約内容\n"
+        f"レッスン：{lesson.title}\n"
+        f"日時：{reservation_date}（{weekday}）\n"
+        f"時間：{start_time}〜{end_time}\n\n"
+
+        f"■ お支払い\n"
+        f"金額：{amount_text}\n"
+        f"お支払い方法：クレジットカード\n\n"
+
+        f"■ ご予約番号\n"
+        f"{reservation.id}\n\n"
+
+        f"当日はお気をつけてお越しください。\n"
+        f"ご予約内容についてご不明な点がございましたら、"
+        f"{club_name}までお問い合わせください。\n\n"
+
+        f"{club_name}"
+    )
+
+    headers = {}
+
+    if (
+        club.owner
+        and club.owner.email
+        and club.owner.email != reservation.email
+    ):
+        headers["Reply-To"] = club.owner.email
+
+    send_mail(
+        subject=subject,
+        message=message,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[reservation.email],
+    )
+
+    logger.info(
+        "[EMAIL] Visitor reservation confirmation sent "
+        "reservation=%s recipient=%s club=%s",
+        reservation.id,
+        reservation.email,
+        club_name,
+    )
+

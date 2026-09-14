@@ -7,6 +7,9 @@ import hashlib
 
 from django.core.exceptions import ValidationError
 from django.db.models import Q
+from django.core.validators import RegexValidator
+
+
 def club_folder_upload_to(subfolder=None):
 
     def upload(instance, filename):
@@ -56,7 +59,18 @@ class Club(models.Model):
     stripe_customer_id = models.CharField(max_length=255, null=True, blank=True)
     stripe_subscription_id = models.CharField(max_length=255, null=True, blank=True)
 
-    
+    trial_price = models.PositiveIntegerField(default=0, help_text="Default trial reservation price. 0 means free.")
+
+    trials_disabled = models.BooleanField(default=False, help_text="If enabled, trial reservations are unavailable for all lessons.")
+
+    visitor_reservation_price = models.PositiveIntegerField(null=True, blank=True, help_text="Default visitor reservation price. Empty means unavailable.")
+
+    visitor_reservations_disabled = models.BooleanField(default=False, help_text="If enabled, visitor reservations are unavailable for all lessons.")
+
+    member_reservation_price = models.PositiveIntegerField(null=True, blank=True, help_text="Default member reservation price. Empty means unavailable.")
+
+    member_reservations_disabled = models.BooleanField(default=False, help_text="If enabled, member reservations are unavailable for all lessons.")
+
     subscription_active = models.BooleanField(default=False)
     last_paid_invoice_id = models.CharField(max_length=255, blank=True, null=True)
     subscription_cancel_at_period_end = models.BooleanField(default=False)
@@ -177,13 +191,54 @@ class MembershipPlanGroup(models.Model):
 class MembershipPlan(models.Model):
     club = models.ForeignKey(Club, related_name="membership_plans", on_delete=models.CASCADE)
     
-    
+    class PlanType(models.TextChoices):
+        NORMAL = "normal", "Normal"
+        TICKET_PLAN = "ticket_plan", "Ticket plan"
+        BUNDLE = "bundle", "Bundle"
+
     group = models.ForeignKey(
         MembershipPlanGroup,
         related_name="plans",
         on_delete=models.CASCADE,
         null=True,
         blank=True
+    )
+
+    plan_type = models.CharField(
+        max_length=20,
+        choices=PlanType.choices,
+        default=PlanType.NORMAL,
+        db_index=True,
+    )
+
+    # Ticket-plan configuration
+    ticket_type = models.ForeignKey(
+        "TicketType",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="ticket_plans",
+    )
+
+    ticket_quantity = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+    )
+
+    class TicketExpirationMode(models.TextChoices):
+        END_OF_MONTH = "end_of_month", "End of month"
+        NEVER = "never", "Never"
+        DAYS_AFTER_GRANT = "days_after_grant", "Days after grant"
+
+    ticket_expiration_mode = models.CharField(
+        max_length=30,
+        choices=TicketExpirationMode.choices,
+        default=TicketExpirationMode.END_OF_MONTH,
+    )
+
+    ticket_expiration_days = models.PositiveIntegerField(
+        null=True,
+        blank=True,
     )
     
     name = models.CharField(max_length=100)   
@@ -424,6 +479,12 @@ class Subscription(models.Model):
     billing_lock_until = models.DateTimeField(null=True, blank=True)
 
     needs_reconciliation = models.BooleanField(default=False)
+
+    stripe_status_checked_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        db_index=True,
+    )
     
 
 
@@ -486,6 +547,7 @@ class SubscriptionMutation(models.Model):
         CHANGE_PLAN = "change_plan", "Change plan"
         CANCEL_CHANGE_PLAN = "cancel_change_plan", "Cancel plan change"
         ADD_PLAN = "add_plan", "Add plan"
+        CASH_TO_STRIPE = "cash_to_stripe", "Cash to Stripe"
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
@@ -544,6 +606,14 @@ class SubscriptionMutation(models.Model):
     can_resume_until = models.DateTimeField(null=True, blank=True)
 
     secondary_mutation_blocked_until = models.DateTimeField(null=True, blank=True)
+
+    local_state_applied = models.BooleanField(
+        default=False,
+    )
+
+    stripe_reconciliation_finished = models.BooleanField(
+        default=False,
+    )
 
     class Meta:
         indexes = [
@@ -626,6 +696,10 @@ class Invoice(models.Model):
     stripe_payment_failed_at = models.DateTimeField(
         null=True,
         blank=True,
+    )
+
+    stripe_payment_failure_email_sent = models.BooleanField(
+        default=False,
     )
 
     stripe_cash_member_email_sent = models.BooleanField(
@@ -810,10 +884,419 @@ class Lesson(models.Model):
 
     picture = models.ImageField(upload_to=club_lessons_upload_to, null=True, blank=True)
 
+    background_color = models.CharField(
+        max_length=7,
+        default="#FFFFFF",
+        validators=[
+            RegexValidator(
+                regex=r"^#[0-9A-Fa-f]{6}$",
+                message="カラーは #FFFFFF の形式で指定してください。"
+            )
+        ]
+    )
+
+    # NEW
+    # If empty => anybody can attend
+    allowed_plans = models.ManyToManyField(
+        "MembershipPlan",
+        blank=True,
+        related_name="allowed_lessons"
+    )
+
+    reservation_only = models.BooleanField(default=False, help_text="If enabled, this lesson can only be booked through a reservation.")
+
+    # --------------------------------------------------------
+    # Reservation settings
+    # --------------------------------------------------------
+
+    # Maximum number of reservations for this lesson.
+    # NULL = unlimited.
+    reservation_limit = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Maximum number of reservations. Leave empty for unlimited."
+    )
+
+    # Trial settings
+    #
+    # NULL = use Club.trial_price
+    # 0 = free trial
+    trial_price = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Trial price for this lesson. Empty uses the club default."
+    )
+
+    # Prevent trial reservations for this lesson entirely.
+    trial_disabled = models.BooleanField(
+        default=False,
+        help_text="If enabled, trial reservations are not allowed."
+    )
+
+    visitor_reservation_price = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Visitor reservation price. Empty uses the club default."
+    )
+
+    # Explicitly disables visitor reservations for this lesson.
+    visitor_reservation_disabled = models.BooleanField(
+        default=False,
+        help_text="If enabled, visitor reservations are not allowed for this lesson."
+    )
+
+    member_reservation_price = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Member reservation price. Empty uses the club default."
+    )
+
+    member_reservation_disabled = models.BooleanField(
+        default=False,
+        help_text="If enabled, member reservations are not allowed for this lesson."
+    )
+
     creation_date = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"{self.club.subdomain} - {self.get_weekday_display()} {self.start_time.strftime('%H:%M')}"
+
+
+class Reservation(models.Model):
+
+    class ReservationType(models.TextChoices):
+        TRIAL = "trial", "Trial"
+        VISITOR = "visitor", "Visitor"
+        MEMBER = "member", "Member"
+
+    class Status(models.TextChoices):
+        UNPAID = "unpaid", "Unpaid"
+        PAID = "paid", "Paid"
+
+    class PaymentMethod(models.TextChoices):
+        STRIPE = "stripe", "Stripe"
+        TICKET = "ticket", "Ticket"
+
+    lesson = models.ForeignKey(
+        Lesson,
+        on_delete=models.CASCADE,
+        related_name="reservations"
+    )
+
+    payment_method = models.CharField(
+        max_length=20,
+        choices=PaymentMethod.choices,
+        null=True,
+        blank=True,
+    )
+
+    club = models.ForeignKey(
+        Club,
+        on_delete=models.CASCADE,
+        related_name="reservations"
+    )
+
+    # Optional because trial/visitor reservations don't need
+    # to create a Member.
+    member = models.ForeignKey(
+        Member,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reservations"
+    )
+    user = models.ForeignKey(CustomUser, null=True, blank=True, on_delete=models.SET_NULL, related_name="reservations")
+
+    reservation_type = models.CharField(
+        max_length=20,
+        choices=ReservationType.choices
+    )
+    confirmation_email_sent = models.BooleanField(
+        default=False,
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.UNPAID
+    )
+
+    full_name = models.CharField(max_length=200)
+    email = models.EmailField()
+
+    stripe_checkout_session_id = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        unique=True
+    )
+
+    stripe_payment_intent_id = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        unique=True
+    )
+
+    phone_number = models.CharField(
+        max_length=30,
+        blank=True
+    )
+
+    # Actual amount charged for this reservation.
+    # This should be stored rather than calculated from Lesson later.
+    amount = models.PositiveIntegerField(
+        default=0
+    )
+
+    currency = models.CharField(
+        max_length=10,
+        default="jpy"
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True
+    )
+
+    paid_at = models.DateTimeField(
+        null=True,
+        blank=True
+    )
+
+    reservation_date = models.DateField()
+    reservation_key = models.CharField(max_length=255, unique=True)
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["lesson", "status"]
+            ),
+            models.Index(
+                fields=["club", "created_at"]
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"{self.full_name} - "
+            f"{self.lesson.title} - "
+            f"{self.reservation_type}"
+        )
+
+
+
+class TicketType(models.Model):
+    club = models.ForeignKey(
+        Club,
+        on_delete=models.CASCADE,
+        related_name="ticket_types",
+    )
+
+    name = models.CharField(max_length=100)
+
+    eligible_plans = models.ManyToManyField(
+        MembershipPlan,
+        blank=True,
+        related_name="ticket_types",
+    )
+
+    description = models.TextField(blank=True)
+
+    active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name
+
+class TicketPackage(models.Model):
+    club = models.ForeignKey(
+        Club,
+        on_delete=models.CASCADE,
+        related_name="ticket_packages",
+    )
+
+    ticket_type = models.ForeignKey(
+        TicketType,
+        on_delete=models.PROTECT,
+        related_name="packages",
+    )
+
+    name = models.CharField(max_length=100)
+
+    description = models.TextField(blank=True)
+
+    quantity = models.PositiveIntegerField()
+
+    price = models.PositiveIntegerField()
+
+    currency = models.CharField(
+        max_length=10,
+        default="jpy",
+    )
+
+    stripe_price_id = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+    )
+
+    stripe_product_id = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+    )
+
+    active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(
+        auto_now_add=True
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True
+    )
+
+    def __str__(self):
+        return self.name
+
+class TicketPurchase(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        PAID = "paid", "Paid"
+        FAILED = "failed", "Failed"
+        REFUNDED = "refunded", "Refunded"
+
+    member = models.ForeignKey(
+        Member,
+        on_delete=models.PROTECT,
+        related_name="ticket_purchases",
+    )
+
+    package = models.ForeignKey(
+        TicketPackage,
+        on_delete=models.PROTECT,
+        related_name="purchases",
+    )
+
+    # Snapshot the purchase information.
+    # This protects historical records if the package changes later.
+    quantity = models.PositiveIntegerField()
+    amount = models.PositiveIntegerField()
+    currency = models.CharField(
+        max_length=10,
+        default="jpy",
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+
+    stripe_checkout_session_id = models.CharField(
+        max_length=255,
+        unique=True,
+        null=True,
+        blank=True,
+    )
+
+    stripe_payment_intent_id = models.CharField(
+        max_length=255,
+        unique=True,
+        null=True,
+        blank=True,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    paid_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    def __str__(self):
+        return (
+            f"{self.member.full_name} - "
+            f"{self.package.name} - "
+            f"{self.amount}"
+        )
+
+class TicketGrant(models.Model):
+    class Source(models.TextChoices):
+        PURCHASE = "purchase", "Purchase"
+        MANUAL = "manual", "Manual"
+
+    member = models.ForeignKey(
+        Member,
+        on_delete=models.CASCADE,
+        related_name="ticket_grants",
+    )
+
+    ticket_type = models.ForeignKey(
+        TicketType,
+        on_delete=models.PROTECT,
+        related_name="grants",
+    )
+
+    source = models.CharField(
+        max_length=20,
+        choices=Source.choices,
+    )
+
+    package = models.ForeignKey(
+        TicketPackage,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="grants",
+    )
+
+    quantity = models.PositiveIntegerField()
+
+    granted_at = models.DateTimeField(
+        auto_now_add=True
+    )
+
+    expires_at = models.DateTimeField(
+        null=True,
+        blank=True
+    )
+
+    def __str__(self):
+        return (
+            f"{self.member.full_name} - "
+            f"{self.ticket_type.name} - "
+            f"{self.quantity}"
+        )
+
+class TicketUsage(models.Model):
+    grant = models.ForeignKey(
+        TicketGrant,
+        on_delete=models.PROTECT,
+        related_name="usages",
+    )
+
+    reservation = models.OneToOneField(
+        Reservation,
+        on_delete=models.PROTECT,
+        related_name="ticket_usage",
+    )
+
+    quantity = models.PositiveIntegerField(
+        default=1
+    )
+
+    used_at = models.DateTimeField(
+        auto_now_add=True
+    )
+
+    refunded_at = models.DateTimeField(
+        null=True,
+        blank=True
+    )
 
 class Participation(models.Model):
     member = models.ForeignKey('Member', on_delete=models.CASCADE, related_name='participations')

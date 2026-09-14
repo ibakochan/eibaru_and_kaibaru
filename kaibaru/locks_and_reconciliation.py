@@ -8,7 +8,7 @@ from collections import defaultdict
 import stripe
 from django.db import transaction
 from django.utils import timezone
-from .models import SubscriptionMutation, SubscriptionItem, Subscription, Club, Member, MembershipPlan, Invoice, InvoiceItem, Payment
+from .models import Reservation, SubscriptionMutation, SubscriptionItem, Subscription, Club, Member, MembershipPlan, Invoice, InvoiceItem, Payment
 from datetime import timedelta
 
 from .tasks_emails import send_stripe_cash_transition_email
@@ -90,7 +90,9 @@ class StripeSubscriptionReconciler:
 
     @staticmethod
     def reconcile(*, subscription, club):
+        
 
+        processed_mutation_ids = []
         with transaction.atomic():
 
             mutations = (
@@ -139,12 +141,14 @@ class StripeSubscriptionReconciler:
                             "access_until",
                         ])
                     
-                    mutation.status = SubscriptionMutation.Status.SUCCEEDED
-                    mutation.processed_at = now
+                    mutation.local_state_applied = True
+                    mutation.status = SubscriptionMutation.Status.PROCESSING
+
                     mutation.save(update_fields=[
+                        "local_state_applied",
                         "status",
-                        "processed_at",
                     ])
+                    processed_mutation_ids.append(mutation.id) 
     
                 # -------------------------------------------------
                 # RESUME
@@ -159,13 +163,14 @@ class StripeSubscriptionReconciler:
                             "access_until",
                         ])
                     
-                    mutation.status = SubscriptionMutation.Status.SUCCEEDED
-                    mutation.processed_at = now
-                    mutation.save(update_fields=[
-                        "status",
-                        "processed_at",
-                    ])
+                    mutation.local_state_applied = True
+                    mutation.status = SubscriptionMutation.Status.PROCESSING
 
+                    mutation.save(update_fields=[
+                        "local_state_applied",
+                        "status",
+                    ])
+                    processed_mutation_ids.append(mutation.id) 
 
                 elif mutation.type == SubscriptionMutation.MutationType.ADD_PLAN:
                     logger.info(
@@ -472,20 +477,17 @@ class StripeSubscriptionReconciler:
                             SubscriptionMutation.InvoiceStatus.OPEN
                         )
                 
-                    mutation.status = (
-                        SubscriptionMutation.Status.SUCCEEDED
-                    )
+                    mutation.local_state_applied = True
+                    mutation.status = SubscriptionMutation.Status.PROCESSING
+
+                    mutation.save(update_fields=[
+                        "invoice_status",
+                        "local_state_applied",
+                        "status",
+                    ])
+                    processed_mutation_ids.append(mutation.id) 
                 
-                    mutation.processed_at = now
-                
-                    mutation.save(
-                        update_fields=[
-                            "invoice_status",
-                            "status",
-                            "processed_at",
-                        ]
-                    )
-                
+
                                 
                 
 
@@ -536,12 +538,14 @@ class StripeSubscriptionReconciler:
                             stripe_subscription_item_id=payload.get("new_stripe_item_id"),
                         )
                     
-                    mutation.status = SubscriptionMutation.Status.SUCCEEDED
-                    mutation.processed_at = now
+                    mutation.local_state_applied = True
+                    mutation.status = SubscriptionMutation.Status.PROCESSING
+
                     mutation.save(update_fields=[
+                        "local_state_applied",
                         "status",
-                        "processed_at",
                     ])
+                    processed_mutation_ids.append(mutation.id) 
 
                 elif mutation.type == SubscriptionMutation.MutationType.CANCEL_CHANGE_PLAN:
 
@@ -585,13 +589,53 @@ class StripeSubscriptionReconciler:
                             "source_item",
                         ])
                     
-                    mutation.status = SubscriptionMutation.Status.SUCCEEDED
-                    mutation.processed_at = now
+                    mutation.local_state_applied = True
+                    mutation.status = SubscriptionMutation.Status.PROCESSING
+
                     mutation.save(update_fields=[
+                        "local_state_applied",
                         "status",
-                        "processed_at",
                     ])
-                        
+                    processed_mutation_ids.append(mutation.id) 
+
+                
+
+                elif mutation.type == SubscriptionMutation.MutationType.CASH_TO_STRIPE:
+
+                    logger.info(
+                        "[CASH_TO_STRIPE] mutation=%s subscription=%s",
+                        mutation.id,
+                        subscription.id,
+                    )
+                
+                    if not subscription.stripe_subscription_id:
+                        logger.warning(
+                            "[CASH_TO_STRIPE] mutation=%s has no Stripe "
+                            "subscription yet. Retrying later.",
+                            mutation.id,
+                        )
+                
+                        mutation.status = SubscriptionMutation.Status.PROCESSING
+                        mutation.save(update_fields=["status"])
+                
+                        continue
+                
+                    # The checkout webhook has already changed the local
+                    # subscription to Stripe and linked the Stripe subscription.
+                    #
+                    # There is no additional local item mutation to perform here.
+                    mutation.local_state_applied = True
+                    mutation.status = SubscriptionMutation.Status.PROCESSING
+                
+                    mutation.save(update_fields=[
+                        "local_state_applied",
+                        "status",
+                    ])
+
+                    processed_mutation_ids.append(mutation.id) 
+
+
+                                    
 
 
 
@@ -710,6 +754,26 @@ class StripeSubscriptionReconciler:
             subscription.cancel_at_period_end = desired_cancel_flag
             subscription.save(update_fields=["cancel_at_period_end"])
 
+
+
+        if processed_mutation_ids:
+
+            SubscriptionMutation.objects.filter(
+                id__in=processed_mutation_ids,
+                local_state_applied=True,
+            ).update(
+                stripe_reconciliation_finished=True,
+                status=SubscriptionMutation.Status.SUCCEEDED,
+                processed_at=timezone.now(),
+            )
+
+            logger.info(
+                "[RECONCILE] subscription=%s successfully "
+                "reconciled mutations=%s",
+                subscription.id,
+                processed_mutation_ids,
+            )
+
         # -------------------------------------------------
         # 6. RETURN DEBUG INFO
         # -------------------------------------------------
@@ -768,7 +832,7 @@ class CheckoutSubscriptionReconciler:
         # Only inspect subscriptions where:
         # - webhook should have already arrived
         # - but not so old that we scan everything forever
-        window_start = now - timedelta(days=10)
+        window_start = now - timedelta(days=5)
         window_end = now - timedelta(hours=1)
 
         logger.info(
@@ -945,8 +1009,448 @@ class CheckoutSubscriptionReconciler:
 
 
 class StripeToCashInvoiceReconciler:
+    
+    STRIPE_STATUS_CHECK_INTERVAL = timedelta(hours=24)
+    STRIPE_STATUS_CHECK_BATCH_SIZE = 10000
 
+    @staticmethod
+    def reconcile_canceled_subscription(*, subscription_id):
+        """
+        Reconcile one specific local Stripe subscription after Stripe
+        has confirmed that the corresponding Stripe subscription was deleted.
 
+        This is the targeted version used by the
+        customer.subscription.deleted webhook.
+
+        Unlike reconcile_canceled_stripe_subscriptions(), this method
+        does NOT scan the database for subscriptions.
+
+        It:
+
+            1. Locks the local subscription.
+            2. Confirms it is still a Stripe subscription.
+            3. Moves local OPEN Stripe invoices to cash.
+            4. Changes the subscription billing method to cash.
+            5. Clears the Stripe subscription ID.
+            6. Clears cancel_at_period_end.
+            7. Restores past_due/unpaid to active.
+
+        Paid invoices are untouched.
+        Void invoices are untouched.
+        """
+
+        try:
+            with subscription_lock(
+                subscription_id,
+                timeout=300,
+            ):
+
+                with transaction.atomic():
+
+                    subscription = (
+                        Subscription.objects
+                        .select_for_update()
+                        .select_related("club")
+                        .get(id=subscription_id)
+                    )
+
+                    # -------------------------------------------------
+                    # Already converted by another process.
+                    # -------------------------------------------------
+
+                    if subscription.billing_method != "stripe":
+
+                        logger.info(
+                            "[STRIPE CANCELED RECONCILE] "
+                            "Subscription=%s already has "
+                            "billing_method=%s. Nothing to do.",
+                            subscription.id,
+                            subscription.billing_method,
+                        )
+
+                        return "skipped"
+
+                    if not subscription.stripe_subscription_id:
+
+                        logger.info(
+                            "[STRIPE CANCELED RECONCILE] "
+                            "Subscription=%s has no Stripe "
+                            "subscription ID. Nothing to do.",
+                            subscription.id,
+                        )
+
+                        return "skipped"
+
+                    stripe_subscription_id = (
+                        subscription.stripe_subscription_id
+                    )
+
+                    # -------------------------------------------------
+                    # Move LOCAL OPEN Stripe invoices to cash.
+                    #
+                    # Paid invoices remain paid.
+                    # Void invoices remain void.
+                    # Existing cash invoices remain unchanged.
+                    # -------------------------------------------------
+
+                    updated_invoice_count = (
+                        Invoice.objects
+                        .filter(
+                            subscription=subscription,
+                            status="open",
+                            payment_method="stripe",
+                        )
+                        .update(
+                            payment_method="cash",
+                        )
+                    )
+
+                    # -------------------------------------------------
+                    # Convert local subscription to cash.
+                    # -------------------------------------------------
+
+                    subscription.billing_method = "cash"
+                    subscription.stripe_subscription_id = None
+                    subscription.cancel_at_period_end = False
+
+                    if subscription.status in [
+                        "past_due",
+                        "unpaid",
+                    ]:
+                        subscription.status = "active"
+
+                    subscription.stripe_status_checked_at = (
+                        timezone.now()
+                    )
+
+                    subscription.save(
+                        update_fields=[
+                            "billing_method",
+                            "stripe_subscription_id",
+                            "cancel_at_period_end",
+                            "status",
+                            "stripe_status_checked_at",
+                        ]
+                    )
+
+                    logger.warning(
+                        "[STRIPE CANCELED RECONCILE] "
+                        "Targeted reconciliation completed. "
+                        "subscription=%s "
+                        "stripe_subscription=%s "
+                        "billing_method=cash "
+                        "invoices_changed=%s",
+                        subscription.id,
+                        stripe_subscription_id,
+                        updated_invoice_count,
+                    )
+
+                    return "succeeded"
+
+        except Subscription.DoesNotExist:
+
+            logger.warning(
+                "[STRIPE CANCELED RECONCILE] "
+                "Local subscription=%s no longer exists.",
+                subscription_id,
+            )
+
+            return "skipped"
+
+        except CacheLockError:
+
+            logger.info(
+                "[STRIPE CANCELED RECONCILE] "
+                "Subscription locked. subscription=%s",
+                subscription_id,
+            )
+
+            raise
+
+        except Exception:
+
+            logger.exception(
+                "[STRIPE CANCELED RECONCILE] "
+                "Targeted reconciliation failed "
+                "subscription=%s",
+                subscription_id,
+            )
+
+            raise
+
+    @staticmethod
+    def reconcile_canceled_stripe_subscriptions():
+        """
+        Periodically check local Stripe subscriptions to make sure
+        Stripe has not been canceled externally.
+
+        Only a confirmed Stripe terminal status causes a local
+        Stripe subscription to be converted to cash.
+
+        Stripe API failures are NEVER treated as cancellation.
+
+        Checked subscriptions are marked with stripe_status_checked_at
+        so they are not repeatedly checked on every task run.
+        """
+
+        now = timezone.now()
+        check_before = (
+            now
+            - StripeToCashInvoiceReconciler.STRIPE_STATUS_CHECK_INTERVAL
+        )
+
+        subscriptions = (
+            Subscription.objects
+            .filter(
+                billing_method="stripe",
+                stripe_subscription_id__isnull=False,
+            )
+            .filter(
+                Q(stripe_status_checked_at__isnull=True)
+                | Q(stripe_status_checked_at__lt=check_before)
+            )
+            .select_related("club")
+            .order_by(
+                "stripe_status_checked_at",
+                "id",
+            )[
+                :StripeToCashInvoiceReconciler.STRIPE_STATUS_CHECK_BATCH_SIZE
+            ]
+        )
+
+        checked = 0
+        processed = 0
+        skipped = 0
+        failed = 0
+
+        logger.info(
+            "[STRIPE CANCELED RECONCILE] Starting scan "
+            "batch_size=%s check_before=%s",
+            StripeToCashInvoiceReconciler.STRIPE_STATUS_CHECK_BATCH_SIZE,
+            check_before,
+        )
+
+        for subscription in subscriptions:
+
+            checked += 1
+
+            try:
+
+                with subscription_lock(
+                    subscription.id,
+                    timeout=300,
+                ):
+
+                    # -------------------------------------------------
+                    # Re-read after acquiring the lock.
+                    # -------------------------------------------------
+
+                    subscription.refresh_from_db()
+
+                    if (
+                        subscription.billing_method != "stripe"
+                        or not subscription.stripe_subscription_id
+                    ):
+                        skipped += 1
+                        continue
+
+                    club = subscription.club
+
+                    stripe_subscription_id = (
+                        subscription.stripe_subscription_id
+                    )
+
+                    # -------------------------------------------------
+                    # Retrieve the actual Stripe subscription.
+                    #
+                    # IMPORTANT:
+                    # An API error is NOT treated as cancellation.
+                    # -------------------------------------------------
+
+                    try:
+
+                        stripe_subscription = (
+                            stripe.Subscription.retrieve(
+                                stripe_subscription_id,
+                                stripe_account=club.stripe_account_id,
+                            )
+                        )
+
+                    except stripe.error.StripeError:
+
+                        logger.exception(
+                            "[STRIPE CANCELED RECONCILE] "
+                            "Could not retrieve Stripe subscription=%s "
+                            "for local subscription=%s. "
+                            "Leaving local state unchanged.",
+                            stripe_subscription_id,
+                            subscription.id,
+                        )
+
+                        failed += 1
+                        continue
+
+                    logger.info(
+                        "[STRIPE CANCELED RECONCILE] "
+                        "subscription=%s stripe_subscription=%s "
+                        "status=%s cancel_at_period_end=%s",
+                        subscription.id,
+                        stripe_subscription.id,
+                        stripe_subscription.status,
+                        stripe_subscription.cancel_at_period_end,
+                    )
+
+                    # -------------------------------------------------
+                    # Stripe explicitly says the subscription has ended.
+                    # -------------------------------------------------
+
+                    if stripe_subscription.status in [
+                        "canceled",
+                        "incomplete_expired",
+                    ]:
+
+                        with transaction.atomic():
+
+                            subscription = (
+                                Subscription.objects
+                                .select_for_update()
+                                .get(id=subscription.id)
+                            )
+
+                            # Another process may have already handled it.
+                            if (
+                                subscription.billing_method != "stripe"
+                                or not subscription.stripe_subscription_id
+                            ):
+                                skipped += 1
+                                continue
+
+                            # -------------------------------------------------
+                            # Move LOCAL OPEN invoices to cash.
+                            #
+                            # Paid invoices remain paid.
+                            # Void invoices remain void.
+                            # -------------------------------------------------
+
+                            updated_invoice_count = (
+                                Invoice.objects
+                                .filter(
+                                    subscription=subscription,
+                                    status="open",
+                                    payment_method="stripe",
+                                )
+                                .update(
+                                    payment_method="cash",
+                                )
+                            )
+
+                            # -------------------------------------------------
+                            # Convert subscription to cash.
+                            # -------------------------------------------------
+
+                            subscription.billing_method = "cash"
+                            subscription.stripe_subscription_id = None
+                            subscription.cancel_at_period_end = False
+
+                            if subscription.status in [
+                                "past_due",
+                                "unpaid",
+                            ]:
+                                subscription.status = "active"
+
+                            subscription.stripe_status_checked_at = now
+
+                            subscription.save(
+                                update_fields=[
+                                    "billing_method",
+                                    "stripe_subscription_id",
+                                    "cancel_at_period_end",
+                                    "status",
+                                    "stripe_status_checked_at",
+                                ]
+                            )
+
+                            logger.warning(
+                                "[STRIPE CANCELED RECONCILE] "
+                                "Converted subscription=%s to cash "
+                                "after confirmed Stripe cancellation. "
+                                "stripe_subscription=%s "
+                                "invoices_changed=%s",
+                                subscription.id,
+                                stripe_subscription.id,
+                                updated_invoice_count,
+                            )
+
+                        processed += 1
+                        continue
+
+                    # -------------------------------------------------
+                    # Stripe is still alive.
+                    #
+                    # We simply record that we successfully checked it.
+                    # -------------------------------------------------
+
+                    with transaction.atomic():
+
+                        subscription = (
+                            Subscription.objects
+                            .select_for_update()
+                            .get(id=subscription.id)
+                        )
+
+                        if (
+                            subscription.billing_method != "stripe"
+                            or not subscription.stripe_subscription_id
+                        ):
+                            skipped += 1
+                            continue
+
+                        subscription.stripe_status_checked_at = now
+
+                        subscription.save(
+                            update_fields=[
+                                "stripe_status_checked_at",
+                            ]
+                        )
+
+                    skipped += 1
+
+            except CacheLockError:
+
+                logger.info(
+                    "[STRIPE CANCELED RECONCILE] "
+                    "Subscription locked. subscription=%s",
+                    subscription.id,
+                )
+
+                skipped += 1
+
+            except Exception:
+
+                logger.exception(
+                    "[STRIPE CANCELED RECONCILE] "
+                    "Unexpected failure subscription=%s",
+                    subscription.id,
+                )
+
+                failed += 1
+
+        logger.info(
+            "[STRIPE CANCELED RECONCILE] Finished "
+            "checked=%s processed=%s skipped=%s failed=%s",
+            checked,
+            processed,
+            skipped,
+            failed,
+        )
+
+        return {
+            "checked": checked,
+            "processed": processed,
+            "skipped": skipped,
+            "failed": failed,
+        }  
+  
     FAILURE_GRACE_DAYS = 10
 
     @staticmethod
@@ -1760,6 +2264,15 @@ class StripeToCashInvoiceReconciler:
                 .get(id=invoice_id)
             )
 
+            subscription.stripe_subscription_id = None
+            subscription.cancel_at_period_end = False
+            subscription.save(
+                update_fields=[
+                    "stripe_subscription_id",
+                    "cancel_at_period_end",
+                ]
+            )
+
             local_invoice.stripe_cash_transition_status = "succeeded"
 
             local_invoice.save(
@@ -1783,5 +2296,897 @@ class StripeToCashInvoiceReconciler:
 
         return "succeeded"
 
+
+class MemberReservationPaymentReconciler:
+    """
+    Reconciles old unpaid member reservations against Stripe.
+
+    There are two Stripe payment paths:
+
+    1. Existing Stripe customer/payment method
+       ----------------------------------------
+       Reservation -> PaymentIntent
+
+       The PaymentIntent is created and confirmed immediately.
+       If the application crashes after Stripe succeeds but before
+       the local reservation is marked PAID, reconciliation can
+       recover the payment.
+
+    2. Stripe Checkout
+       ----------------
+       Reservation -> Checkout Session
+
+       The Checkout Session is allowed to expire after the configured
+       Checkout lifetime. The webhook normally marks the reservation
+       PAID, but reconciliation handles missed/delayed webhooks.
+
+    Important safety rule:
+
+        Reservation age alone NEVER determines whether a reservation
+        should be deleted.
+
+    The reservation must first be reconciled against Stripe.
+
+    Existing-card PaymentIntent:
+        succeeded
+            -> PAID
+
+        requires_payment_method / canceled
+            -> DELETE
+
+        processing / requires_action / requires_confirmation /
+        requires_capture
+            -> WAIT
+
+    Checkout Session:
+        payment_status == paid
+            -> PAID
+
+        status == expired
+            -> DELETE
+
+        open / unpaid
+            -> WAIT
+
+        Stripe/API error
+            -> WAIT / FAILED
+            never delete
+    """
+
+    HOLD_MINUTES = 31
+
+    # ---------------------------------------------------------
+    # PaymentIntent statuses
+    # ---------------------------------------------------------
+
+    TERMINAL_PAYMENT_INTENT_FAILURE_STATUSES = {
+        "requires_payment_method",
+        "canceled",
+    }
+
+    NON_TERMINAL_PAYMENT_INTENT_STATUSES = {
+        "requires_confirmation",
+        "requires_action",
+        "processing",
+        "requires_capture",
+    }
+
+    # ---------------------------------------------------------
+    # Checkout Session statuses
+    # ---------------------------------------------------------
+
+    CHECKOUT_EXPIRED_STATUS = "expired"
+
+    @classmethod
+    def reconcile_old_unpaid_reservations(cls):
+        """
+        Find old unpaid member reservations and reconcile them
+        against the Stripe object associated with the reservation.
+
+        Only reservations older than HOLD_MINUTES are considered.
+
+        Stripe/API failures never cause destructive cleanup.
+        """
+
+        now = timezone.now()
+
+        cutoff = (
+            now
+            - timedelta(minutes=cls.HOLD_MINUTES)
+        )
+
+        reservations = (
+            Reservation.objects
+            .filter(
+                status=Reservation.Status.UNPAID,
+                created_at__lt=cutoff,
+                payment_method="stripe",
+                reservation_type=(
+                    Reservation.ReservationType.MEMBER
+                ),
+            )
+            .select_related("club")
+            .order_by(
+                "created_at",
+                "id",
+            )
+        )
+
+        checked = 0
+        paid = 0
+        deleted = 0
+        waiting = 0
+        skipped = 0
+        failed = 0
+
+        logger.info(
+            "[MEMBER RESERVATION RECONCILE] "
+            "Starting scan cutoff=%s",
+            cutoff,
+        )
+
+        for reservation in reservations:
+
+            checked += 1
+
+            try:
+
+                result = cls.reconcile_reservation(
+                    reservation_id=reservation.id
+                )
+
+                if result == "paid":
+                    paid += 1
+
+                elif result == "deleted":
+                    deleted += 1
+
+                elif result == "waiting":
+                    waiting += 1
+
+                elif result == "skipped":
+                    skipped += 1
+
+                else:
+                    failed += 1
+
+            except Reservation.DoesNotExist:
+
+                skipped += 1
+
+                logger.info(
+                    "[MEMBER RESERVATION RECONCILE] "
+                    "Reservation=%s disappeared before processing.",
+                    reservation.id,
+                )
+
+            except Exception:
+
+                failed += 1
+
+                logger.exception(
+                    "[MEMBER RESERVATION RECONCILE] "
+                    "Unexpected error reservation=%s",
+                    reservation.id,
+                )
+
+        logger.info(
+            "[MEMBER RESERVATION RECONCILE] "
+            "Finished checked=%s paid=%s deleted=%s "
+            "waiting=%s skipped=%s failed=%s",
+            checked,
+            paid,
+            deleted,
+            waiting,
+            skipped,
+            failed,
+        )
+
+        return {
+            "checked": checked,
+            "paid": paid,
+            "deleted": deleted,
+            "waiting": waiting,
+            "skipped": skipped,
+            "failed": failed,
+        }
+
+    # =========================================================
+    # SINGLE RESERVATION
+    # =========================================================
+
+    @classmethod
+    def reconcile_reservation(
+        cls,
+        *,
+        reservation_id,
+    ):
+
+        with transaction.atomic():
+
+            reservation = (
+                Reservation.objects
+                .select_for_update()
+                .select_related("club")
+                .get(id=reservation_id)
+            )
+
+            # -------------------------------------------------
+            # Another process already completed it.
+            # -------------------------------------------------
+
+            if (
+                reservation.status
+                == Reservation.Status.PAID
+            ):
+
+                logger.info(
+                    "[MEMBER RESERVATION RECONCILE] "
+                    "Reservation=%s already paid.",
+                    reservation.id,
+                )
+
+                return "skipped"
+
+            # -------------------------------------------------
+            # It may have been deleted or changed by another
+            # process between the initial query and acquiring
+            # this lock.
+            # -------------------------------------------------
+
+            if (
+                reservation.status
+                != Reservation.Status.UNPAID
+            ):
+
+                logger.info(
+                    "[MEMBER RESERVATION RECONCILE] "
+                    "Reservation=%s status=%s. Skipping.",
+                    reservation.id,
+                    reservation.status,
+                )
+
+                return "skipped"
+
+            # -------------------------------------------------
+            # Only member Stripe reservations belong here.
+            # -------------------------------------------------
+
+            if (
+                reservation.payment_method
+                != "stripe"
+                or reservation.reservation_type
+                != Reservation.ReservationType.MEMBER
+            ):
+
+                logger.info(
+                    "[MEMBER RESERVATION RECONCILE] "
+                    "Reservation=%s is not a member Stripe "
+                    "reservation. Skipping.",
+                    reservation.id,
+                )
+
+                return "skipped"
+
+            club = reservation.club
+
+            if (
+                not club
+                or not club.stripe_account_id
+            ):
+
+                logger.warning(
+                    "[MEMBER RESERVATION RECONCILE] "
+                    "Reservation=%s has no Stripe account. "
+                    "Leaving unchanged.",
+                    reservation.id,
+                )
+
+                return "failed"
+
+            # -------------------------------------------------
+            # Re-check age after acquiring the lock.
+            # -------------------------------------------------
+
+            cutoff = (
+                timezone.now()
+                - timedelta(
+                    minutes=cls.HOLD_MINUTES
+                )
+            )
+
+            if reservation.created_at >= cutoff:
+
+                logger.info(
+                    "[MEMBER RESERVATION RECONCILE] "
+                    "Reservation=%s is not old enough yet.",
+                    reservation.id,
+                )
+
+                return "skipped"
+
+            # =================================================
+            # CHECKOUT PATH
+            # =================================================
+
+            if reservation.stripe_checkout_session_id:
+
+                return cls._reconcile_checkout(
+                    reservation=reservation,
+                    club=club,
+                )
+
+            # =================================================
+            # PAYMENT INTENT PATH
+            # =================================================
+
+            return cls._reconcile_payment_intent(
+                reservation=reservation,
+                club=club,
+            )
+
+    # =========================================================
+    # PAYMENT INTENT RECONCILIATION
+    # =========================================================
+
+    @classmethod
+    def _reconcile_payment_intent(
+        cls,
+        *,
+        reservation,
+        club,
+    ):
+
+        payment_intent = None
+
+        # -----------------------------------------------------
+        # Fast path:
+        # locally stored PaymentIntent ID.
+        # -----------------------------------------------------
+
+        if reservation.stripe_payment_intent_id:
+
+            try:
+
+                payment_intent = (
+                    stripe.PaymentIntent.retrieve(
+                        reservation.stripe_payment_intent_id,
+                        stripe_account=(
+                            club.stripe_account_id
+                        ),
+                    )
+                )
+
+            except stripe.error.InvalidRequestError:
+
+                logger.warning(
+                    "[MEMBER RESERVATION RECONCILE] "
+                    "Reservation=%s stored PaymentIntent=%s "
+                    "could not be retrieved. Falling back "
+                    "to metadata search.",
+                    reservation.id,
+                    reservation.stripe_payment_intent_id,
+                )
+
+                payment_intent = None
+
+            except stripe.error.StripeError:
+
+                logger.exception(
+                    "[MEMBER RESERVATION RECONCILE] "
+                    "Stripe error retrieving PaymentIntent=%s "
+                    "reservation=%s. Leaving unchanged.",
+                    reservation.stripe_payment_intent_id,
+                    reservation.id,
+                )
+
+                return "failed"
+
+        # -----------------------------------------------------
+        # Recovery path:
+        #
+        # The PaymentIntent may have succeeded but the process
+        # crashed before stripe_payment_intent_id was written
+        # locally.
+        #
+        # reservation_id is stored in PaymentIntent metadata.
+        # -----------------------------------------------------
+
+        if payment_intent is None:
+
+            try:
+
+                search_result = (
+                    stripe.PaymentIntent.search(
+                        query=(
+                            "metadata['reservation_id']:"
+                            f"'{reservation.id}'"
+                        ),
+                        limit=10,
+                        stripe_account=(
+                            club.stripe_account_id
+                        ),
+                    )
+                )
+
+            except stripe.error.StripeError:
+
+                logger.exception(
+                    "[MEMBER RESERVATION RECONCILE] "
+                    "Could not search PaymentIntents for "
+                    "reservation=%s. Leaving unchanged.",
+                    reservation.id,
+                )
+
+                return "failed"
+
+            payment_intents = list(
+                search_result.auto_paging_iter()
+            )
+
+            if payment_intents:
+
+                # -------------------------------------------------
+                # Prefer a successful PaymentIntent.
+                # -------------------------------------------------
+
+                succeeded = [
+                    pi
+                    for pi in payment_intents
+                    if pi.status == "succeeded"
+                ]
+
+                if succeeded:
+
+                    payment_intent = max(
+                        succeeded,
+                        key=lambda pi: pi.created or 0,
+                    )
+
+                else:
+
+                    payment_intent = max(
+                        payment_intents,
+                        key=lambda pi: pi.created or 0,
+                    )
+
+        # -----------------------------------------------------
+        # No PaymentIntent exists.
+        #
+        # This means the existing-card payment path never
+        # created a PaymentIntent.
+        #
+        # Since this reservation is already older than the
+        # hold period, there is nothing in Stripe that can
+        # eventually turn it into a successful payment.
+        # -----------------------------------------------------
+
+        if payment_intent is None:
+
+            logger.warning(
+                "[MEMBER RESERVATION RECONCILE] "
+                "Reservation=%s has no matching PaymentIntent. "
+                "Deleting unpaid reservation.",
+                reservation.id,
+            )
+
+            reservation.delete()
+
+            return "deleted"
+
+        logger.info(
+            "[MEMBER RESERVATION RECONCILE] "
+            "Reservation=%s PaymentIntent=%s status=%s",
+            reservation.id,
+            payment_intent.id,
+            payment_intent.status,
+        )
+
+        # -----------------------------------------------------
+        # SUCCESS
+        # -----------------------------------------------------
+
+        if payment_intent.status == "succeeded":
+
+            reservation.status = (
+                Reservation.Status.PAID
+            )
+
+            reservation.paid_at = (
+                timezone.now()
+            )
+
+            reservation.stripe_payment_intent_id = (
+                payment_intent.id
+            )
+
+            reservation.save(
+                update_fields=[
+                    "status",
+                    "paid_at",
+                    "stripe_payment_intent_id",
+                ]
+            )
+
+            logger.warning(
+                "[MEMBER RESERVATION RECONCILE] "
+                "Recovered successful PaymentIntent. "
+                "reservation=%s payment_intent=%s",
+                reservation.id,
+                payment_intent.id,
+            )
+
+            return "paid"
+
+        # -----------------------------------------------------
+        # DEFINITIVE FAILURE
+        # -----------------------------------------------------
+
+        if (
+            payment_intent.status
+            in cls.TERMINAL_PAYMENT_INTENT_FAILURE_STATUSES
+        ):
+
+            logger.warning(
+                "[MEMBER RESERVATION RECONCILE] "
+                "PaymentIntent=%s has terminal failure "
+                "status=%s. Deleting reservation=%s.",
+                payment_intent.id,
+                payment_intent.status,
+                reservation.id,
+            )
+
+            reservation.delete()
+
+            return "deleted"
+
+        # -----------------------------------------------------
+        # STILL PROCESSING / REQUIRES ACTION
+        #
+        # Never delete these.
+        # -----------------------------------------------------
+
+        if (
+            payment_intent.status
+            in cls.NON_TERMINAL_PAYMENT_INTENT_STATUSES
+        ):
+
+            logger.info(
+                "[MEMBER RESERVATION RECONCILE] "
+                "PaymentIntent=%s status=%s. "
+                "Leaving reservation=%s unchanged.",
+                payment_intent.id,
+                payment_intent.status,
+                reservation.id,
+            )
+
+            # Store recovered PaymentIntent ID if necessary.
+            if (
+                reservation.stripe_payment_intent_id
+                != payment_intent.id
+            ):
+
+                reservation.stripe_payment_intent_id = (
+                    payment_intent.id
+                )
+
+                reservation.save(
+                    update_fields=[
+                        "stripe_payment_intent_id",
+                    ]
+                )
+
+            return "waiting"
+
+        # -----------------------------------------------------
+        # Unknown Stripe status.
+        #
+        # Never make a destructive decision about a status
+        # we do not explicitly understand.
+        # -----------------------------------------------------
+
+        logger.warning(
+            "[MEMBER RESERVATION RECONCILE] "
+            "PaymentIntent=%s has unknown status=%s. "
+            "Leaving reservation=%s unchanged.",
+            payment_intent.id,
+            payment_intent.status,
+            reservation.id,
+        )
+
+        return "waiting"
+
+    # =========================================================
+    # CHECKOUT RECONCILIATION
+    # =========================================================
+
+    @classmethod
+    def _reconcile_checkout(
+        cls,
+        *,
+        reservation,
+        club,
+    ):
+
+        checkout_session = None
+
+        # -----------------------------------------------------
+        # Fast path:
+        # locally stored Checkout Session ID.
+        # -----------------------------------------------------
+
+        if reservation.stripe_checkout_session_id:
+
+            try:
+
+                checkout_session = (
+                    stripe.checkout.Session.retrieve(
+                        reservation.stripe_checkout_session_id,
+                        stripe_account=(
+                            club.stripe_account_id
+                        ),
+                    )
+                )
+
+            except stripe.error.InvalidRequestError:
+
+                logger.warning(
+                    "[MEMBER RESERVATION RECONCILE] "
+                    "Reservation=%s stored Checkout Session=%s "
+                    "could not be retrieved. Falling back "
+                    "to metadata search.",
+                    reservation.id,
+                    reservation.stripe_checkout_session_id,
+                )
+
+                checkout_session = None
+
+            except stripe.error.StripeError:
+
+                logger.exception(
+                    "[MEMBER RESERVATION RECONCILE] "
+                    "Stripe error retrieving Checkout Session=%s "
+                    "reservation=%s. Leaving unchanged.",
+                    reservation.stripe_checkout_session_id,
+                    reservation.id,
+                )
+
+                return "failed"
+
+        # -----------------------------------------------------
+        # Recovery path:
+        #
+        # The Checkout Session may have been created successfully
+        # but the application crashed before the Session ID was
+        # saved locally.
+        #
+        # reservation_id exists in the Checkout metadata.
+        # -----------------------------------------------------
+
+        if checkout_session is None:
+
+            try:
+
+                sessions = (
+                    stripe.checkout.Session.list(
+                        limit=100,
+                        stripe_account=(
+                            club.stripe_account_id
+                        ),
+                    )
+                )
+
+            except stripe.error.StripeError:
+
+                logger.exception(
+                    "[MEMBER RESERVATION RECONCILE] "
+                    "Could not list Checkout Sessions for "
+                    "reservation=%s. Leaving unchanged.",
+                    reservation.id,
+                )
+
+                return "failed"
+
+            matching_sessions = []
+
+            for session in sessions.auto_paging_iter():
+
+                metadata = (
+                    session.get("metadata", {})
+                )
+
+                if (
+                    str(metadata.get("reservation_id"))
+                    == str(reservation.id)
+                ):
+
+                    matching_sessions.append(
+                        session
+                    )
+
+            if matching_sessions:
+
+                # Prefer a paid session.
+                paid_sessions = [
+                    session
+                    for session in matching_sessions
+                    if session.get("payment_status")
+                    == "paid"
+                ]
+
+                if paid_sessions:
+
+                    checkout_session = max(
+                        paid_sessions,
+                        key=lambda session:
+                            session.get("created", 0),
+                    )
+
+                else:
+
+                    checkout_session = max(
+                        matching_sessions,
+                        key=lambda session:
+                            session.get("created", 0),
+                    )
+
+        # -----------------------------------------------------
+        # No Checkout Session found.
+        #
+        # IMPORTANT:
+        #
+        # We do NOT immediately delete here.
+        #
+        # The session may have been created but Stripe's list
+        # endpoint may not have returned it yet, or Stripe may
+        # be experiencing a temporary API inconsistency.
+        #
+        # Since we don't have definitive Stripe evidence that
+        # the checkout expired or failed, leave the reservation.
+        # -----------------------------------------------------
+
+        if checkout_session is None:
+
+            logger.warning(
+                "[MEMBER RESERVATION RECONCILE] "
+                "Reservation=%s has no matching Checkout Session. "
+                "Leaving reservation unchanged because Stripe "
+                "state cannot be confirmed.",
+                reservation.id,
+            )
+
+            return "waiting"
+
+        session_id = checkout_session.id
+
+        session_status = (
+            checkout_session.get("status")
+        )
+
+        payment_status = (
+            checkout_session.get("payment_status")
+        )
+
+        logger.info(
+            "[MEMBER RESERVATION RECONCILE] "
+            "Reservation=%s CheckoutSession=%s "
+            "status=%s payment_status=%s",
+            reservation.id,
+            session_id,
+            session_status,
+            payment_status,
+        )
+
+        # -----------------------------------------------------
+        # PAYMENT SUCCESS
+        #
+        # This is the missed-webhook recovery path.
+        # -----------------------------------------------------
+
+        if payment_status == "paid":
+
+            payment_intent_id = (
+                checkout_session.get(
+                    "payment_intent"
+                )
+            )
+
+            reservation.status = (
+                Reservation.Status.PAID
+            )
+
+            reservation.paid_at = (
+                timezone.now()
+            )
+
+            if payment_intent_id:
+
+                reservation.stripe_payment_intent_id = (
+                    payment_intent_id
+                )
+
+            reservation.stripe_checkout_session_id = (
+                session_id
+            )
+
+            reservation.save(
+                update_fields=[
+                    "status",
+                    "paid_at",
+                    "stripe_payment_intent_id",
+                    "stripe_checkout_session_id",
+                ]
+            )
+
+            logger.warning(
+                "[MEMBER RESERVATION RECONCILE] "
+                "Recovered successful Checkout payment. "
+                "reservation=%s session=%s payment_intent=%s",
+                reservation.id,
+                session_id,
+                payment_intent_id,
+            )
+
+            return "paid"
+
+        # -----------------------------------------------------
+        # CHECKOUT EXPIRED
+        #
+        # Stripe explicitly confirms the checkout hold is dead.
+        # This is safe to delete.
+        # -----------------------------------------------------
+
+        if (
+            session_status
+            == cls.CHECKOUT_EXPIRED_STATUS
+        ):
+
+            logger.warning(
+                "[MEMBER RESERVATION RECONCILE] "
+                "Checkout Session=%s expired without payment. "
+                "Deleting reservation=%s.",
+                session_id,
+                reservation.id,
+            )
+
+            reservation.delete()
+
+            return "deleted"
+
+        # -----------------------------------------------------
+        # CHECKOUT STILL OPEN / PAYMENT NOT COMPLETE
+        #
+        # Do not delete merely because the local reservation is
+        # old. Stripe has not told us that the Checkout Session
+        # has expired yet.
+        # -----------------------------------------------------
+
+        logger.info(
+            "[MEMBER RESERVATION RECONCILE] "
+            "Checkout Session=%s still active/unpaid. "
+            "status=%s payment_status=%s. "
+            "Leaving reservation=%s unchanged.",
+            session_id,
+            session_status,
+            payment_status,
+            reservation.id,
+        )
+
+        if (
+            reservation.stripe_checkout_session_id
+            != session_id
+        ):
+
+            reservation.stripe_checkout_session_id = (
+                session_id
+            )
+
+            reservation.save(
+                update_fields=[
+                    "stripe_checkout_session_id",
+                ]
+            )
+
+        return "waiting"
 
         

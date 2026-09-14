@@ -20,6 +20,9 @@ router.register(r'membershipplans', viewsets.MembershipPlanViewSet)
 router.register(r'discounts', viewsets.DiscountViewSet)
 router.register(r'member_pricing_adjustments', viewsets.MemberPricingAdjustmentViewSet)
 router.register(r'invoices', viewsets.InvoiceViewSet, basename='invoice')
+router.register(r'reservations', viewsets.ReservationViewSet, basename='reservation')
+router.register(r'ticket-types', viewsets.TicketTypeViewSet, basename='ticket-type')
+router.register(r'ticket-packages', viewsets.TicketPackageViewSet, basename='ticket-package')
 
 app_name='kaibaru'
 urlpatterns = [
@@ -55,6 +58,17 @@ urlpatterns = [
         stripe_views.reconcile_subscription_mutations_manual,
         name="reconcile_subscription_mutations_manual",
     ),
+
+    path(
+        "create_member_reservation/<int:lesson_id>/",
+        stripe_views.create_member_reservation,
+        name="create_member_reservation",
+    ),
+
+    path("create_ticket_purchase/<int:package_id>/", stripe_views.create_ticket_purchase, name="create_ticket_purchase",),
+
+    path('create_visitor_reservation/<int:lesson_id>/', stripe_views.create_visitor_reservation, name='create_visitor_reservation'),
+    path('change_stripe_payment_method/<int:club_id>/', stripe_views.change_stripe_payment_method, name='change_stripe_payment_method'),
 
     path(
         'migrate_cash_subscription_to_stripe/<int:club_id>/',
