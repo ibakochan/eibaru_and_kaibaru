@@ -364,9 +364,21 @@ class SubscriptionSerializer(serializers.ModelSerializer):
 
 class MembershipPlanSerializer(serializers.ModelSerializer):
     group = serializers.PrimaryKeyRelatedField(read_only=True)
-    group_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
-    merge_plan_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
-    default_plan_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
+    group_id = serializers.IntegerField(
+        write_only=True,
+        required=False,
+        allow_null=True
+    )
+    merge_plan_id = serializers.IntegerField(
+        write_only=True,
+        required=False,
+        allow_null=True
+    )
+    default_plan_id = serializers.IntegerField(
+        write_only=True,
+        required=False,
+        allow_null=True
+    )
 
     class Meta:
         model = MembershipPlan
@@ -378,26 +390,36 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
             "price",
             "currency",
             "interval",
+
             "max_lessons_per_month",
             "member_category",
             "age_min",
             "age_max",
+
             "bundled_plans",
+
             "active",
             "created_at",
             "updated_at",
+
             "group",
             "group_id",
             "merge_plan_id",
             "default_plan_id",
+
             "deleted_at",
             "apply_current_price_to_existing",
+
+            # Plan type
             "plan_type",
+
+            # Ticket plan configuration
             "ticket_type",
             "ticket_quantity",
             "ticket_expiration_mode",
             "ticket_expiration_days",
         ]
+
         read_only_fields = [
             "id",
             "club",
@@ -406,230 +428,714 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
         ]
 
     def validate(self, attrs):
-        bundled = attrs.get("bundled_plans", [])
-    
         club = self.context.get("club")
+
         if not club:
             raise serializers.ValidationError({
                 "club_subdomain": "Club is required."
             })
-    
-        # convert to set of IDs (works for both create + update)
-        new_set = set(p.id for p in bundled)
-    
-        # ---------------------------------------------------
-        # 1. OPTIONAL BUNDLE (empty = normal plan)
-        # ---------------------------------------------------
-        if not new_set:
-            return attrs
-    
-        # ---------------------------------------------------
-        # 2. MUST HAVE AT LEAST 2 PLANS
-        # ---------------------------------------------------
-        if len(new_set) < 2:
-            raise serializers.ValidationError(
-                {"bundled_plans": "A bundle must contain at least 2 plans."}
-            )
-    
-        # ---------------------------------------------------
-        # 3. PREVENT SELF-INCLUSION (update case)
-        # ---------------------------------------------------
-        if self.instance and self.instance.id in new_set:
-            raise serializers.ValidationError(
-                {"bundled_plans": "A plan cannot include itself in a bundle."}
-            )
-    
-        # ---------------------------------------------------
-        # 4. PREVENT NESTED BUNDLES
-        # (any plan already used inside another bundle)
-        # ---------------------------------------------------
-        nested_bundles = MembershipPlan.objects.filter(
-            id__in=new_set,
-            bundled_plans__isnull=False
-        ).distinct()
-    
-        if nested_bundles.exists():
-            raise serializers.ValidationError(
-                {"bundled_plans": "Bundles cannot contain other bundles."}
-            )
-    
-        # ---------------------------------------------------
-        # 5. PREVENT IDENTICAL BUNDLES (same club)
-        # ---------------------------------------------------
-        qs = MembershipPlan.objects.filter(club=club)
-    
-        if self.instance:
-            qs = qs.exclude(id=self.instance.id)
-    
-        for p in qs:
-            existing_set = set(
-                p.bundled_plans.values_list("id", flat=True)
-            )
-    
-            if existing_set == new_set:
-                raise serializers.ValidationError(
-                    {"bundled_plans": "An identical bundle already exists."}
-                )
-    
-        return attrs
-    
 
+        bundled = attrs.get("bundled_plans")
+
+        # =========================================================
+        # CREATE
+        # =========================================================
+
+        if self.instance is None:
+
+            bundled = list(bundled or [])
+
+            # -----------------------------------------------------
+            # Bundle determination
+            #
+            # 2+ bundled plans ALWAYS means BUNDLE.
+            # The frontend does not need to send "bundle".
+            # -----------------------------------------------------
+
+            if len(bundled) >= 2:
+                attrs["plan_type"] = (
+                    MembershipPlan.PlanType.BUNDLE
+                )
+
+            elif len(bundled) == 1:
+                raise serializers.ValidationError({
+                    "bundled_plans": (
+                        "A bundle must contain at least 2 plans."
+                    )
+                })
+
+            else:
+                plan_type = attrs.get(
+                    "plan_type",
+                    MembershipPlan.PlanType.NORMAL,
+                )
+
+                if plan_type not in [
+                    MembershipPlan.PlanType.NORMAL,
+                    MembershipPlan.PlanType.TICKET_PLAN,
+                ]:
+                    raise serializers.ValidationError({
+                        "plan_type": "Invalid plan type."
+                    })
+
+            # -----------------------------------------------------
+            # Ticket plan validation
+            # -----------------------------------------------------
+
+            plan_type = attrs.get(
+                "plan_type",
+                MembershipPlan.PlanType.NORMAL,
+            )
+
+            if plan_type == MembershipPlan.PlanType.TICKET_PLAN:
+
+                if not attrs.get("ticket_type"):
+                    raise serializers.ValidationError({
+                        "ticket_type": (
+                            "Ticket plans must specify a ticket type."
+                        )
+                    })
+
+                ticket_quantity = attrs.get(
+                    "ticket_quantity"
+                )
+
+                if not ticket_quantity or ticket_quantity <= 0:
+                    raise serializers.ValidationError({
+                        "ticket_quantity": (
+                            "Ticket quantity must be greater than 0."
+                        )
+                    })
+
+                expiration_mode = attrs.get(
+                    "ticket_expiration_mode",
+                    MembershipPlan.TicketExpirationMode.END_OF_MONTH,
+                )
+
+                expiration_days = attrs.get(
+                    "ticket_expiration_days"
+                )
+
+                if (
+                    expiration_mode
+                    == MembershipPlan.TicketExpirationMode.DAYS_AFTER_GRANT
+                ):
+                    if not expiration_days or expiration_days <= 0:
+                        raise serializers.ValidationError({
+                            "ticket_expiration_days": (
+                                "Expiration days must be greater than 0."
+                            )
+                        })
+                else:
+                    attrs["ticket_expiration_days"] = None
+
+            else:
+                # Normal and bundle plans cannot have ticket config.
+                attrs["ticket_type"] = None
+                attrs["ticket_quantity"] = None
+                attrs["ticket_expiration_mode"] = (
+                    MembershipPlan.TicketExpirationMode.END_OF_MONTH
+                )
+                attrs["ticket_expiration_days"] = None
+
+            # -----------------------------------------------------
+            # Validate bundled plans
+            # -----------------------------------------------------
+
+            if bundled:
+
+                new_set = {
+                    p.id
+                    for p in bundled
+                }
+
+                if len(new_set) < 2:
+                    raise serializers.ValidationError({
+                        "bundled_plans": (
+                            "A bundle must contain at least 2 plans."
+                        )
+                    })
+
+                # All plans must belong to this club and be active.
+                invalid_plans = [
+                    p
+                    for p in bundled
+                    if (
+                        p.club_id != club.id
+                        or p.is_deleted
+                        or not p.active
+                    )
+                ]
+
+                if invalid_plans:
+                    raise serializers.ValidationError({
+                        "bundled_plans": (
+                            "All bundled plans must belong to this "
+                            "club and be active."
+                        )
+                    })
+
+                # Prevent nested bundles.
+                nested_bundles = MembershipPlan.objects.filter(
+                    id__in=new_set,
+                    bundled_plans__isnull=False
+                ).distinct()
+
+                if nested_bundles.exists():
+                    raise serializers.ValidationError({
+                        "bundled_plans": (
+                            "Bundles cannot contain other bundles."
+                        )
+                    })
+
+                # Prevent identical bundles.
+                qs = MembershipPlan.objects.filter(
+                    club=club
+                )
+
+                for p in qs:
+
+                    existing_set = set(
+                        p.bundled_plans.values_list(
+                            "id",
+                            flat=True
+                        )
+                    )
+
+                    if existing_set == new_set:
+                        raise serializers.ValidationError({
+                            "bundled_plans": (
+                                "An identical bundle already exists."
+                            )
+                        })
+
+            return attrs
+
+        # =========================================================
+        # UPDATE
+        # =========================================================
+
+        submitted_plan_type = attrs.get("plan_type")
+
+        # ---------------------------------------------------------
+        # Plan type is immutable.
+        # ---------------------------------------------------------
+
+        if (
+            submitted_plan_type is not None
+            and submitted_plan_type != self.instance.plan_type
+        ):
+            raise serializers.ValidationError({
+                "plan_type": (
+                    "Plan type cannot be changed after creation."
+                )
+            })
+
+        # ---------------------------------------------------------
+        # Bundle rules are based on plan_type, NOT merely on
+        # whether bundled_plans happens to contain records.
+        # ---------------------------------------------------------
+
+        if bundled is not None:
+
+            bundled = list(bundled)
+
+            is_bundle = (
+                self.instance.plan_type
+                == MembershipPlan.PlanType.BUNDLE
+            )
+
+            if is_bundle:
+
+                if len(bundled) < 2:
+                    raise serializers.ValidationError({
+                        "bundled_plans": (
+                            "A bundle must contain at least 2 plans."
+                        )
+                    })
+
+            else:
+
+                if len(bundled) > 0:
+                    raise serializers.ValidationError({
+                        "bundled_plans": (
+                            "Only bundle plans can contain "
+                            "bundled plans."
+                        )
+                    })
+
+            # -----------------------------------------------------
+            # Validate bundle contents
+            # -----------------------------------------------------
+
+            if is_bundle:
+
+                new_set = {
+                    p.id
+                    for p in bundled
+                }
+
+                if self.instance.id in new_set:
+                    raise serializers.ValidationError({
+                        "bundled_plans": (
+                            "A plan cannot include itself "
+                            "in a bundle."
+                        )
+                    })
+
+                invalid_plans = [
+                    p
+                    for p in bundled
+                    if (
+                        p.club_id != self.instance.club_id
+                        or p.is_deleted
+                        or not p.active
+                    )
+                ]
+
+                if invalid_plans:
+                    raise serializers.ValidationError({
+                        "bundled_plans": (
+                            "All bundled plans must belong to "
+                            "this club and be active."
+                        )
+                    })
+
+                nested_bundles = MembershipPlan.objects.filter(
+                    id__in=new_set,
+                    bundled_plans__isnull=False
+                ).exclude(
+                    id=self.instance.id
+                ).distinct()
+
+                if nested_bundles.exists():
+                    raise serializers.ValidationError({
+                        "bundled_plans": (
+                            "Bundles cannot contain other bundles."
+                        )
+                    })
+
+                qs = MembershipPlan.objects.filter(
+                    club=self.instance.club
+                ).exclude(
+                    id=self.instance.id
+                )
+
+                for p in qs:
+
+                    existing_set = set(
+                        p.bundled_plans.values_list(
+                            "id",
+                            flat=True
+                        )
+                    )
+
+                    if existing_set == new_set:
+                        raise serializers.ValidationError({
+                            "bundled_plans": (
+                                "An identical bundle already exists."
+                            )
+                        })
+
+        # ---------------------------------------------------------
+        # Ticket-plan validation on update.
+        #
+        # The type itself cannot change, but ticket configuration can.
+        # ---------------------------------------------------------
+
+        if (
+            self.instance.plan_type
+            == MembershipPlan.PlanType.TICKET_PLAN
+        ):
+
+            ticket_type = attrs.get(
+                "ticket_type",
+                self.instance.ticket_type,
+            )
+
+            ticket_quantity = attrs.get(
+                "ticket_quantity",
+                self.instance.ticket_quantity,
+            )
+
+            expiration_mode = attrs.get(
+                "ticket_expiration_mode",
+                self.instance.ticket_expiration_mode,
+            )
+
+            expiration_days = attrs.get(
+                "ticket_expiration_days",
+                self.instance.ticket_expiration_days,
+            )
+
+            if not ticket_type:
+                raise serializers.ValidationError({
+                    "ticket_type": (
+                        "Ticket plans must specify a ticket type."
+                    )
+                })
+
+            if not ticket_quantity or ticket_quantity <= 0:
+                raise serializers.ValidationError({
+                    "ticket_quantity": (
+                        "Ticket quantity must be greater than 0."
+                    )
+                })
+
+            if (
+                expiration_mode
+                == MembershipPlan.TicketExpirationMode.DAYS_AFTER_GRANT
+            ):
+
+                if not expiration_days or expiration_days <= 0:
+                    raise serializers.ValidationError({
+                        "ticket_expiration_days": (
+                            "Expiration days must be greater than 0."
+                        )
+                    })
+
+            else:
+                attrs["ticket_expiration_days"] = None
+
+        else:
+
+            # Normal/bundle plans cannot acquire ticket settings.
+            if (
+                attrs.get("ticket_type") is not None
+                or attrs.get("ticket_quantity") is not None
+                or attrs.get("ticket_expiration_days") is not None
+            ):
+                raise serializers.ValidationError({
+                    "plan_type": (
+                        "Only ticket plans can have "
+                        "ticket configuration."
+                    )
+                })
+
+        return attrs
 
     def create(self, validated_data):
-        bundled = validated_data.pop("bundled_plans", [])
-        group_id = validated_data.pop("group_id", None)
-        merge_plan_id = validated_data.pop("merge_plan_id", None)
-        default_plan_id = validated_data.pop("default_plan_id", None)
-    
-        club = self.context.get("club") or validated_data.get("club")
-    
+        bundled = validated_data.pop(
+            "bundled_plans",
+            []
+        )
+
+        group_id = validated_data.pop(
+            "group_id",
+            None
+        )
+
+        merge_plan_id = validated_data.pop(
+            "merge_plan_id",
+            None
+        )
+
+        default_plan_id = validated_data.pop(
+            "default_plan_id",
+            None
+        )
+
+        club = (
+            self.context.get("club")
+            or validated_data.get("club")
+        )
+
+        # ---------------------------------------------------------
+        # 2+ bundled plans ALWAYS create a BUNDLE.
+        # ---------------------------------------------------------
+
+        if len(bundled) >= 2:
+            validated_data["plan_type"] = (
+                MembershipPlan.PlanType.BUNDLE
+            )
+
         with transaction.atomic():
-            plan = MembershipPlan.objects.create(**validated_data)
+
+            plan = MembershipPlan.objects.create(
+                **validated_data
+            )
+
             group = None
-    
+
             # CASE 1: join existing group
             if group_id:
-                group = MembershipPlanGroup.objects.get(id=group_id, club=club)
+
+                group = MembershipPlanGroup.objects.get(
+                    id=group_id,
+                    club=club
+                )
+
                 plan.group = group
-                plan.save(update_fields=["group"])
-    
+
+                plan.save(
+                    update_fields=["group"]
+                )
+
             # CASE 2: merge with single plan → create group
             elif merge_plan_id:
-                other = MembershipPlan.objects.get(id=merge_plan_id, club=club)
-    
+
+                other = MembershipPlan.objects.get(
+                    id=merge_plan_id,
+                    club=club
+                )
+
                 if other.group:
                     group = other.group
+
                 else:
-                    group = MembershipPlanGroup.objects.create(club=club)
-                    other.group = group
-                    other.save(update_fields=["group"])
-    
-                plan.group = group
-                plan.save(update_fields=["group"])
-    
-            # DEFAULT PLAN LOGIC (FIXED)
-            if group:
-                if default_plan_id:
-                    default_plan = MembershipPlan.objects.get(
-                        id=default_plan_id,
+                    group = MembershipPlanGroup.objects.create(
                         club=club
                     )
-    
+
+                    other.group = group
+
+                    other.save(
+                        update_fields=["group"]
+                    )
+
+                plan.group = group
+
+                plan.save(
+                    update_fields=["group"]
+                )
+
+            # DEFAULT PLAN LOGIC
+            if group:
+
+                if default_plan_id:
+
+                    default_plan = (
+                        MembershipPlan.objects.get(
+                            id=default_plan_id,
+                            club=club
+                        )
+                    )
+
                     if default_plan.group_id != group.id:
                         raise serializers.ValidationError({
-                            "default_plan_id": "Default plan must belong to the group."
+                            "default_plan_id": (
+                                "Default plan must belong "
+                                "to the group."
+                            )
                         })
-    
+
                     group.default_plan = default_plan
+
                 else:
+
                     group.default_plan = plan
-    
-                group.save(update_fields=["default_plan"])
-    
-            plan.bundled_plans.set(bundled)
-            enforce_membership_plan_invariants(club)
-    
+
+                group.save(
+                    update_fields=["default_plan"]
+                )
+
+            plan.bundled_plans.set(
+                bundled
+            )
+
+            enforce_membership_plan_invariants(
+                club
+            )
+
         return plan
-     
-     
+
     def update(self, instance, validated_data):
-        bundled = validated_data.pop("bundled_plans", None)
-        group_id = validated_data.pop("group_id", None)
-        merge_plan_id = validated_data.pop("merge_plan_id", None)
-        default_plan_id = validated_data.pop("default_plan_id", None)
-    
+
+        bundled = validated_data.pop(
+            "bundled_plans",
+            None
+        )
+
+        group_id = validated_data.pop(
+            "group_id",
+            None
+        )
+
+        merge_plan_id = validated_data.pop(
+            "merge_plan_id",
+            None
+        )
+
+        default_plan_id = validated_data.pop(
+            "default_plan_id",
+            None
+        )
+
+        # ---------------------------------------------------------
+        # Plan type is immutable.
+        #
+        # Remove it from validated_data so it can never be
+        # changed by instance.save().
+        # ---------------------------------------------------------
+
+        validated_data.pop(
+            "plan_type",
+            None
+        )
+
+        # ---------------------------------------------------------
+        # Bundle determination is based on plan_type.
+        # ---------------------------------------------------------
+
         if bundled is not None:
-            is_current_bundle = instance.bundled_plans.exists()
-    
+
+            is_current_bundle = (
+                instance.plan_type
+                == MembershipPlan.PlanType.BUNDLE
+            )
+
             new_count = len(bundled)
-            is_becoming_bundle = new_count >= 2
-            is_becoming_normal = new_count < 2
-    
-            if not is_current_bundle and is_becoming_bundle:
-                raise serializers.ValidationError({
-                    "bundled_plans": "通常プランをセットプランに変更することはできません。"
-                })
-    
-            if is_current_bundle and is_becoming_normal:
-                raise serializers.ValidationError({
-                    "bundled_plans": "セットプランは通常プランに戻すことはできません。"
-                })
-    
+
+            if is_current_bundle:
+
+                if new_count < 2:
+                    raise serializers.ValidationError({
+                        "bundled_plans": (
+                            "セットプランは2つ以上の"
+                            "プランが必要です。"
+                        )
+                    })
+
+            else:
+
+                if new_count > 0:
+                    raise serializers.ValidationError({
+                        "bundled_plans": (
+                            "通常プランまたはチケットプランを"
+                            "セットプランに変更することはできません。"
+                        )
+                    })
+
         with transaction.atomic():
-    
+
             old_group = instance.group
-    
+
             for attr, value in validated_data.items():
-                setattr(instance, attr, value)
-    
+                setattr(
+                    instance,
+                    attr,
+                    value
+                )
+
             if group_id is not None:
+
                 if group_id == 0:
                     instance.group = None
+
                 else:
-                    instance.group = MembershipPlanGroup.objects.get(
-                        id=group_id,
-                        club=instance.club
+                    instance.group = (
+                        MembershipPlanGroup.objects.get(
+                            id=group_id,
+                            club=instance.club
+                        )
                     )
-    
+
             elif merge_plan_id:
+
                 other = MembershipPlan.objects.get(
                     id=merge_plan_id,
                     club=instance.club
                 )
-    
-                if other.group:
-                    instance.group = other.group
-                else:
-                    group = MembershipPlanGroup.objects.create(club=instance.club)
-                    other.group = group
-                    other.save(update_fields=["group"])
-                    instance.group = group
-    
-            else:
-                instance.group = None
-    
-            instance.save()
-    
 
-    
+                if other.group:
+
+                    instance.group = other.group
+
+                else:
+
+                    group = (
+                        MembershipPlanGroup.objects.create(
+                            club=instance.club
+                        )
+                    )
+
+                    other.group = group
+
+                    other.save(
+                        update_fields=["group"]
+                    )
+
+                    instance.group = group
+
+            else:
+
+                instance.group = None
+
+            instance.save()
+
             # CLEANUP: ensure default still valid
-            if instance.group and instance.group.default_plan:
-                if instance.group.default_plan.group_id != instance.group_id:
+            if (
+                instance.group
+                and instance.group.default_plan
+            ):
+
+                if (
+                    instance.group.default_plan.group_id
+                    != instance.group_id
+                ):
+
                     instance.group.default_plan = max(
                         instance.group.plans.all(),
                         key=lambda p: p.price,
                         default=None
                     )
-                    instance.group.save(update_fields=["default_plan"])
-    
+
+                    instance.group.save(
+                        update_fields=["default_plan"]
+                    )
+
             # CLEANUP groups
             if old_group:
+
                 if old_group.plans.count() < 2:
-                    old_group.plans.update(group=None)
+
+                    old_group.plans.update(
+                        group=None
+                    )
+
                     old_group.delete()
-    
+
             if bundled is not None:
+
                 if len(bundled) >= 2:
-                    instance.bundled_plans.set(bundled)
+                    instance.bundled_plans.set(
+                        bundled
+                    )
 
             if default_plan_id and instance.group:
-                default_plan = MembershipPlan.objects.get(
-                    id=default_plan_id,
-                    club=instance.club
+
+                default_plan = (
+                    MembershipPlan.objects.get(
+                        id=default_plan_id,
+                        club=instance.club
+                    )
                 )
 
-                if default_plan.group_id != instance.group_id:
+                if (
+                    default_plan.group_id
+                    != instance.group_id
+                ):
                     raise serializers.ValidationError({
-                        "default_plan_id": "Default plan must belong to the group."
+                        "default_plan_id": (
+                            "Default plan must belong "
+                            "to the group."
+                        )
                     })
 
-                instance.group.default_plan = default_plan
-                instance.group.save(update_fields=["default_plan"])
-            
+                instance.group.default_plan = (
+                    default_plan
+                )
+
+                instance.group.save(
+                    update_fields=["default_plan"]
+                )
+
         transaction.on_commit(
-            lambda: enforce_membership_plan_invariants(instance.club)
+            lambda: enforce_membership_plan_invariants(
+                instance.club
+            )
         )
-    
+
         return instance
 
 

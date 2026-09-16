@@ -548,6 +548,10 @@ class SubscriptionAddPlanService:
         # =========================================================
         # DB UPDATE (UNCHANGED)
         # =========================================================
+        ticket_grant_quantity = None
+
+        if plan.plan_type == "ticket_plan":
+            ticket_grant_quantity = pricing["ticket_quantity"]
 
         with transaction.atomic():
             item = SubscriptionItem.objects.filter(
@@ -570,6 +574,26 @@ class SubscriptionAddPlanService:
                     stripe_subscription_item_id=stripe_item_id,
                     price_at_subscription=plan.price,
                     stripe_price_id_at_subscription=plan.stripe_price_id,
+                )
+
+            # ---------------------------------------------------------
+            # INITIAL TICKET GRANT
+            # ---------------------------------------------------------
+        
+            if (
+                plan.plan_type == "ticket_plan"
+                and pricing.get("ticket_quantity", 0) > 0
+            ):
+        
+                TicketGrant.objects.create(
+                    member=member,
+                    ticket_type=plan.ticket_type,
+                    source=TicketGrant.Source.SUBSCRIPTION,
+                    quantity=pricing["ticket_quantity"],
+                    expires_at=calculate_ticket_expiration(
+                        plan=plan,
+                        granted_at=timezone.now(),
+                    ),
                 )
 
             if joining_fee_amount > 0:

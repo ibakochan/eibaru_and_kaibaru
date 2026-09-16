@@ -103,7 +103,7 @@ def build_pricing_map(club, request_user=None, preview_member=None):
     from django.db.models import Q
 
     from .models import Subscription, SubscriptionItem, Member
-    from .pricing import calculate_regular_proration, calculate_monthly_proration
+    from .pricing import calculate_ticket_proration, calculate_regular_proration, calculate_monthly_proration
     from .discounts import (
         build_discount_context,
         build_member_discount_map,
@@ -163,7 +163,35 @@ def build_pricing_map(club, request_user=None, preview_member=None):
     for item in all_items:
         items_by_member[item.member_id].append(item)
 
-    plans = list(club.membership_plans.filter(active=True))
+    ticket_grants = list(
+        TicketGrant.objects
+        .filter(
+            member_id__in=[
+                m.id
+                for m in members
+                if not getattr(m, "is_preview", False)
+            ],
+        )
+        .select_related("ticket_type")
+        .filter(
+            Q(expires_at__isnull=True)
+            | Q(expires_at__gte=timezone.now())
+        )
+        .order_by("expires_at", "id")
+    )
+    
+    ticket_grants_by_member = defaultdict(list)
+    
+    for grant in ticket_grants:
+        ticket_grants_by_member[grant.member_id].append(grant)
+    
+    
+    
+    plans = list(
+        club.membership_plans
+        .filter(active=True)
+        .select_related("ticket_type")
+    )
 
     # -------------------------
     # DISCOUNTS (RAW)
@@ -290,6 +318,41 @@ def build_pricing_map(club, request_user=None, preview_member=None):
                 if not plan:
                     continue
 
+                ticket_data = None
+
+                if plan.plan_type == "ticket_plan":
+
+                    grants = [
+                        grant
+                        for grant in ticket_grants_by_member.get(member.id, [])
+                        if grant.ticket_type_id == plan.ticket_type_id
+                    ]
+                
+                    ticket_data = {
+                        "ticket_type_id": plan.ticket_type_id,
+                        "ticket_type_name": (
+                            plan.ticket_type.name
+                            if plan.ticket_type
+                            else None
+                        ),
+                        "monthly_quantity": plan.ticket_quantity,
+                        "expiration_mode": plan.ticket_expiration_mode,
+                        "expiration_days": plan.ticket_expiration_days,
+                        "grants": [
+                            {
+                                "id": grant.id,
+                                "quantity": grant.quantity,
+                                "granted_at": grant.granted_at.isoformat(),
+                                "expires_at": (
+                                    grant.expires_at.isoformat()
+                                    if grant.expires_at
+                                    else None
+                                ),
+                            }
+                            for grant in grants
+                        ],
+                    }
+                
                 base = get_effective_subscription_price(item)
 
                 pricing_result = apply_discounts(
@@ -312,6 +375,7 @@ def build_pricing_map(club, request_user=None, preview_member=None):
                     "deleted_at": item.deleted_at.isoformat() if item.deleted_at else None,
                     "access_until": item.access_until.isoformat() if item.access_until else None,
                     **pricing_result,
+                    "ticket": ticket_data,
                 })
 
             member_data["subscription_items"] = subscription_items
@@ -336,39 +400,75 @@ def build_pricing_map(club, request_user=None, preview_member=None):
                 )
 
                 # proration
-                if mode == "regular":
-                    proration = calculate_regular_proration(
-                        today, anchor_day, plan.price
-                    )
-                    ratio = (
-                        proration["remaining_days"]
-                        / proration["billing_period_days"]
-                    )
-                else:
-                    proration = calculate_monthly_proration(
-                        today, plan.price
-                    )
-                    ratio = (
-                        proration["remaining_days"]
-                        / proration["days_in_month"]
-                    )
 
-                prorated_pricing = apply_discounts(
-                    member=member,
-                    member_adjustments=member_adjustments,
-                    member_id=member.id,
-                    base_amount=proration["prorated_amount"],
-                    discount_type="subscription",
-                    plan=plan,
-                    proration_ratio=ratio,
-                    member_subscription_discounts=member_subscription_discounts,
-                    member_joining_discounts=member_joining_discounts,
-                    subscription_discount_plan_ids=subscription_discount_plan_ids,
-                    joining_discount_plan_ids=joining_discount_plan_ids,
-                )
+                ticket_proration = None
+
+                if plan.plan_type == "ticket_plan":
+
+                    ticket_proration = calculate_ticket_proration(
+                        today=today,
+                        anchor_day=anchor_day,
+                        plan_price=plan.price,
+                        ticket_quantity=plan.ticket_quantity,
+                        mode=mode,
+                    )
+                
+                    proration = ticket_proration["calendar_proration"]
+                
+                    # IMPORTANT:
+                    # Discount proration follows the rounded ticket quantity.
+                    ratio = ticket_proration["ticket_ratio"]
+                
+                    prorated_pricing = apply_discounts(
+                        member=member,
+                        member_adjustments=member_adjustments,
+                        member_id=member.id,
+                        base_amount=ticket_proration["base_amount"],
+                        discount_type="subscription",
+                        plan=plan,
+                        proration_ratio=ratio,
+                        member_subscription_discounts=member_subscription_discounts,
+                        member_joining_discounts=member_joining_discounts,
+                        subscription_discount_plan_ids=subscription_discount_plan_ids,
+                        joining_discount_plan_ids=joining_discount_plan_ids,
+                    )
+                
+                else:
+
+                    if mode == "regular":
+                        proration = calculate_regular_proration(
+                            today, anchor_day, plan.price
+                        )
+                        ratio = (
+                            proration["remaining_days"]
+                            / proration["billing_period_days"]
+                        )
+                    else:
+                        proration = calculate_monthly_proration(
+                            today, plan.price
+                        )
+                        ratio = (
+                            proration["remaining_days"]
+                            / proration["days_in_month"]
+                        )
+    
+                    prorated_pricing = apply_discounts(
+                        member=member,
+                        member_adjustments=member_adjustments,
+                        member_id=member.id,
+                        base_amount=proration["prorated_amount"],
+                        discount_type="subscription",
+                        plan=plan,
+                        proration_ratio=ratio,
+                        member_subscription_discounts=member_subscription_discounts,
+                        member_joining_discounts=member_joining_discounts,
+                        subscription_discount_plan_ids=subscription_discount_plan_ids,
+                        joining_discount_plan_ids=joining_discount_plan_ids,
+                    )
 
                 is_monthly_past_anchor = (
-                    mode == "monthly"
+                    plan.plan_type != "ticket_plan"
+                    and mode == "monthly"
                     and anchor_day
                     and today.day > anchor_day
                 )
@@ -382,6 +482,56 @@ def build_pricing_map(club, request_user=None, preview_member=None):
                 else:
                     today_charge = prorated_pricing
 
+                ticket_preview = None
+
+                if plan.plan_type == "ticket_plan":
+
+                    ticket_preview = {
+                        "ticket_type_id": plan.ticket_type_id,
+                        "ticket_type_name": (
+                            plan.ticket_type.name
+                            if plan.ticket_type
+                            else None
+                        ),
+                
+                        # Normal recurring entitlement.
+                        "monthly_quantity": plan.ticket_quantity,
+                
+                        # Initial signup entitlement after calendar
+                        # proration + rounding.
+                        "initial_quantity": ticket_proration[
+                            "ticket_quantity"
+                        ],
+                
+                        "raw_initial_quantity": ticket_proration[
+                            "raw_ticket_quantity"
+                        ],
+                
+                        "calendar_ratio": ticket_proration[
+                            "calendar_ratio"
+                        ],
+                
+                        # This is the ratio used for money/discounts.
+                        "ticket_ratio": ticket_proration[
+                            "ticket_ratio"
+                        ],
+                
+                        "expiration_mode": (
+                            plan.ticket_expiration_mode
+                        ),
+                
+                        "expiration_days": (
+                            plan.ticket_expiration_days
+                        ),
+                
+                        # For the first grant, which happens today.
+                        "initial_grant_date": today.isoformat(),
+                
+                        # We can calculate this in the frontend or
+                        # add the expiration helper here later.
+                        "initial_grant_expires_at": None,
+                    }
+
                 plan_alternatives[plan.id] = {
                     "plan_name": plan.name,
                     "monthly": full_pricing,
@@ -391,6 +541,8 @@ def build_pricing_map(club, request_user=None, preview_member=None):
                         "ratio": ratio,
                     },
                     "today_charge": today_charge,
+                    "plan_type": plan.plan_type,
+                    "ticket": ticket_preview,
                 }
 
             member_data["plan_alternatives"] = plan_alternatives
@@ -405,6 +557,41 @@ def build_pricing_map(club, request_user=None, preview_member=None):
                 plan = item.plan
                 if not plan:
                     continue
+
+                ticket_data = None
+
+                if plan.plan_type == "ticket_plan":
+
+                    grants = [
+                        grant
+                        for grant in ticket_grants_by_member.get(member.id, [])
+                        if grant.ticket_type_id == plan.ticket_type_id
+                    ]
+                
+                    ticket_data = {
+                        "ticket_type_id": plan.ticket_type_id,
+                        "ticket_type_name": (
+                            plan.ticket_type.name
+                            if plan.ticket_type
+                            else None
+                        ),
+                        "monthly_quantity": plan.ticket_quantity,
+                        "expiration_mode": plan.ticket_expiration_mode,
+                        "expiration_days": plan.ticket_expiration_days,
+                        "grants": [
+                            {
+                                "id": grant.id,
+                                "quantity": grant.quantity,
+                                "granted_at": grant.granted_at.isoformat(),
+                                "expires_at": (
+                                    grant.expires_at.isoformat()
+                                    if grant.expires_at
+                                    else None
+                                ),
+                            }
+                            for grant in grants
+                        ],
+                    }
 
                 base = get_effective_subscription_price(item)
 
@@ -428,6 +615,7 @@ def build_pricing_map(club, request_user=None, preview_member=None):
                     "deleted_at": item.deleted_at.isoformat() if item.deleted_at else None,
                     "access_until": item.access_until.isoformat() if item.access_until else None,
                     **pricing_result,
+                    "ticket": ticket_data,
                 })
 
             member_data["subscription_items"] = staff_items
@@ -659,37 +847,36 @@ class MembershipPlanViewSet(viewsets.ModelViewSet):
     queryset = MembershipPlan.objects.all()
     serializer_class = MembershipPlanSerializer
 
-    
-
     def get_serializer_context(self):
         context = super().get_serializer_context()
 
         subdomain = self.request.data.get("club_subdomain")
-        club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
+        club = Club.objects.filter(
+            subdomain=subdomain,
+            is_deleted=False
+        ).first()
 
         context["club"] = club
         return context
-
-
 
     def perform_destroy(self, instance):
         if self.request.user != instance.club.owner:
             raise serializers.ValidationError(
                 {"detail": "Only owner can delete plans."}
             )
-    
+
         if would_break_any_bundle(instance):
             raise serializers.ValidationError(
                 "Cannot delete plan because it would leave a bundle with <2 plans."
             )
-    
+
         # ---------------------------------------------------------
-        # STEP 1: Check ANY subscription history (even soft deleted)
+        # STEP 1: Check ANY subscription history
         # ---------------------------------------------------------
         has_history = SubscriptionItem.objects.filter(
             plan=instance
         ).exists()
-    
+
         active_items = SubscriptionItem.objects.filter(
             plan=instance,
             deleted_at__isnull=True
@@ -699,24 +886,28 @@ class MembershipPlanViewSet(viewsets.ModelViewSet):
         # CASE 1: ACTIVE ITEMS EXIST → cancel them
         # ---------------------------------------------------------
         if active_items.exists():
-            
+
             owner_map = defaultdict(lambda: {
                 "members": set(),
                 "plans": set(),
                 "access_until": None,
             })
-    
+
             for item in active_items:
                 owner = item.member.owner
                 group = owner_map[owner.id]
-    
-                group["members"].add(item.member.full_name)
-                group["plans"].add(item.plan.name)
-                group["access_until"] = item.subscription.access_until
-        
-    
 
+                group["members"].add(
+                    item.member.full_name
+                )
 
+                group["plans"].add(
+                    item.plan.name
+                )
+
+                group["access_until"] = (
+                    item.subscription.access_until
+                )
 
             for item in active_items:
                 SubscriptionItemService.cancel_item(
@@ -724,49 +915,76 @@ class MembershipPlanViewSet(viewsets.ModelViewSet):
                     subscription=item.subscription,
                     club=instance.club
                 )
-    
+
             instance.is_deleted = True
             instance.deleted_at = timezone.now()
-            instance.save(update_fields=["is_deleted", "deleted_at"])
-         
+
+            instance.save(
+                update_fields=[
+                    "is_deleted",
+                    "deleted_at"
+                ]
+            )
+
             serializable_owner_map = {
                 str(owner_id): {
-                    "members": list(data["members"]),
-                    "plans": list(data["plans"]),
-                    "access_until": data["access_until"].isoformat() if data["access_until"] else None,
+                    "members": list(
+                        data["members"]
+                    ),
+                    "plans": list(
+                        data["plans"]
+                    ),
+                    "access_until": (
+                        data["access_until"].isoformat()
+                        if data["access_until"]
+                        else None
+                    ),
                 }
                 for owner_id, data in owner_map.items()
             }
 
             transaction.on_commit(
-                lambda: send_plan_deletion_emails.delay(serializable_owner_map)
+                lambda: send_plan_deletion_emails.delay(
+                    serializable_owner_map
+                )
             )
 
             return
-            
+
         # ---------------------------------------------------------
         # STEP 3: HAS HISTORY → SOFT DELETE ONLY
         # ---------------------------------------------------------
         if has_history:
+
             instance.is_deleted = True
             instance.deleted_at = timezone.now()
-            instance.save(update_fields=["is_deleted", "deleted_at"])
+
+            instance.save(
+                update_fields=[
+                    "is_deleted",
+                    "deleted_at"
+                ]
+            )
 
             return
-    
+
         # ---------------------------------------------------------
         # STEP 4: NEVER USED → SAFE HARD DELETE
         # ---------------------------------------------------------
         instance.bundled_plans.clear()
         instance.delete()
-    
+
     def perform_create(self, serializer):
-        subdomain = self.request.data.get("club_subdomain")
+        subdomain = self.request.data.get(
+            "club_subdomain"
+        )
 
         if not subdomain:
-            raise serializers.ValidationError(
-                {"club_subdomain": "This field is required."}
-            )
+            raise serializers.ValidationError({
+                "club_subdomain": (
+                    "This field is required."
+                )
+            })
 
         club = Club.objects.filter(
             subdomain=subdomain,
@@ -774,100 +992,269 @@ class MembershipPlanViewSet(viewsets.ModelViewSet):
         ).first()
 
         if not club:
-            raise serializers.ValidationError(
-                {"club_subdomain": "Club not found."}
-            )
+            raise serializers.ValidationError({
+                "club_subdomain": "Club not found."
+            })
 
         if self.request.user != club.owner:
-            raise serializers.ValidationError(
-                {"detail": "Only owner can create plans."}
-            )
+            raise serializers.ValidationError({
+                "detail": "Only owner can create plans."
+            })
 
-        name = serializer.validated_data.get("name")
-        price = serializer.validated_data.get("price")
-        
+        name = serializer.validated_data.get(
+            "name"
+        )
+
+        price = serializer.validated_data.get(
+            "price"
+        )
+
         if not name:
-            raise serializers.ValidationError({"name": "Name cannot be empty."})
+            raise serializers.ValidationError({
+                "name": "Name cannot be empty."
+            })
 
         if price is None or price <= 0:
-            raise serializers.ValidationError({"price": "Price must be greater than 0."})
+            raise serializers.ValidationError({
+                "price": (
+                    "Price must be greater than 0."
+                )
+            })
 
-        
-        # 1️⃣ Save plan first
-        plan = serializer.save(club=club)
+        # ---------------------------------------------------------
+        # Determine final plan type.
+        #
+        # 2+ bundled plans always means BUNDLE.
+        # ---------------------------------------------------------
 
-        # 2️⃣ Create Stripe Product in the connected account
+        bundled_plans = serializer.validated_data.get(
+            "bundled_plans",
+            []
+        )
+
+        plan_type = serializer.validated_data.get(
+            "plan_type",
+            MembershipPlan.PlanType.NORMAL
+        )
+
+        if len(bundled_plans) >= 2:
+            plan_type = MembershipPlan.PlanType.BUNDLE
+
+        # ---------------------------------------------------------
+        # Ticket-plan validation
+        # ---------------------------------------------------------
+
+        if (
+            plan_type
+            == MembershipPlan.PlanType.TICKET_PLAN
+        ):
+
+            ticket_type = serializer.validated_data.get(
+                "ticket_type"
+            )
+
+            ticket_quantity = serializer.validated_data.get(
+                "ticket_quantity"
+            )
+
+            expiration_mode = serializer.validated_data.get(
+                "ticket_expiration_mode",
+                MembershipPlan.TicketExpirationMode.END_OF_MONTH
+            )
+
+            expiration_days = serializer.validated_data.get(
+                "ticket_expiration_days"
+            )
+
+            if not ticket_type:
+                raise serializers.ValidationError({
+                    "ticket_type": (
+                        "Ticket plans must specify "
+                        "a ticket type."
+                    )
+                })
+
+            if (
+                ticket_quantity is None
+                or ticket_quantity <= 0
+            ):
+                raise serializers.ValidationError({
+                    "ticket_quantity": (
+                        "Ticket quantity must be "
+                        "greater than 0."
+                    )
+                })
+
+            if (
+                expiration_mode
+                == MembershipPlan.TicketExpirationMode.DAYS_AFTER_GRANT
+            ):
+
+                if (
+                    expiration_days is None
+                    or expiration_days <= 0
+                ):
+                    raise serializers.ValidationError({
+                        "ticket_expiration_days": (
+                            "Expiration days must be "
+                            "greater than 0."
+                        )
+                    })
+
+        # ---------------------------------------------------------
+        # Save plan first.
+        # ---------------------------------------------------------
+
+        plan = serializer.save(
+            club=club,
+            plan_type=plan_type,
+        )
+
+        # ---------------------------------------------------------
+        # Create Stripe Product
+        # ---------------------------------------------------------
+
         product_data = {
             "name": plan.name,
             "metadata": {
-                "club_id": club.id,
-                "plan_id": plan.id
+                "club_id": str(club.id),
+                "plan_id": str(plan.id),
+                "plan_type": plan.plan_type,
             },
         }
-        
+
         if plan.description:
-            product_data["description"] = plan.description
-        
+            product_data["description"] = (
+                plan.description
+            )
+
         product = stripe.Product.create(
             **product_data,
             stripe_account=club.stripe_account_id
         )
 
-        # 3️⃣ Create Stripe Price
+        # ---------------------------------------------------------
+        # Create Stripe Price
+        # ---------------------------------------------------------
+
         stripe_price = stripe.Price.create(
             product=product.id,
-            unit_amount=int(plan.price),  # convert to cents
+            unit_amount=int(plan.price),
             currency=plan.currency,
-            recurring={"interval": plan.interval},
+            recurring={
+                "interval": plan.interval
+            },
             stripe_account=club.stripe_account_id
         )
 
-        # 4️⃣ Save Stripe price ID
+        # ---------------------------------------------------------
+        # Save Stripe IDs
+        # ---------------------------------------------------------
+
         plan.stripe_product_id = product.id
         plan.stripe_price_id = stripe_price.id
-        plan.save()
-    
+
+        plan.save(
+            update_fields=[
+                "stripe_product_id",
+                "stripe_price_id",
+            ]
+        )
+
     def perform_update(self, serializer):
         plan = self.get_object()
         club = plan.club
-    
+
         if self.request.user != club.owner:
-            raise serializers.ValidationError({"detail": "Only owner can update plans."})
-    
+            raise serializers.ValidationError({
+                "detail": "Only owner can update plans."
+            })
+
+        # ---------------------------------------------------------
+        # Plan type is immutable.
+        # ---------------------------------------------------------
+
+        submitted_plan_type = (
+            serializer.validated_data.get(
+                "plan_type"
+            )
+        )
+
+        if (
+            submitted_plan_type is not None
+            and submitted_plan_type != plan.plan_type
+        ):
+            raise serializers.ValidationError({
+                "plan_type": (
+                    "Plan type cannot be changed "
+                    "after creation."
+                )
+            })
+
+        # Make absolutely sure it cannot be changed.
+        serializer.validated_data.pop(
+            "plan_type",
+            None
+        )
+
         old_price = plan.price
         old_name = plan.name
         old_description = plan.description
-    
+
         updated_plan = serializer.save()
-    
+
         stripe_account = club.stripe_account_id
-    
-        # 1️⃣ Update product name and description (safe)
-        if updated_plan.stripe_product_id and (
-            old_name != updated_plan.name or
-            old_description != updated_plan.description
+
+        # ---------------------------------------------------------
+        # Update Stripe Product
+        # ---------------------------------------------------------
+
+        if (
+            updated_plan.stripe_product_id
+            and (
+                old_name != updated_plan.name
+                or old_description
+                != updated_plan.description
+            )
         ):
+
             stripe.Product.modify(
                 updated_plan.stripe_product_id,
                 name=updated_plan.name,
-                description=updated_plan.description or "",
+                description=(
+                    updated_plan.description or ""
+                ),
                 stripe_account=stripe_account
             )
-    
-        # 2️⃣ If price changed → create NEW Stripe price
+
+        # ---------------------------------------------------------
+        # Price changed → create NEW Stripe Price
+        # ---------------------------------------------------------
+
         if old_price != updated_plan.price:
+
             new_price = stripe.Price.create(
                 product=updated_plan.stripe_product_id,
-                unit_amount=int(updated_plan.price),
+                unit_amount=int(
+                    updated_plan.price
+                ),
                 currency=updated_plan.currency,
-                recurring={"interval": updated_plan.interval},
+                recurring={
+                    "interval":
+                        updated_plan.interval
+                },
                 stripe_account=stripe_account
             )
-    
-            updated_plan.stripe_price_id = new_price.id
-            updated_plan.save(update_fields=["stripe_price_id"])
-    
-    
+
+            updated_plan.stripe_price_id = (
+                new_price.id
+            )
+
+            updated_plan.save(
+                update_fields=[
+                    "stripe_price_id"
+                ]
+            )
 
 
 class SlateImageViewSet(viewsets.ModelViewSet):
