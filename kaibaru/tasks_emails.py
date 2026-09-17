@@ -1262,7 +1262,7 @@ def send_visitor_reservation_confirmation_email(
         f"{club_name}へのご予約ありがとうございます。\n"
         f"お支払いが完了し、ご予約が確定しました。\n\n"
 
-        f"■ ご予約内容いばぼばぶ\n"
+        f"■ ご予約内容\n"
         f"レッスン：{lesson.title}\n"
         f"日時：{reservation_date}（{weekday}）\n"
         f"時間：{start_time}〜{end_time}\n\n"
