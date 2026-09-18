@@ -1,6 +1,8 @@
 import calendar
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
+
+from django.utils import timezone
 
 
 # =========================================================
@@ -352,3 +354,44 @@ def calculate_ticket_proration(
         "ticket_ratio": ticket_ratio,
         "base_amount": base_amount,
     }
+
+
+def calculate_ticket_expiration(*, plan, granted_at):
+    """
+    Return when a ticket grant from this plan expires.
+
+    never            -> None
+    end_of_month     -> last second of the grant's local calendar month
+    days_after_grant -> granted_at + ticket_expiration_days
+    """
+    mode = plan.ticket_expiration_mode
+
+    if mode == "never":
+        return None
+
+    if timezone.is_naive(granted_at):
+        granted_at = timezone.make_aware(granted_at)
+
+    local_granted = timezone.localtime(granted_at)
+
+    if mode == "end_of_month":
+        last_day = calendar.monthrange(
+            local_granted.year,
+            local_granted.month,
+        )[1]
+
+        return local_granted.replace(
+            day=last_day,
+            hour=23,
+            minute=59,
+            second=59,
+            microsecond=0,
+        )
+
+    if mode == "days_after_grant":
+        days = plan.ticket_expiration_days or 0
+        if days <= 0:
+            return None
+        return granted_at + timedelta(days=days)
+
+    return None

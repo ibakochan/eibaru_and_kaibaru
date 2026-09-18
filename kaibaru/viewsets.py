@@ -103,7 +103,12 @@ def build_pricing_map(club, request_user=None, preview_member=None):
     from django.db.models import Q
 
     from .models import Subscription, SubscriptionItem, Member
-    from .pricing import calculate_ticket_proration, calculate_regular_proration, calculate_monthly_proration
+    from .pricing import (
+        calculate_ticket_proration,
+        calculate_regular_proration,
+        calculate_monthly_proration,
+        calculate_ticket_expiration,
+    )
     from .discounts import (
         build_discount_context,
         build_member_discount_map,
@@ -486,6 +491,11 @@ def build_pricing_map(club, request_user=None, preview_member=None):
 
                 if plan.plan_type == "ticket_plan":
 
+                    initial_expires_at = calculate_ticket_expiration(
+                        plan=plan,
+                        granted_at=timezone.now(),
+                    )
+
                     ticket_preview = {
                         "ticket_type_id": plan.ticket_type_id,
                         "ticket_type_name": (
@@ -527,9 +537,11 @@ def build_pricing_map(club, request_user=None, preview_member=None):
                         # For the first grant, which happens today.
                         "initial_grant_date": today.isoformat(),
                 
-                        # We can calculate this in the frontend or
-                        # add the expiration helper here later.
-                        "initial_grant_expires_at": None,
+                        "initial_grant_expires_at": (
+                            initial_expires_at.isoformat()
+                            if initial_expires_at
+                            else None
+                        ),
                     }
 
                 plan_alternatives[plan.id] = {

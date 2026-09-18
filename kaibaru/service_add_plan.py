@@ -2,9 +2,21 @@ import stripe
 from django.core.cache import cache
 from django.utils import timezone
 
-from .models import SubscriptionItem, SubscriptionMutation, Invoice, InvoiceItem, Payment, Member
+from .models import (
+    SubscriptionItem,
+    SubscriptionMutation,
+    Invoice,
+    InvoiceItem,
+    Payment,
+    Member,
+    TicketGrant,
+)
 from django.db import transaction
-from .pricing import calculate_joining_fee, calculate_subscription_pricing
+from .pricing import (
+    calculate_joining_fee,
+    calculate_subscription_pricing,
+    calculate_ticket_expiration,
+)
 from .discounts import (
     calculate_discounted_amount,
 )

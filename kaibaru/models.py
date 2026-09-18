@@ -143,6 +143,8 @@ class Club(models.Model):
     stripe_onboarding_completed = models.BooleanField(default=False)
     stripe_details_submitted = models.BooleanField(default=False)
 
+
+
     def clean(self):
         super().clean()
 
