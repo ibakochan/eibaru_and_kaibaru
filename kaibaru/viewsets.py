@@ -1071,7 +1071,7 @@ class MembershipPlanViewSet(viewsets.ModelViewSet):
 
             expiration_mode = serializer.validated_data.get(
                 "ticket_expiration_mode",
-                MembershipPlan.TicketExpirationMode.END_OF_MONTH
+                MembershipPlan.TicketExpirationMode.ONE_MONTH
             )
 
             expiration_days = serializer.validated_data.get(

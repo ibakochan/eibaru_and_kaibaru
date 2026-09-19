@@ -509,7 +509,7 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
 
                 expiration_mode = attrs.get(
                     "ticket_expiration_mode",
-                    MembershipPlan.TicketExpirationMode.END_OF_MONTH,
+                    MembershipPlan.TicketExpirationMode.ONE_MONTH,
                 )
 
                 expiration_days = attrs.get(
@@ -534,7 +534,7 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
                 attrs["ticket_type"] = None
                 attrs["ticket_quantity"] = None
                 attrs["ticket_expiration_mode"] = (
-                    MembershipPlan.TicketExpirationMode.END_OF_MONTH
+                    MembershipPlan.TicketExpirationMode.ONE_MONTH
                 )
                 attrs["ticket_expiration_days"] = None
 

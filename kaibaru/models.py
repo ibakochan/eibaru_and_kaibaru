@@ -228,14 +228,14 @@ class MembershipPlan(models.Model):
     )
 
     class TicketExpirationMode(models.TextChoices):
-        END_OF_MONTH = "end_of_month", "End of month"
+        ONE_MONTH = "one_month", "One month"
         NEVER = "never", "Never"
         DAYS_AFTER_GRANT = "days_after_grant", "Days after grant"
 
     ticket_expiration_mode = models.CharField(
         max_length=30,
         choices=TicketExpirationMode.choices,
-        default=TicketExpirationMode.END_OF_MONTH,
+        default=TicketExpirationMode.ONE_MONTH,
     )
 
     ticket_expiration_days = models.PositiveIntegerField(

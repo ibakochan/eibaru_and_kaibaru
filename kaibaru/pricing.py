@@ -356,12 +356,34 @@ def calculate_ticket_proration(
     }
 
 
+def add_one_month(local_dt):
+    """
+    Return local_dt shifted forward by exactly one calendar month,
+    keeping the same day-of-month whenever possible.
+
+    If the target month doesn't have that many days (e.g. Jan 31 ->
+    Feb 31), the day is clamped to the last day of the target month.
+    """
+    year = local_dt.year
+    month = local_dt.month + 1
+
+    if month > 12:
+        month = 1
+        year += 1
+
+    last_day_of_target_month = calendar.monthrange(year, month)[1]
+    day = min(local_dt.day, last_day_of_target_month)
+
+    return local_dt.replace(year=year, month=month, day=day)
+
+
 def calculate_ticket_expiration(*, plan, granted_at):
     """
     Return when a ticket grant from this plan expires.
 
     never            -> None
-    end_of_month     -> last second of the grant's local calendar month
+    one_month        -> last second of the same day, one month later
+                         (e.g. granted Sep 19 -> expires end of Oct 19)
     days_after_grant -> granted_at + ticket_expiration_days
     """
     mode = plan.ticket_expiration_mode
@@ -374,14 +396,10 @@ def calculate_ticket_expiration(*, plan, granted_at):
 
     local_granted = timezone.localtime(granted_at)
 
-    if mode == "end_of_month":
-        last_day = calendar.monthrange(
-            local_granted.year,
-            local_granted.month,
-        )[1]
+    if mode == "one_month":
+        target = add_one_month(local_granted)
 
-        return local_granted.replace(
-            day=last_day,
+        return target.replace(
             hour=23,
             minute=59,
             second=59,
