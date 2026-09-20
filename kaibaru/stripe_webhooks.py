@@ -58,7 +58,7 @@ from .rules_subscriptions import (
     item_state,
 )
 
-from .pricing import calculate_joining_fee, calculate_subscription_pricing, get_effective_subscription_price
+from .pricing import calculate_joining_fee, calculate_subscription_pricing, get_effective_subscription_price, calculate_ticket_expiration
 
 now = timezone.now()
 # ---------------------------
@@ -454,6 +454,7 @@ def stripe_connected_webhook(request):
                         ),
                         package=purchase.package,
                         quantity=purchase.quantity,
+                        stripe_event_id=event_id,
                     )
 
                     logger.info(
@@ -788,6 +789,8 @@ def stripe_connected_webhook(request):
             )
     
     
+        pricing = None
+
         if club.subscription_mode == "regular":
 
             
@@ -1110,6 +1113,51 @@ def stripe_connected_webhook(request):
 
 
             
+        # =========================================================
+        # INITIAL TICKET GRANT
+        # SAME PRORATION RULES AS ADD PLAN
+        # =========================================================
+
+        if (
+            plan.plan_type == "ticket_plan"
+            and pricing
+            and pricing.get("ticket_quantity", 0) > 0
+        ):
+
+            # A redelivered webhook must not grant a second batch.
+            already_granted = TicketGrant.objects.filter(
+                stripe_event_id=event_id,
+            ).exists()
+
+            if already_granted:
+                logger.info(
+                    "[checkout.session.completed] Subscription ticket grant "
+                    "already exists today for member=%s plan=%s, skipping",
+                    member.id,
+                    plan.id,
+                )
+
+            else:
+                TicketGrant.objects.create(
+                    member=member,
+                    ticket_type=plan.ticket_type,
+                    source=TicketGrant.Source.SUBSCRIPTION,
+                    quantity=pricing["ticket_quantity"],
+                    expires_at=calculate_ticket_expiration(
+                        plan=plan,
+                        granted_at=timezone.now(),
+                    ),
+                )
+
+                logger.info(
+                    "[checkout.session.completed] Granted %s prorated "
+                    "subscription tickets to member=%s plan=%s",
+                    pricing["ticket_quantity"],
+                    member.id,
+                    plan.id,
+                )
+
+
     elif event["type"] == "invoice.paid":
         invoice = event["data"]["object"]
         logger.info(f"[invoice.paid] Received invoice: {invoice.get('id')}")

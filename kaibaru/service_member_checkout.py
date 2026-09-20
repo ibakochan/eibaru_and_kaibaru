@@ -71,6 +71,27 @@ class MemberSubscriptionCheckoutService:
         prorated_amount = pricing["final_amount"]
         remaining_days = pricing["proration"]["remaining_days"]
 
+        # -------------------------
+        # ticket plans are prorated in whole tickets, so the
+        # summary shows the ticket count instead of the days
+        # -------------------------
+        is_ticket_plan = plan.plan_type == "ticket_plan"
+
+        ticket_quantity = (
+            pricing.get("ticket_quantity", 0)
+            if is_ticket_plan
+            else 0
+        )
+
+        if is_ticket_plan:
+            proration_line = (
+                f"・チケット{ticket_quantity}枚分: ¥{prorated_amount}"
+            )
+        else:
+            proration_line = (
+                f"・日割り料金 ({remaining_days}日): ¥{prorated_amount}"
+            )
+
         next_month_amount = 0
         if (today.day > club.stripe_anchor_date) and club.subscription_mode == "monthly":
             next_month_amount = calculate_discounted_amount(
@@ -110,7 +131,7 @@ class MemberSubscriptionCheckoutService:
                     "message": (
                         f"今回のお支払い予定:\n"
                         f"・入会金: ¥{joining_fee}\n"
-                        f"・日割り料金 ({remaining_days}日): ¥{prorated_amount}\n"
+                        f"{proration_line}\n"
                         f"{'・翌月前払い: ¥' + str(next_month_amount) if next_month_amount else ''}\n\n"
                         f"※最終金額はシステム計算に基づき確定されます"
                     )

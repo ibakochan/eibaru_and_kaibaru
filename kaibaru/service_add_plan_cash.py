@@ -6,11 +6,13 @@ from .models import (
     Invoice,
     InvoiceItem,
     Member,
+    TicketGrant,
 )
 
 from .pricing import (
     calculate_joining_fee,
     calculate_subscription_pricing,
+    calculate_ticket_expiration,
 )
 
 from .discounts import calculate_discounted_amount
@@ -50,6 +52,14 @@ class CashAddPlanService:
             joining_fee_amount = 0
             proration_amount = pricing["final_amount"]
             next_month_amount = 0
+
+            is_ticket_plan = plan.plan_type == "ticket_plan"
+
+            ticket_quantity = (
+                pricing.get("ticket_quantity", 0)
+                if is_ticket_plan
+                else 0
+            )
 
 
             if (
@@ -122,13 +132,23 @@ class CashAddPlanService:
 
             if proration_amount > 0:
 
+                if is_ticket_plan:
+                    proration_description = (
+                        f"{member.full_name}さんの"
+                        f"{plan.name} {ticket_quantity}枚分の日割り計算"
+                    )
+
+                else:
+                    proration_description = (
+                        f"{member.full_name}さんの"
+                        f"{pricing['proration']['remaining_days']}日分の{plan.name}の日割り計算"
+                    )
+
+
                 InvoiceItem.objects.create(
                     invoice=invoice,
                     member=member,
-                    description = (
-                        f"{member.full_name}さんの"
-                        f"{pricing['proration']['remaining_days']}日分の{plan.name}の日割り計算"
-                    ),
+                    description=proration_description,
                     amount=proration_amount,
                     quantity=1,
                 )
@@ -199,6 +219,26 @@ class CashAddPlanService:
                     plan=plan,
                     price_at_subscription=plan.price,
                     stripe_price_id_at_subscription=plan.stripe_price_id,
+                )
+
+
+
+            # =====================================================
+            # INITIAL TICKET GRANT
+            # SAME PRORATION RULES AS STRIPE ADD PLAN
+            # =====================================================
+
+            if is_ticket_plan and ticket_quantity > 0:
+
+                TicketGrant.objects.create(
+                    member=member,
+                    ticket_type=plan.ticket_type,
+                    source=TicketGrant.Source.SUBSCRIPTION,
+                    quantity=ticket_quantity,
+                    expires_at=calculate_ticket_expiration(
+                        plan=plan,
+                        granted_at=timezone.now(),
+                    ),
                 )
 
 

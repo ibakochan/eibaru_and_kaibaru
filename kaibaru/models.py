@@ -1263,6 +1263,13 @@ class TicketGrant(models.Model):
         auto_now_add=True
     )
 
+    stripe_event_id = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        unique=True,
+    )
+
     expires_at = models.DateTimeField(
         null=True,
         blank=True
