@@ -1230,6 +1230,7 @@ class TicketGrant(models.Model):
     class Source(models.TextChoices):
         PURCHASE = "purchase", "Purchase"
         MANUAL = "manual", "Manual"
+        SUBSCRIPTION = "subscription", "Subscription"
 
     member = models.ForeignKey(
         Member,
