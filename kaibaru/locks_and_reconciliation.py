@@ -6,12 +6,14 @@ from django.db.models import Q
 
 from collections import defaultdict
 import stripe
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
-from .models import Reservation, SubscriptionMutation, SubscriptionItem, Subscription, Club, Member, MembershipPlan, Invoice, InvoiceItem, Payment
-from datetime import timedelta
+from .models import TicketGrant, Reservation, SubscriptionMutation, SubscriptionItem, Subscription, Club, Member, MembershipPlan, Invoice, InvoiceItem, Payment
+from datetime import datetime, timedelta
 
-from .tasks_emails import send_stripe_cash_transition_email
+from .tasks_emails import send_stripe_cash_transition_email, send_plan_deletion_emails
+from .service_mutations import MutationLockedError
 
 from .invoice_creation import create_local_invoice_from_stripe_invoice
 
@@ -415,6 +417,21 @@ class StripeSubscriptionReconciler:
                 
                     member = Member.objects.get(id=member_id)
                     plan = MembershipPlan.objects.get(id=plan_id)
+
+
+                    frozen_price = payload.get("price_at_subscription")
+                    if frozen_price is None:
+                        raise ValueError(
+                            f"ADD_PLAN mutation {mutation.id} is missing "
+                            "frozen price_at_subscription"
+                        )
+
+                    frozen_stripe_price_id = payload.get("stripe_price_id")
+                    if not frozen_stripe_price_id:
+                        raise ValueError(
+                            f"ADD_PLAN mutation {mutation.id} is missing "
+                            "frozen stripe_price_id"
+                        )
                 
                 
                     existing = SubscriptionItem.objects.filter(
@@ -426,10 +443,8 @@ class StripeSubscriptionReconciler:
                 
                     if existing:
                         existing.deleted_at = None
-                        existing.price_at_subscription = plan.price
-                        existing.stripe_price_id_at_subscription = (
-                            plan.stripe_price_id
-                        )
+                        existing.price_at_subscription = frozen_price
+                        existing.stripe_price_id_at_subscription = frozen_stripe_price_id
                         existing.save(
                             update_fields=[
                                 "deleted_at",
@@ -449,7 +464,7 @@ class StripeSubscriptionReconciler:
                         stripe_item = next(
                             (
                                 i for i in stripe_sub["items"]["data"]
-                                if i["price"]["id"] == plan.stripe_price_id
+                                if i["price"]["id"] == frozen_stripe_price_id
                             ),
                             None
                         )
@@ -458,14 +473,63 @@ class StripeSubscriptionReconciler:
                             subscription=subscription,
                             member=member,
                             plan=plan,
-                            price_at_subscription=plan.price,
-                            stripe_price_id_at_subscription=plan.stripe_price_id,
+                            price_at_subscription=frozen_price,
+                            stripe_price_id_at_subscription=frozen_stripe_price_id,
                             stripe_subscription_item_id=(
                                 stripe_item["id"]
                                 if stripe_item
                                 else None
                             ),
                         )
+
+                    if plan.plan_type == "ticket_plan":
+                        ticket_grant_data = payload.get(
+                            "ticket_grant",
+                            {},
+                        )
+
+                        if not ticket_grant_data:
+                            raise ValueError(
+                                f"ADD_PLAN mutation {mutation.id} is missing "
+                                "frozen ticket_grant data"
+                            )
+
+                        ticket_quantity = ticket_grant_data.get(
+                            "quantity",
+                            0,
+                        )
+
+                        if ticket_quantity > 0:
+
+                            existing_grant = TicketGrant.objects.filter(
+                                mutation=mutation,
+                            ).first()
+                            
+                            
+                            ticket_type_id = ticket_grant_data.get(
+                                "ticket_type_id",
+                            )
+                            
+                            expires_at = ticket_grant_data.get(
+                                "expires_at",
+                            )
+                            
+                            expires_at = (
+                                datetime.fromisoformat(expires_at)
+                                if expires_at
+                                else None
+                            )
+
+                            if not existing_grant:
+
+                                TicketGrant.objects.create(
+                                    member=member,
+                                    mutation=mutation,
+                                    ticket_type_id=ticket_type_id,
+                                    source=TicketGrant.Source.SUBSCRIPTION,
+                                    quantity=ticket_quantity,
+                                    expires_at=expires_at,
+                                )
                 
                 
                     if invoice.status == "paid":
@@ -501,6 +565,7 @@ class StripeSubscriptionReconciler:
                     old_plan_id = payload["old_plan_id"]
                     new_plan_id = payload["new_plan_id"]
                     new_price_id = payload["new_price_id"]
+                    new_price = payload["new_price"]
                     stripe_id = payload.get("new_stripe_item_id")
                                 
                     if not item:
@@ -522,6 +587,8 @@ class StripeSubscriptionReconciler:
                         new_item.deleted_at = None
                         new_item.access_start = item.access_until
                         new_item.source_item = item
+                        new_item.price_at_subscription = new_price
+                        new_item.stripe_price_id_at_subscription = new_price_id
                         if stripe_id:
                             new_item.stripe_subscription_item_id = stripe_id
                         new_item.save()
@@ -531,7 +598,7 @@ class StripeSubscriptionReconciler:
                             subscription=subscription,
                             member_id=item.member_id,
                             plan_id=new_plan_id,
-                            price_at_subscription=new_price_id,
+                            price_at_subscription=new_price,
                             stripe_price_id_at_subscription=new_price_id,
                             source_item=item,
                             access_start=item.access_until,
@@ -809,6 +876,201 @@ def subscription_lock(subscription_id: int, timeout: int = 300):
         except Exception:
             pass  # never block release path
 
+
+class MembershipPlanDeletionReconciler:
+    """
+    Shared logic for cancelling active SubscriptionItems that belong
+    to a MembershipPlan scheduled for deletion, and for finalizing the
+    plan's deletion once no active items remain.
+
+    Used by BOTH:
+        - delete_membership_plan_task (fired once, right after an
+          owner schedules a plan for deletion)
+        - reconcile_scheduled_plan_deletions (periodic safety-net)
+
+    Design notes / safety:
+        - Reuses the existing per-subscription cache lock
+          (subscription_lock) and the existing SubscriptionMutation
+          locking (assert_mutation_not_locked, raised as
+          MutationLockedError) instead of inventing new locking.
+        - Re-checks item.deleted_at under the subscription lock before
+          attempting to cancel, so running this twice (or running the
+          one-shot task concurrently with the periodic reconciler) is
+          safe - an already-cancelled item is simply skipped.
+        - One member's cancellation failure never stops the others
+          from being attempted.
+        - The plan is only ever marked is_deleted=True once a DB
+          re-check confirms there are zero remaining active items for
+          it. That final UPDATE is itself idempotent (it targets
+          is_deleted=False), so double-finalizing is harmless.
+    """
+
+    @staticmethod
+    def process_plan(plan):
+        # Imported locally to avoid a circular import:
+        # service_subscription imports StripeSubscriptionReconciler
+        # from this module.
+        from .service_subscription import SubscriptionItemService
+
+        stripe.api_key = settings.STRIPE_SECRET_KEY
+
+        active_items = list(
+            SubscriptionItem.objects
+            .filter(plan=plan, deleted_at__isnull=True)
+            .select_related("subscription", "member", "member__owner")
+        )
+
+        cancelled_owner_map = defaultdict(lambda: {
+            "members": set(),
+            "plans": set(),
+            "access_until": None,
+        })
+
+        cancelled_count = 0
+        failed_count = 0
+
+        for item in active_items:
+            subscription = item.subscription
+
+            try:
+                with subscription_lock(subscription.id, timeout=300):
+
+                    # Re-read under the lock: another run (the
+                    # one-shot task or the periodic reconciler) may
+                    # have already cancelled this item.
+                    item.refresh_from_db()
+
+                    if item.deleted_at is not None:
+                        continue
+
+                    SubscriptionItemService.cancel_item(
+                        item=item,
+                        subscription=subscription,
+                        club=plan.club,
+                    )
+
+            except CacheLockError:
+                logger.info(
+                    "[PLAN DELETE] subscription locked, will retry "
+                    "later plan=%s subscription=%s item=%s",
+                    plan.id, subscription.id, item.id,
+                )
+                failed_count += 1
+                continue
+
+            except MutationLockedError:
+                logger.info(
+                    "[PLAN DELETE] mutation locked, will retry later "
+                    "plan=%s subscription=%s item=%s",
+                    plan.id, subscription.id, item.id,
+                )
+                failed_count += 1
+                continue
+
+            except Exception:
+                logger.exception(
+                    "[PLAN DELETE] failed to cancel item=%s plan=%s "
+                    "subscription=%s",
+                    item.id, plan.id, subscription.id,
+                )
+                failed_count += 1
+                continue
+
+            cancelled_count += 1
+
+            owner = item.member.owner if item.member else None
+
+            if owner:
+                group = cancelled_owner_map[owner.id]
+                group["members"].add(item.member.full_name)
+                group["plans"].add(plan.name)
+                group["access_until"] = subscription.access_until
+
+        # -----------------------------------------------------------
+        # Only mark the plan actually deleted once a fresh DB query
+        # confirms there are zero active items left. This must be
+        # re-queried (not derived from the `active_items` snapshot
+        # above) because other concurrent processes may also be
+        # cancelling items for this plan.
+        # -----------------------------------------------------------
+        remaining_active = SubscriptionItem.objects.filter(
+            plan=plan,
+            deleted_at__isnull=True,
+        ).exists()
+
+        finalized = False
+
+        if not remaining_active:
+            updated = MembershipPlan.objects.filter(
+                id=plan.id,
+                is_deleted=False,
+            ).update(
+                is_deleted=True,
+                deleted_at=timezone.now(),
+            )
+            finalized = bool(updated)
+
+        if cancelled_owner_map:
+            serializable_owner_map = {
+                str(owner_id): {
+                    "members": list(data["members"]),
+                    "plans": list(data["plans"]),
+                    "access_until": (
+                        data["access_until"].isoformat()
+                        if data["access_until"]
+                        else None
+                    ),
+                }
+                for owner_id, data in cancelled_owner_map.items()
+            }
+
+            # The cancellations/finalization above are already
+            # committed at this point. A broker hiccup while enqueuing
+            # the notification email must not be reported as if the
+            # cancellation work itself failed.
+            try:
+                send_plan_deletion_emails.delay(serializable_owner_map)
+            except Exception:
+                logger.exception(
+                    "[PLAN DELETE] Failed to enqueue deletion "
+                    "notification emails for plan=%s",
+                    plan.id,
+                )
+
+        result = {
+            "plan_id": plan.id,
+            "cancelled": cancelled_count,
+            "failed": failed_count,
+            "remaining_active": remaining_active and not finalized,
+            "finalized": finalized,
+        }
+
+        logger.info("[PLAN DELETE] plan processed result=%s", result)
+
+        return result
+
+    @staticmethod
+    def reconcile_all():
+        plans = MembershipPlan.objects.filter(
+            scheduled_for_deletion=True,
+            is_deleted=False,
+        )
+
+        results = []
+
+        for plan in plans:
+            try:
+                results.append(
+                    MembershipPlanDeletionReconciler.process_plan(plan)
+                )
+            except Exception:
+                logger.exception(
+                    "[PLAN DELETE RECONCILE] Unexpected failure "
+                    "plan=%s",
+                    plan.id,
+                )
+
+        return results
 
 
 class CheckoutSubscriptionReconciler:

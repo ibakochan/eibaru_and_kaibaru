@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
-from .locks_and_reconciliation import subscription_lock, CacheLockError, StripeToCashInvoiceReconciler
+from .locks_and_reconciliation import subscription_lock, CacheLockError, StripeToCashInvoiceReconciler, CheckoutSubscriptionReconciler
 
 from .discounts import calculate_discounted_amount
 from .billing import (
@@ -686,6 +686,47 @@ def stripe_connected_webhook(request):
             logger.error("Plan not found for session %s", session["id"])
             return webhook_ok(event_record)
 
+        # -----------------------------------------------------------
+        # INVARIANT: a plan that is scheduled for deletion (or already
+        # deleted) must never gain a new/reactivated active
+        # SubscriptionItem.
+        #
+        # It's possible for a member to start checkout for a plan
+        # that the owner then schedules for deletion before the
+        # checkout completes. In that case we must NOT create/
+        # activate a local Subscription/SubscriptionItem for it.
+        #
+        # We reuse the existing orphan-checkout cleanup path to
+        # cancel the Stripe subscription immediately. If that call
+        # itself fails, the periodic checkout reconciliation task
+        # will still find and cancel this Stripe subscription later
+        # since no local Subscription row is ever created for it.
+        # -----------------------------------------------------------
+        if plan.scheduled_for_deletion or plan.is_deleted:
+            logger.warning(
+                "[checkout.session.completed] Plan=%s is scheduled "
+                "for deletion or already deleted; refusing to "
+                "activate stripe_subscription=%s session=%s",
+                plan.id,
+                sub.id,
+                session["id"],
+            )
+
+            try:
+                CheckoutSubscriptionReconciler.cancel_orphan(
+                    stripe_sub=sub,
+                    club=club,
+                )
+            except Exception:
+                logger.exception(
+                    "[checkout.session.completed] Failed to cancel "
+                    "stripe_subscription=%s for scheduled/deleted "
+                    "plan=%s",
+                    sub.id,
+                    plan.id,
+                )
+
+            return webhook_ok(event_record)
 
         stripe_customer_obj = get_or_create_stripe_customer(member.owner, club)
 

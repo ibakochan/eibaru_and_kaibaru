@@ -309,6 +309,7 @@ def change_member_plan(request, item_id, new_plan_id):
         id=new_plan_id,
         club=club,
         is_deleted=False,
+        scheduled_for_deletion=False,
         active=True
     )
 
@@ -460,6 +461,21 @@ def resume_member_subscription(request, item_id):
         subscription__owner=request.user
     )
 
+    if (
+        not item.plan
+        or item.plan.is_deleted
+        or item.plan.scheduled_for_deletion
+    ):
+        return JsonResponse(
+            {
+                "error": (
+                    "このプランは削除されているため、"
+                    "再開できません。"
+                )
+            },
+            status=400,
+        )
+
     state = item_state(item)
 
     if state == "expired":
@@ -563,6 +579,20 @@ def cancel_member_plan_change(request, new_item_id):
 
     old_item = new_item.source_item
 
+    if old_item.plan and (
+        old_item.plan.is_deleted
+        or old_item.plan.scheduled_for_deletion
+    ):
+        return JsonResponse(
+            {
+                "error": (
+                    "このプランはすでに削除されているため、"
+                    "プラン変更を取り消すことはできません。"
+                )
+            },
+            status=400,
+        )
+
 
    
     subscription = old_item.subscription
@@ -575,7 +605,6 @@ def cancel_member_plan_change(request, new_item_id):
 
     club = subscription.club
 
-    old_plan_deleted = old_item.plan and old_item.plan.deleted_at is not None
 
     try:
         with subscription_lock(subscription.id, timeout=300):
@@ -584,7 +613,6 @@ def cancel_member_plan_change(request, new_item_id):
                 old_item=old_item,
                 subscription=subscription,
                 club=club,
-                old_plan_deleted=old_plan_deleted,
             )
 
     except CacheLockError:
@@ -668,6 +696,7 @@ def change_cash_member_plan(request, item_id, new_plan_id):
         id=new_plan_id,
         club=club,
         is_deleted=False,
+        scheduled_for_deletion=False,
         active=True
     )
 
@@ -872,6 +901,20 @@ def resume_cash_member_subscription(request, item_id):
         subscription__owner=request.user
     )
 
+    if (
+        not item.plan
+        or item.plan.is_deleted
+        or item.plan.scheduled_for_deletion
+    ):
+        return JsonResponse(
+            {
+                "error": (
+                    "このプランは削除されているため、"
+                    "再開できません。"
+                )
+            },
+            status=400,
+        )
 
     state = item_state(item)
 
@@ -1012,6 +1055,19 @@ def cancel_cash_member_plan_change(request, new_item_id):
 
     old_item = new_item.source_item
 
+    if old_item.plan and (
+        old_item.plan.is_deleted
+        or old_item.plan.scheduled_for_deletion
+    ):
+        return JsonResponse(
+            {
+                "error": (
+                    "このプランはすでに削除されているため、"
+                    "プラン変更を取り消すことはできません。"
+                )
+            },
+            status=400,
+        )
 
     subscription = old_item.subscription
 
@@ -1147,7 +1203,14 @@ def create_member_checkout_session(request, club_id, plan_id):
             status=400
         )
 
-    plan = get_object_or_404(MembershipPlan, id=plan_id, club=club, is_deleted=False, active=True)
+    plan = get_object_or_404(
+        MembershipPlan,
+        id=plan_id,
+        club=club,
+        is_deleted=False,
+        scheduled_for_deletion=False,
+        active=True,
+    )
     if not plan.stripe_price_id:
         return JsonResponse({"error": "Plan not configured correctly"}, status=400)
 
@@ -1300,6 +1363,7 @@ def create_member_cash_subscription(
         id=plan_id,
         club=club,
         is_deleted=False,
+        scheduled_for_deletion=False,
         active=True,
     )
 
@@ -1483,7 +1547,14 @@ def add_plan_to_subscription_view(request, club_id, plan_id):
             status=400
         )
 
-    plan = get_object_or_404(MembershipPlan, id=plan_id, club=club, is_deleted=False, active=True)
+    plan = get_object_or_404(
+        MembershipPlan,
+        id=plan_id,
+        club=club,
+        is_deleted=False,
+        scheduled_for_deletion=False,
+        active=True,
+    )
 
     if not plan.stripe_price_id:
         return JsonResponse({"error": "Plan not configured correctly"}, status=400)
@@ -1635,6 +1706,7 @@ def add_plan_to_cash_subscription_view(
         id=plan_id,
         club=club,
         is_deleted=False,
+        scheduled_for_deletion=False,
         active=True,
     )
 

@@ -161,12 +161,36 @@ def validate_bundle_rule(active_plan_ids, bundle_map):
         )
 
 
+def assert_plan_is_activatable(plan):
+    """
+    A plan that is scheduled for deletion or already deleted must
+    never gain a new/reactivated active SubscriptionItem.
+
+    This is the single, shared gate used by every flow that starts a
+    NEW activation of a plan (new subscription/checkout, add plan,
+    change plan, resume). It intentionally does not consider whether
+    OTHER unrelated SubscriptionItems already exist on the plan -
+    existing historical/active rows are handled separately by the
+    plan-deletion task/reconciliation and must not be invalidated by
+    this check.
+    """
+    if plan is None:
+        return
+
+    if plan.scheduled_for_deletion or plan.is_deleted:
+        raise ValidationError(
+            "このプランは削除されているため、選択できません。"
+        )
+
+
 def validate_subscription_transition(
     subscription,
     member,
     new_plan,
     old_plan_id=None,
 ):
+    assert_plan_is_activatable(new_plan)
+
     now = timezone.now()
 
     items = SubscriptionItem.objects.filter(

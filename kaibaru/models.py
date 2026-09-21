@@ -278,6 +278,18 @@ class MembershipPlan(models.Model):
     is_deleted = models.BooleanField(default=False)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
+    # An owner has requested deletion of this plan and the system is
+    # currently working through cancellation of existing subscribers.
+    #
+    # State model:
+    #   scheduled_for_deletion=False, is_deleted=False -> normal active plan
+    #   scheduled_for_deletion=True,  is_deleted=False -> deletion in progress
+    #   is_deleted=True                                -> plan is actually deleted (terminal)
+    #
+    # A plan with either flag set must never gain a new/reactivated
+    # active SubscriptionItem.
+    scheduled_for_deletion = models.BooleanField(default=False)
+
     apply_current_price_to_existing = models.BooleanField(
         default=False,
         help_text="If enabled, existing members will be charged the current plan price instead of their subscription price."
@@ -1238,6 +1250,14 @@ class TicketGrant(models.Model):
         related_name="ticket_grants",
     )
 
+    mutation = models.ForeignKey(
+        SubscriptionMutation,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="ticket_grants",
+    )
+
     ticket_type = models.ForeignKey(
         TicketType,
         on_delete=models.PROTECT,
@@ -1275,12 +1295,22 @@ class TicketGrant(models.Model):
         blank=True
     )
 
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["mutation"],
+                name="unique_ticket_grant_per_subscription_mutation",
+        ),
+    ]
+
     def __str__(self):
         return (
             f"{self.member.full_name} - "
             f"{self.ticket_type.name} - "
             f"{self.quantity}"
         )
+
+
 
 class TicketUsage(models.Model):
     grant = models.ForeignKey(

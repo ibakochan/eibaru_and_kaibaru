@@ -13,6 +13,7 @@ from .service_mutations import (
     stripe_idempotency_key,
     get_or_create_mutation_strict,
 )
+from .rules_subscriptions import assert_plan_is_activatable
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,8 @@ class SubscriptionItemService:
 
     @staticmethod
     def resume_item(*, item, subscription, club):
+        assert_plan_is_activatable(item.plan)
+
         assert_mutation_not_locked(
             item=item,
             mutation_type=SubscriptionMutation.MutationType.RESUME
@@ -260,6 +263,8 @@ class SubscriptionItemService:
         club,
         old_item_is_grace: bool
     ):
+        assert_plan_is_activatable(new_plan)
+
         assert_mutation_not_locked(
             item=item,
             mutation_type=SubscriptionMutation.MutationType.CHANGE_PLAN
@@ -274,9 +279,16 @@ class SubscriptionItemService:
                 "old_price_id": item.stripe_price_id_at_subscription,
                 "old_stripe_item_id": item.stripe_subscription_item_id,
                 "new_price_id": new_plan.stripe_price_id,
+                "new_price": new_plan.price,
                 "is_grace": old_item_is_grace,
             },
         )
+
+        payload = mutation.payload
+
+        old_price_id = payload["old_price_id"]
+        new_price_id = payload["new_price_id"]
+        new_price = payload["new_price"]
 
         stripe_sub = stripe.Subscription.retrieve(
             subscription.stripe_subscription_id,
@@ -289,7 +301,7 @@ class SubscriptionItemService:
         # =========================================================
         new_stripe_item = next(
             (i for i in stripe_sub["items"]["data"]
-             if i["price"]["id"] == new_plan.stripe_price_id),
+             if i["price"]["id"] == new_price_id),
             None
         )
         key_modify = stripe_idempotency_key(
@@ -317,7 +329,7 @@ class SubscriptionItemService:
         else:
             created_stripe_item = stripe.SubscriptionItem.create(
                 subscription=subscription.stripe_subscription_id,
-                price=new_plan.stripe_price_id,
+                price=new_price_id,
                 quantity=1,
                 proration_behavior="none",
                 stripe_account=club.stripe_account_id,
@@ -419,6 +431,8 @@ class SubscriptionItemService:
                 new_item.access_start = item.access_until
                 new_item.source_item = item
                 new_item.stripe_subscription_item_id = new_item_id
+                new_item.price_at_subscription = new_price
+                new_item.stripe_price_id_at_subscription = new_price_id
         
                 new_item.save(update_fields=[
                     "deleted_at",
@@ -426,6 +440,8 @@ class SubscriptionItemService:
                     "quantity",
                     "source_item",
                     "stripe_subscription_item_id",
+                    "price_at_subscription",
+                    "stripe_price_id_at_subscription",
                 ])
         
             else:
@@ -436,8 +452,8 @@ class SubscriptionItemService:
                     subscription=subscription,
                     member=item.member,
                     plan=new_plan,
-                    price_at_subscription=new_plan.price,
-                    stripe_price_id_at_subscription=new_plan.stripe_price_id,
+                    price_at_subscription=new_price,
+                    stripe_price_id_at_subscription=new_price_id,
                     source_item=item,
                     access_start=item.access_until,
                     stripe_subscription_item_id=new_item_id,
@@ -469,8 +485,13 @@ class SubscriptionItemService:
         old_item,
         subscription,
         club,
-        old_plan_deleted,
     ):
+        # Cancelling a pending plan change revives the OLD item. If the
+        # old plan has since been scheduled for deletion (or deleted),
+        # that revival must be refused - the plan change cancellation
+        # must not resurrect an item on a plan that's going away.
+        assert_plan_is_activatable(old_item.plan)
+
         assert_mutation_not_locked(
             item=old_item,
             mutation_type=SubscriptionMutation.MutationType.CANCEL_CHANGE_PLAN
@@ -483,10 +504,23 @@ class SubscriptionItemService:
                 "new_item_id": new_item.id,
                 "old_item_id": old_item.id,
                 "new_price_id": new_item.stripe_price_id_at_subscription,
+                "new_stripe_item_id": new_item.stripe_subscription_item_id,
                 "old_price_id": old_item.stripe_price_id_at_subscription,
                 "old_stripe_item_id": old_item.stripe_subscription_item_id,
             },
         )
+
+        payload = mutation.payload
+
+        new_item_id = payload["new_item_id"]
+        old_item_id = payload["old_item_id"]
+
+        new_price_id = payload["new_price_id"]
+        old_price_id = payload["old_price_id"]
+
+        new_stripe_item_id = payload["new_stripe_item_id"]
+        old_stripe_item_id = payload["old_stripe_item_id"]
+
         now = timezone.now()
 
         stripe_sub = stripe.Subscription.retrieve(
@@ -501,7 +535,7 @@ class SubscriptionItemService:
         new_stripe_item = next(
             (
                 i for i in stripe_sub["items"]["data"]
-                if i["id"] == new_item.stripe_subscription_item_id
+                if i["id"] == new_stripe_item_id
             ),
             None
         )
@@ -548,81 +582,80 @@ class SubscriptionItemService:
         # =========================================================
         # 2. RESTORE OLD STRIPE ITEM safely
         # =========================================================
-        if not old_plan_deleted:
-            old_stripe_item = next(
-                (
-                    i for i in stripe_sub["items"]["data"]
-                    if i["price"]["id"] == old_item.plan.stripe_price_id
-                ),
-                None
+        old_stripe_item = next(
+            (
+                i for i in stripe_sub["items"]["data"]
+                if i["price"]["id"] == old_price_id
+            ),
+            None
+        )
+
+        old_plan_active_qty = SubscriptionItem.objects.filter(
+            subscription=subscription,
+            stripe_price_id_at_subscription=old_item.stripe_price_id_at_subscription,
+            deleted_at__isnull=True
+        ).count()
+
+        desired_old_qty = old_plan_active_qty + 1
+    
+        if old_stripe_item:
+            key = stripe_idempotency_key(
+                mutation,
+                "cancel_change_restore_old_item_modify"
             )
-
-            old_plan_active_qty = SubscriptionItem.objects.filter(
-                subscription=subscription,
-                stripe_price_id_at_subscription=old_item.stripe_price_id_at_subscription,
-                deleted_at__isnull=True
-            ).count()
-
-            desired_old_qty = old_plan_active_qty + 1
+            stripe.SubscriptionItem.modify(
+                old_stripe_item["id"],
+                quantity=desired_old_qty,
+                proration_behavior="none",
+                stripe_account=club.stripe_account_id,
+                idempotency_key=key,
+            )
+            restored_id = old_stripe_item["id"]
+        else:
+            key = stripe_idempotency_key(
+                mutation,
+                "cancel_change_restore_old_item_create"
+            )
+            created_stripe_item = stripe.SubscriptionItem.create(
+                subscription=subscription.stripe_subscription_id,
+                price=old_price_id,
+                quantity=desired_old_qty,
+                proration_behavior="none",
+                stripe_account=club.stripe_account_id,
+                idempotency_key=key,
+            )
+            restored_id = created_stripe_item["id"]
     
-            if old_stripe_item:
-                key = stripe_idempotency_key(
-                    mutation,
-                    "cancel_change_restore_old_item_modify"
-                )
-                stripe.SubscriptionItem.modify(
-                    old_stripe_item["id"],
-                    quantity=desired_old_qty,
-                    proration_behavior="none",
-                    stripe_account=club.stripe_account_id,
-                    idempotency_key=key,
-                )
-                restored_id = old_stripe_item["id"]
+        with transaction.atomic():
+
+            # restore old item
+            old_item.stripe_subscription_item_id = restored_id
+            old_item.deleted_at = None
+            old_item.access_until = None
+            old_item.save(update_fields=[
+                "deleted_at",
+                "access_until",
+                "stripe_subscription_item_id"
+            ])
+    
+            # SOFT CANCEL new item (IMPORTANT CHANGE)
+            new_item.deleted_at = now
+            new_item.access_until = now
+            new_item.source_item = None
+            new_item.save(update_fields=[
+                "deleted_at",
+                "access_until",
+                "source_item",
+            ])
+    
+            # mark mutation success
+            mutation.status = SubscriptionMutation.Status.SUCCEEDED
+            mutation.processed_at = now
+    
+            if subscription.current_period_end:
+                mutation.secondary_mutation_blocked_until = subscription.current_period_end
             else:
-                key = stripe_idempotency_key(
-                    mutation,
-                    "cancel_change_restore_old_item_create"
-                )
-                created_stripe_item = stripe.SubscriptionItem.create(
-                    subscription=subscription.stripe_subscription_id,
-                    price=old_item.plan.stripe_price_id,
-                    quantity=desired_old_qty,
-                    proration_behavior="none",
-                    stripe_account=club.stripe_account_id,
-                    idempotency_key=key,
-                )
-                restored_id = created_stripe_item["id"]
+                mutation.secondary_mutation_blocked_until = now
     
-            with transaction.atomic():
-
-                # restore old item
-                old_item.stripe_subscription_item_id = restored_id
-                old_item.deleted_at = None
-                old_item.access_until = None
-                old_item.save(update_fields=[
-                    "deleted_at",
-                    "access_until",
-                    "stripe_subscription_item_id"
-                ])
-    
-                # SOFT CANCEL new item (IMPORTANT CHANGE)
-                new_item.deleted_at = now
-                new_item.access_until = now
-                new_item.source_item = None
-                new_item.save(update_fields=[
-                    "deleted_at",
-                    "access_until",
-                    "source_item",
-                ])
-    
-                # mark mutation success
-                mutation.status = SubscriptionMutation.Status.SUCCEEDED
-                mutation.processed_at = now
-    
-                if subscription.current_period_end:
-                    mutation.secondary_mutation_blocked_until = subscription.current_period_end
-                else:
-                    mutation.secondary_mutation_blocked_until = now
-    
-                mutation.save()
+            mutation.save()
     

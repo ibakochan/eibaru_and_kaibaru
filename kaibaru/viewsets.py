@@ -24,7 +24,7 @@ from django.db.models import Prefetch
 from django.core.exceptions import ValidationError
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
-from .tasks_emails import send_plan_deletion_emails
+from .tasks import delete_membership_plan_task
 
 from .discounts import calculate_discounted_amount
 import uuid
@@ -50,8 +50,6 @@ from .rules_subscriptions import validate_plan_set
 from django.core.files.base import ContentFile
 import os
 from django.utils.timezone import now
-from .service_subscription import SubscriptionItemService
-
 class PreviewMember:
 
     def __init__(
@@ -871,6 +869,24 @@ class MembershipPlanViewSet(viewsets.ModelViewSet):
         context["club"] = club
         return context
 
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        result = self.perform_destroy(instance)
+
+        if result and result.get("scheduled"):
+            return Response(
+                {
+                    "detail": (
+                        "プランの削除を予約しました。既存の契約者の"
+                        "解約処理が完了すると自動的に削除されます。"
+                    ),
+                    "scheduled_for_deletion": True,
+                },
+                status=status.HTTP_202_ACCEPTED,
+            )
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
     def perform_destroy(self, instance):
         if self.request.user != instance.club.owner:
             raise serializers.ValidationError(
@@ -883,88 +899,57 @@ class MembershipPlanViewSet(viewsets.ModelViewSet):
             )
 
         # ---------------------------------------------------------
+        # Already deleted / already scheduled → nothing to do.
+        # ---------------------------------------------------------
+        if instance.is_deleted or instance.scheduled_for_deletion:
+            raise serializers.ValidationError(
+                {
+                    "detail": (
+                        "This plan is already deleted or already "
+                        "scheduled for deletion."
+                    )
+                }
+            )
+
+        # ---------------------------------------------------------
         # STEP 1: Check ANY subscription history
         # ---------------------------------------------------------
         has_history = SubscriptionItem.objects.filter(
             plan=instance
         ).exists()
 
-        active_items = SubscriptionItem.objects.filter(
+        has_active_items = SubscriptionItem.objects.filter(
             plan=instance,
             deleted_at__isnull=True
-        ).select_related("subscription")
+        ).exists()
 
         # ---------------------------------------------------------
-        # CASE 1: ACTIVE ITEMS EXIST → cancel them
+        # CASE 1: ACTIVE ITEMS EXIST → schedule background cancellation.
+        #
+        # We do NOT cancel potentially hundreds of Stripe subscription
+        # items synchronously inside the HTTP request. Instead we mark
+        # the plan as scheduled for deletion (blocking any new
+        # activation immediately) and hand the actual cancellation
+        # work off to delete_membership_plan_task, which is safe to
+        # retry and is also backed by reconcile_scheduled_plan_deletions.
         # ---------------------------------------------------------
-        if active_items.exists():
+        if has_active_items:
 
-            owner_map = defaultdict(lambda: {
-                "members": set(),
-                "plans": set(),
-                "access_until": None,
-            })
-
-            for item in active_items:
-                owner = item.member.owner
-                group = owner_map[owner.id]
-
-                group["members"].add(
-                    item.member.full_name
-                )
-
-                group["plans"].add(
-                    item.plan.name
-                )
-
-                group["access_until"] = (
-                    item.subscription.access_until
-                )
-
-            for item in active_items:
-                SubscriptionItemService.cancel_item(
-                    item=item,
-                    subscription=item.subscription,
-                    club=instance.club
-                )
-
-            instance.is_deleted = True
-            instance.deleted_at = timezone.now()
-
+            instance.scheduled_for_deletion = True
             instance.save(
                 update_fields=[
-                    "is_deleted",
-                    "deleted_at"
+                    "scheduled_for_deletion",
                 ]
             )
 
-            serializable_owner_map = {
-                str(owner_id): {
-                    "members": list(
-                        data["members"]
-                    ),
-                    "plans": list(
-                        data["plans"]
-                    ),
-                    "access_until": (
-                        data["access_until"].isoformat()
-                        if data["access_until"]
-                        else None
-                    ),
-                }
-                for owner_id, data in owner_map.items()
-            }
-
             transaction.on_commit(
-                lambda: send_plan_deletion_emails.delay(
-                    serializable_owner_map
-                )
+                lambda: delete_membership_plan_task.delay(instance.id)
             )
 
-            return
+            return {"scheduled": True}
 
         # ---------------------------------------------------------
-        # STEP 3: HAS HISTORY → SOFT DELETE ONLY
+        # STEP 3: HAS HISTORY, NO ACTIVE ITEMS → SOFT DELETE ONLY
         # ---------------------------------------------------------
         if has_history:
 
@@ -978,13 +963,15 @@ class MembershipPlanViewSet(viewsets.ModelViewSet):
                 ]
             )
 
-            return
+            return None
 
         # ---------------------------------------------------------
         # STEP 4: NEVER USED → SAFE HARD DELETE
         # ---------------------------------------------------------
         instance.bundled_plans.clear()
         instance.delete()
+
+        return None
 
     def perform_create(self, serializer):
         subdomain = self.request.data.get(
@@ -1372,6 +1359,7 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
             if (
                 plan.club_id != club.id
                 or plan.is_deleted
+                or plan.scheduled_for_deletion
                 or not plan.active
             )
         ]

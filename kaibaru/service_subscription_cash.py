@@ -2,6 +2,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from .models import SubscriptionItem
+from .rules_subscriptions import assert_plan_is_activatable
 
 
 class CashSubscriptionItemService:
@@ -16,6 +17,7 @@ class CashSubscriptionItemService:
         subscription,
         club,
     ):
+        assert_plan_is_activatable(item.plan)
 
         with transaction.atomic():
 
@@ -106,6 +108,7 @@ class CashSubscriptionItemService:
         club,
         old_item_is_grace: bool,
     ):
+        assert_plan_is_activatable(new_plan)
 
 
         now = timezone.now()
@@ -201,8 +204,14 @@ class CashSubscriptionItemService:
         old_item,
         subscription,
         club,
-        old_plan_deleted,
+        old_plan_deleted=None,
     ):
+        # `old_plan_deleted` is kept for call-site compatibility but the
+        # actual gate is evaluated here against the plan's current state,
+        # matching the Stripe implementation. Cancelling a pending plan
+        # change must not revive an item on a plan that has since been
+        # scheduled for deletion (or deleted).
+        assert_plan_is_activatable(old_item.plan)
 
         now = timezone.now()
 

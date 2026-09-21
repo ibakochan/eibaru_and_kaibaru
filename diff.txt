@@ -1,0 +1,1506 @@
+diff --git a/kaibaru/locks_and_reconciliation.py b/kaibaru/locks_and_reconciliation.py
+index 560f275..b0720b6 100644
+--- a/kaibaru/locks_and_reconciliation.py
++++ b/kaibaru/locks_and_reconciliation.py
+@@ -6,12 +6,14 @@ from django.db.models import Q
+ 
+ from collections import defaultdict
+ import stripe
++from django.conf import settings
+ from django.db import transaction
+ from django.utils import timezone
+-from .models import Reservation, SubscriptionMutation, SubscriptionItem, Subscription, Club, Member, MembershipPlan, Invoice, InvoiceItem, Payment
+-from datetime import timedelta
++from .models import TicketGrant, Reservation, SubscriptionMutation, SubscriptionItem, Subscription, Club, Member, MembershipPlan, Invoice, InvoiceItem, Payment
++from datetime import datetime, timedelta
+ 
+-from .tasks_emails import send_stripe_cash_transition_email
++from .tasks_emails import send_stripe_cash_transition_email, send_plan_deletion_emails
++from .service_mutations import MutationLockedError
+ 
+ from .invoice_creation import create_local_invoice_from_stripe_invoice
+ 
+@@ -415,6 +417,21 @@ class StripeSubscriptionReconciler:
+                 
+                     member = Member.objects.get(id=member_id)
+                     plan = MembershipPlan.objects.get(id=plan_id)
++
++
++                    frozen_price = payload.get("price_at_subscription")
++                    if frozen_price is None:
++                        raise ValueError(
++                            f"ADD_PLAN mutation {mutation.id} is missing "
++                            "frozen price_at_subscription"
++                        )
++
++                    frozen_stripe_price_id = payload.get("stripe_price_id")
++                    if not frozen_stripe_price_id:
++                        raise ValueError(
++                            f"ADD_PLAN mutation {mutation.id} is missing "
++                            "frozen stripe_price_id"
++                        )
+                 
+                 
+                     existing = SubscriptionItem.objects.filter(
+@@ -426,10 +443,8 @@ class StripeSubscriptionReconciler:
+                 
+                     if existing:
+                         existing.deleted_at = None
+-                        existing.price_at_subscription = plan.price
+-                        existing.stripe_price_id_at_subscription = (
+-                            plan.stripe_price_id
+-                        )
++                        existing.price_at_subscription = frozen_price
++                        existing.stripe_price_id_at_subscription = frozen_stripe_price_id
+                         existing.save(
+                             update_fields=[
+                                 "deleted_at",
+@@ -449,7 +464,7 @@ class StripeSubscriptionReconciler:
+                         stripe_item = next(
+                             (
+                                 i for i in stripe_sub["items"]["data"]
+-                                if i["price"]["id"] == plan.stripe_price_id
++                                if i["price"]["id"] == frozen_stripe_price_id
+                             ),
+                             None
+                         )
+@@ -458,14 +473,63 @@ class StripeSubscriptionReconciler:
+                             subscription=subscription,
+                             member=member,
+                             plan=plan,
+-                            price_at_subscription=plan.price,
+-                            stripe_price_id_at_subscription=plan.stripe_price_id,
++                            price_at_subscription=frozen_price,
++                            stripe_price_id_at_subscription=frozen_stripe_price_id,
+                             stripe_subscription_item_id=(
+                                 stripe_item["id"]
+                                 if stripe_item
+                                 else None
+                             ),
+                         )
++
++                    if plan.plan_type == "ticket_plan":
++                        ticket_grant_data = payload.get(
++                            "ticket_grant",
++                            {},
++                        )
++
++                        if not ticket_grant_data:
++                            raise ValueError(
++                                f"ADD_PLAN mutation {mutation.id} is missing "
++                                "frozen ticket_grant data"
++                            )
++
++                        ticket_quantity = ticket_grant_data.get(
++                            "quantity",
++                            0,
++                        )
++
++                        if ticket_quantity > 0:
++
++                            existing_grant = TicketGrant.objects.filter(
++                                mutation=mutation,
++                            ).first()
++                            
++                            
++                            ticket_type_id = ticket_grant_data.get(
++                                "ticket_type_id",
++                            )
++                            
++                            expires_at = ticket_grant_data.get(
++                                "expires_at",
++                            )
++                            
++                            expires_at = (
++                                datetime.fromisoformat(expires_at)
++                                if expires_at
++                                else None
++                            )
++
++                            if not existing_grant:
++
++                                TicketGrant.objects.create(
++                                    member=member,
++                                    mutation=mutation,
++                                    ticket_type_id=ticket_type_id,
++                                    source=TicketGrant.Source.SUBSCRIPTION,
++                                    quantity=ticket_quantity,
++                                    expires_at=expires_at,
++                                )
+                 
+                 
+                     if invoice.status == "paid":
+@@ -501,6 +565,7 @@ class StripeSubscriptionReconciler:
+                     old_plan_id = payload["old_plan_id"]
+                     new_plan_id = payload["new_plan_id"]
+                     new_price_id = payload["new_price_id"]
++                    new_price = payload["new_price"]
+                     stripe_id = payload.get("new_stripe_item_id")
+                                 
+                     if not item:
+@@ -522,6 +587,8 @@ class StripeSubscriptionReconciler:
+                         new_item.deleted_at = None
+                         new_item.access_start = item.access_until
+                         new_item.source_item = item
++                        new_item.price_at_subscription = new_price
++                        new_item.stripe_price_id_at_subscription = new_price_id
+                         if stripe_id:
+                             new_item.stripe_subscription_item_id = stripe_id
+                         new_item.save()
+@@ -531,7 +598,7 @@ class StripeSubscriptionReconciler:
+                             subscription=subscription,
+                             member_id=item.member_id,
+                             plan_id=new_plan_id,
+-                            price_at_subscription=new_price_id,
++                            price_at_subscription=new_price,
+                             stripe_price_id_at_subscription=new_price_id,
+                             source_item=item,
+                             access_start=item.access_until,
+@@ -810,6 +877,201 @@ def subscription_lock(subscription_id: int, timeout: int = 300):
+             pass  # never block release path
+ 
+ 
++class MembershipPlanDeletionReconciler:
++    """
++    Shared logic for cancelling active SubscriptionItems that belong
++    to a MembershipPlan scheduled for deletion, and for finalizing the
++    plan's deletion once no active items remain.
++
++    Used by BOTH:
++        - delete_membership_plan_task (fired once, right after an
++          owner schedules a plan for deletion)
++        - reconcile_scheduled_plan_deletions (periodic safety-net)
++
++    Design notes / safety:
++        - Reuses the existing per-subscription cache lock
++          (subscription_lock) and the existing SubscriptionMutation
++          locking (assert_mutation_not_locked, raised as
++          MutationLockedError) instead of inventing new locking.
++        - Re-checks item.deleted_at under the subscription lock before
++          attempting to cancel, so running this twice (or running the
++          one-shot task concurrently with the periodic reconciler) is
++          safe - an already-cancelled item is simply skipped.
++        - One member's cancellation failure never stops the others
++          from being attempted.
++        - The plan is only ever marked is_deleted=True once a DB
++          re-check confirms there are zero remaining active items for
++          it. That final UPDATE is itself idempotent (it targets
++          is_deleted=False), so double-finalizing is harmless.
++    """
++
++    @staticmethod
++    def process_plan(plan):
++        # Imported locally to avoid a circular import:
++        # service_subscription imports StripeSubscriptionReconciler
++        # from this module.
++        from .service_subscription import SubscriptionItemService
++
++        stripe.api_key = settings.STRIPE_SECRET_KEY
++
++        active_items = list(
++            SubscriptionItem.objects
++            .filter(plan=plan, deleted_at__isnull=True)
++            .select_related("subscription", "member", "member__owner")
++        )
++
++        cancelled_owner_map = defaultdict(lambda: {
++            "members": set(),
++            "plans": set(),
++            "access_until": None,
++        })
++
++        cancelled_count = 0
++        failed_count = 0
++
++        for item in active_items:
++            subscription = item.subscription
++
++            try:
++                with subscription_lock(subscription.id, timeout=300):
++
++                    # Re-read under the lock: another run (the
++                    # one-shot task or the periodic reconciler) may
++                    # have already cancelled this item.
++                    item.refresh_from_db()
++
++                    if item.deleted_at is not None:
++                        continue
++
++                    SubscriptionItemService.cancel_item(
++                        item=item,
++                        subscription=subscription,
++                        club=plan.club,
++                    )
++
++            except CacheLockError:
++                logger.info(
++                    "[PLAN DELETE] subscription locked, will retry "
++                    "later plan=%s subscription=%s item=%s",
++                    plan.id, subscription.id, item.id,
++                )
++                failed_count += 1
++                continue
++
++            except MutationLockedError:
++                logger.info(
++                    "[PLAN DELETE] mutation locked, will retry later "
++                    "plan=%s subscription=%s item=%s",
++                    plan.id, subscription.id, item.id,
++                )
++                failed_count += 1
++                continue
++
++            except Exception:
++                logger.exception(
++                    "[PLAN DELETE] failed to cancel item=%s plan=%s "
++                    "subscription=%s",
++                    item.id, plan.id, subscription.id,
++                )
++                failed_count += 1
++                continue
++
++            cancelled_count += 1
++
++            owner = item.member.owner if item.member else None
++
++            if owner:
++                group = cancelled_owner_map[owner.id]
++                group["members"].add(item.member.full_name)
++                group["plans"].add(plan.name)
++                group["access_until"] = subscription.access_until
++
++        # -----------------------------------------------------------
++        # Only mark the plan actually deleted once a fresh DB query
++        # confirms there are zero active items left. This must be
++        # re-queried (not derived from the `active_items` snapshot
++        # above) because other concurrent processes may also be
++        # cancelling items for this plan.
++        # -----------------------------------------------------------
++        remaining_active = SubscriptionItem.objects.filter(
++            plan=plan,
++            deleted_at__isnull=True,
++        ).exists()
++
++        finalized = False
++
++        if not remaining_active:
++            updated = MembershipPlan.objects.filter(
++                id=plan.id,
++                is_deleted=False,
++            ).update(
++                is_deleted=True,
++                deleted_at=timezone.now(),
++            )
++            finalized = bool(updated)
++
++        if cancelled_owner_map:
++            serializable_owner_map = {
++                str(owner_id): {
++                    "members": list(data["members"]),
++                    "plans": list(data["plans"]),
++                    "access_until": (
++                        data["access_until"].isoformat()
++                        if data["access_until"]
++                        else None
++                    ),
++                }
++                for owner_id, data in cancelled_owner_map.items()
++            }
++
++            # The cancellations/finalization above are already
++            # committed at this point. A broker hiccup while enqueuing
++            # the notification email must not be reported as if the
++            # cancellation work itself failed.
++            try:
++                send_plan_deletion_emails.delay(serializable_owner_map)
++            except Exception:
++                logger.exception(
++                    "[PLAN DELETE] Failed to enqueue deletion "
++                    "notification emails for plan=%s",
++                    plan.id,
++                )
++
++        result = {
++            "plan_id": plan.id,
++            "cancelled": cancelled_count,
++            "failed": failed_count,
++            "remaining_active": remaining_active and not finalized,
++            "finalized": finalized,
++        }
++
++        logger.info("[PLAN DELETE] plan processed result=%s", result)
++
++        return result
++
++    @staticmethod
++    def reconcile_all():
++        plans = MembershipPlan.objects.filter(
++            scheduled_for_deletion=True,
++            is_deleted=False,
++        )
++
++        results = []
++
++        for plan in plans:
++            try:
++                results.append(
++                    MembershipPlanDeletionReconciler.process_plan(plan)
++                )
++            except Exception:
++                logger.exception(
++                    "[PLAN DELETE RECONCILE] Unexpected failure "
++                    "plan=%s",
++                    plan.id,
++                )
++
++        return results
++
+ 
+ class CheckoutSubscriptionReconciler:
+ 
+diff --git a/kaibaru/models.py b/kaibaru/models.py
+index 15ceb3c..d525d82 100755
+--- a/kaibaru/models.py
++++ b/kaibaru/models.py
+@@ -278,6 +278,18 @@ class MembershipPlan(models.Model):
+     is_deleted = models.BooleanField(default=False)
+     deleted_at = models.DateTimeField(null=True, blank=True)
+ 
++    # An owner has requested deletion of this plan and the system is
++    # currently working through cancellation of existing subscribers.
++    #
++    # State model:
++    #   scheduled_for_deletion=False, is_deleted=False -> normal active plan
++    #   scheduled_for_deletion=True,  is_deleted=False -> deletion in progress
++    #   is_deleted=True                                -> plan is actually deleted (terminal)
++    #
++    # A plan with either flag set must never gain a new/reactivated
++    # active SubscriptionItem.
++    scheduled_for_deletion = models.BooleanField(default=False)
++
+     apply_current_price_to_existing = models.BooleanField(
+         default=False,
+         help_text="If enabled, existing members will be charged the current plan price instead of their subscription price."
+@@ -1238,6 +1250,14 @@ class TicketGrant(models.Model):
+         related_name="ticket_grants",
+     )
+ 
++    mutation = models.ForeignKey(
++        SubscriptionMutation,
++        null=True,
++        blank=True,
++        on_delete=models.SET_NULL,
++        related_name="ticket_grants",
++    )
++
+     ticket_type = models.ForeignKey(
+         TicketType,
+         on_delete=models.PROTECT,
+@@ -1275,6 +1295,14 @@ class TicketGrant(models.Model):
+         blank=True
+     )
+ 
++    class Meta:
++        constraints = [
++            models.UniqueConstraint(
++                fields=["mutation"],
++                name="unique_ticket_grant_per_subscription_mutation",
++        ),
++    ]
++
+     def __str__(self):
+         return (
+             f"{self.member.full_name} - "
+@@ -1282,6 +1310,8 @@ class TicketGrant(models.Model):
+             f"{self.quantity}"
+         )
+ 
++
++
+ class TicketUsage(models.Model):
+     grant = models.ForeignKey(
+         TicketGrant,
+diff --git a/kaibaru/rules_subscriptions.py b/kaibaru/rules_subscriptions.py
+index 55fdcb7..ad11ca0 100644
+--- a/kaibaru/rules_subscriptions.py
++++ b/kaibaru/rules_subscriptions.py
+@@ -161,12 +161,36 @@ def validate_bundle_rule(active_plan_ids, bundle_map):
+         )
+ 
+ 
++def assert_plan_is_activatable(plan):
++    """
++    A plan that is scheduled for deletion or already deleted must
++    never gain a new/reactivated active SubscriptionItem.
++
++    This is the single, shared gate used by every flow that starts a
++    NEW activation of a plan (new subscription/checkout, add plan,
++    change plan, resume). It intentionally does not consider whether
++    OTHER unrelated SubscriptionItems already exist on the plan -
++    existing historical/active rows are handled separately by the
++    plan-deletion task/reconciliation and must not be invalidated by
++    this check.
++    """
++    if plan is None:
++        return
++
++    if plan.scheduled_for_deletion or plan.is_deleted:
++        raise ValidationError(
++            "このプランは削除されているため、選択できません。"
++        )
++
++
+ def validate_subscription_transition(
+     subscription,
+     member,
+     new_plan,
+     old_plan_id=None,
+ ):
++    assert_plan_is_activatable(new_plan)
++
+     now = timezone.now()
+ 
+     items = SubscriptionItem.objects.filter(
+diff --git a/kaibaru/service_add_plan.py b/kaibaru/service_add_plan.py
+index 502a409..97ef2fb 100644
+--- a/kaibaru/service_add_plan.py
++++ b/kaibaru/service_add_plan.py
+@@ -27,8 +27,9 @@ from .service_mutations import (
+     stripe_idempotency_key,
+     get_or_create_mutation_strict,
+ )
+-
++from datetime import datetime
+ from .invoice_creation import create_local_invoice_from_stripe_invoice
++from .rules_subscriptions import assert_plan_is_activatable
+ 
+ class SubscriptionAddPlanService:
+ 
+@@ -44,6 +45,7 @@ class SubscriptionAddPlanService:
+         PURE EXTRACTION of existing 'sub exists' add-plan logic.
+         NO BEHAVIOR CHANGES.
+         """
++        assert_plan_is_activatable(plan)
+ 
+         today = timezone.localtime().date()
+         billing_user = member.owner
+@@ -138,11 +140,42 @@ class SubscriptionAddPlanService:
+                 "mutation_key": f"add_plan_member_{member.id}_plan_{plan.id}",
+                 "member_id": member.id,
+                 "plan_id": plan.id,
++                "price_at_subscription": plan.price,
+                 "stripe_price_id": plan.stripe_price_id,
+                 "expected_invoice_items": expected_invoice_items,
++                "ticket_grant": {
++                    "quantity": pricing["ticket_quantity"],
++                    "ticket_type_id": plan.ticket_type_id,
++                    "expires_at": (
++                        calculate_ticket_expiration(
++                            plan=plan,
++                            granted_at=timezone.now(),
++                        ).isoformat()
++                    ),
++                },
+             },
+         )
+ 
++        ticket_grant_data = mutation.payload.get(
++            "ticket_grant",
++            {},
++        )
++
++        ticket_grant_quantity = ticket_grant_data.get(
++            "quantity",
++            0,
++        )
++
++        ticket_grant_expires_at = ticket_grant_data.get(
++            "expires_at",
++        )
++
++        ticket_grant_expires_at = (
++            datetime.fromisoformat(ticket_grant_expires_at)
++            if ticket_grant_expires_at
++            else None
++        )
++
+         if created:
+             proration_remaining_days = (
+                 pricing["proration"]["remaining_days"]
+@@ -560,10 +593,13 @@ class SubscriptionAddPlanService:
+         # =========================================================
+         # DB UPDATE (UNCHANGED)
+         # =========================================================
+-        ticket_grant_quantity = None
++        frozen_price = payload.get("price_at_subscription")
+ 
+-        if plan.plan_type == "ticket_plan":
+-            ticket_grant_quantity = pricing["ticket_quantity"]
++        if frozen_price is None:
++            raise ValueError(
++                f"ADD_PLAN mutation {mutation.id} is missing "
++                "frozen price_at_subscription"
++            )
+ 
+         with transaction.atomic():
+             item = SubscriptionItem.objects.filter(
+@@ -574,8 +610,8 @@ class SubscriptionAddPlanService:
+     
+             if item:
+                 item.deleted_at = None
+-                item.price_at_subscription = plan.price
+-                item.stripe_price_id_at_subscription = plan.stripe_price_id
++                item.price_at_subscription = frozen_price
++                item.stripe_price_id_at_subscription = frozen_stripe_price_id
+                 item.save()
+     
+             else:
+@@ -584,28 +620,31 @@ class SubscriptionAddPlanService:
+                     subscription=subscription,
+                     plan=plan,
+                     stripe_subscription_item_id=stripe_item_id,
+-                    price_at_subscription=plan.price,
++                    price_at_subscription=frozen_price,
+                     stripe_price_id_at_subscription=plan.stripe_price_id,
+                 )
+ 
+             # ---------------------------------------------------------
+             # INITIAL TICKET GRANT
+             # ---------------------------------------------------------
+-        
++
++
+             if (
+                 plan.plan_type == "ticket_plan"
+-                and pricing.get("ticket_quantity", 0) > 0
++                and ticket_grant_quantity > 0
+             ):
++                existing_grant = TicketGrant.objects.filter(
++                    mutation=mutation,
++                ).first()
+         
+-                TicketGrant.objects.create(
++                if not existing_grant:
++                    TicketGrant.objects.create(
+                     member=member,
+-                    ticket_type=plan.ticket_type,
++                    mutation=mutation,
++                    ticket_type_id=ticket_grant_data["ticket_type_id"],
+                     source=TicketGrant.Source.SUBSCRIPTION,
+-                    quantity=pricing["ticket_quantity"],
+-                    expires_at=calculate_ticket_expiration(
+-                        plan=plan,
+-                        granted_at=timezone.now(),
+-                    ),
++                    quantity=ticket_grant_quantity,
++                    expires_at=ticket_grant_expires_at,
+                 )
+ 
+             if joining_fee_amount > 0:
+diff --git a/kaibaru/service_add_plan_cash.py b/kaibaru/service_add_plan_cash.py
+index 8e2518e..555df3e 100644
+--- a/kaibaru/service_add_plan_cash.py
++++ b/kaibaru/service_add_plan_cash.py
+@@ -16,6 +16,7 @@ from .pricing import (
+ )
+ 
+ from .discounts import calculate_discounted_amount
++from .rules_subscriptions import assert_plan_is_activatable
+ 
+ 
+ class CashAddPlanService:
+@@ -28,6 +29,7 @@ class CashAddPlanService:
+         plan,
+         subscription,
+     ):
++        assert_plan_is_activatable(plan)
+ 
+         today = timezone.localtime().date()
+ 
+diff --git a/kaibaru/service_subscription.py b/kaibaru/service_subscription.py
+index 3cd9122..d0468b6 100644
+--- a/kaibaru/service_subscription.py
++++ b/kaibaru/service_subscription.py
+@@ -13,6 +13,7 @@ from .service_mutations import (
+     stripe_idempotency_key,
+     get_or_create_mutation_strict,
+ )
++from .rules_subscriptions import assert_plan_is_activatable
+ 
+ logger = logging.getLogger(__name__)
+ 
+@@ -22,6 +23,8 @@ class SubscriptionItemService:
+ 
+     @staticmethod
+     def resume_item(*, item, subscription, club):
++        assert_plan_is_activatable(item.plan)
++
+         assert_mutation_not_locked(
+             item=item,
+             mutation_type=SubscriptionMutation.MutationType.RESUME
+@@ -260,6 +263,8 @@ class SubscriptionItemService:
+         club,
+         old_item_is_grace: bool
+     ):
++        assert_plan_is_activatable(new_plan)
++
+         assert_mutation_not_locked(
+             item=item,
+             mutation_type=SubscriptionMutation.MutationType.CHANGE_PLAN
+@@ -274,10 +279,17 @@ class SubscriptionItemService:
+                 "old_price_id": item.stripe_price_id_at_subscription,
+                 "old_stripe_item_id": item.stripe_subscription_item_id,
+                 "new_price_id": new_plan.stripe_price_id,
++                "new_price": new_plan.price,
+                 "is_grace": old_item_is_grace,
+             },
+         )
+ 
++        payload = mutation.payload
++
++        old_price_id = payload["old_price_id"]
++        new_price_id = payload["new_price_id"]
++        new_price = payload["new_price"]
++
+         stripe_sub = stripe.Subscription.retrieve(
+             subscription.stripe_subscription_id,
+             stripe_account=club.stripe_account_id,
+@@ -289,7 +301,7 @@ class SubscriptionItemService:
+         # =========================================================
+         new_stripe_item = next(
+             (i for i in stripe_sub["items"]["data"]
+-             if i["price"]["id"] == new_plan.stripe_price_id),
++             if i["price"]["id"] == new_price_id),
+             None
+         )
+         key_modify = stripe_idempotency_key(
+@@ -317,7 +329,7 @@ class SubscriptionItemService:
+         else:
+             created_stripe_item = stripe.SubscriptionItem.create(
+                 subscription=subscription.stripe_subscription_id,
+-                price=new_plan.stripe_price_id,
++                price=new_price_id,
+                 quantity=1,
+                 proration_behavior="none",
+                 stripe_account=club.stripe_account_id,
+@@ -419,6 +431,8 @@ class SubscriptionItemService:
+                 new_item.access_start = item.access_until
+                 new_item.source_item = item
+                 new_item.stripe_subscription_item_id = new_item_id
++                new_item.price_at_subscription = new_price
++                new_item.stripe_price_id_at_subscription = new_price_id
+         
+                 new_item.save(update_fields=[
+                     "deleted_at",
+@@ -426,6 +440,8 @@ class SubscriptionItemService:
+                     "quantity",
+                     "source_item",
+                     "stripe_subscription_item_id",
++                    "price_at_subscription",
++                    "stripe_price_id_at_subscription",
+                 ])
+         
+             else:
+@@ -436,8 +452,8 @@ class SubscriptionItemService:
+                     subscription=subscription,
+                     member=item.member,
+                     plan=new_plan,
+-                    price_at_subscription=new_plan.price,
+-                    stripe_price_id_at_subscription=new_plan.stripe_price_id,
++                    price_at_subscription=new_price,
++                    stripe_price_id_at_subscription=new_price_id,
+                     source_item=item,
+                     access_start=item.access_until,
+                     stripe_subscription_item_id=new_item_id,
+@@ -469,8 +485,13 @@ class SubscriptionItemService:
+         old_item,
+         subscription,
+         club,
+-        old_plan_deleted,
+     ):
++        # Cancelling a pending plan change revives the OLD item. If the
++        # old plan has since been scheduled for deletion (or deleted),
++        # that revival must be refused - the plan change cancellation
++        # must not resurrect an item on a plan that's going away.
++        assert_plan_is_activatable(old_item.plan)
++
+         assert_mutation_not_locked(
+             item=old_item,
+             mutation_type=SubscriptionMutation.MutationType.CANCEL_CHANGE_PLAN
+@@ -483,10 +504,23 @@ class SubscriptionItemService:
+                 "new_item_id": new_item.id,
+                 "old_item_id": old_item.id,
+                 "new_price_id": new_item.stripe_price_id_at_subscription,
++                "new_stripe_item_id": new_item.stripe_subscription_item_id,
+                 "old_price_id": old_item.stripe_price_id_at_subscription,
+                 "old_stripe_item_id": old_item.stripe_subscription_item_id,
+             },
+         )
++
++        payload = mutation.payload
++
++        new_item_id = payload["new_item_id"]
++        old_item_id = payload["old_item_id"]
++
++        new_price_id = payload["new_price_id"]
++        old_price_id = payload["old_price_id"]
++
++        new_stripe_item_id = payload["new_stripe_item_id"]
++        old_stripe_item_id = payload["old_stripe_item_id"]
++
+         now = timezone.now()
+ 
+         stripe_sub = stripe.Subscription.retrieve(
+@@ -501,7 +535,7 @@ class SubscriptionItemService:
+         new_stripe_item = next(
+             (
+                 i for i in stripe_sub["items"]["data"]
+-                if i["id"] == new_item.stripe_subscription_item_id
++                if i["id"] == new_stripe_item_id
+             ),
+             None
+         )
+@@ -548,81 +582,80 @@ class SubscriptionItemService:
+         # =========================================================
+         # 2. RESTORE OLD STRIPE ITEM safely
+         # =========================================================
+-        if not old_plan_deleted:
+-            old_stripe_item = next(
+-                (
+-                    i for i in stripe_sub["items"]["data"]
+-                    if i["price"]["id"] == old_item.plan.stripe_price_id
+-                ),
+-                None
+-            )
++        old_stripe_item = next(
++            (
++                i for i in stripe_sub["items"]["data"]
++                if i["price"]["id"] == old_price_id
++            ),
++            None
++        )
+ 
+-            old_plan_active_qty = SubscriptionItem.objects.filter(
+-                subscription=subscription,
+-                stripe_price_id_at_subscription=old_item.stripe_price_id_at_subscription,
+-                deleted_at__isnull=True
+-            ).count()
++        old_plan_active_qty = SubscriptionItem.objects.filter(
++            subscription=subscription,
++            stripe_price_id_at_subscription=old_item.stripe_price_id_at_subscription,
++            deleted_at__isnull=True
++        ).count()
+ 
+-            desired_old_qty = old_plan_active_qty + 1
++        desired_old_qty = old_plan_active_qty + 1
+     
+-            if old_stripe_item:
+-                key = stripe_idempotency_key(
+-                    mutation,
+-                    "cancel_change_restore_old_item_modify"
+-                )
+-                stripe.SubscriptionItem.modify(
+-                    old_stripe_item["id"],
+-                    quantity=desired_old_qty,
+-                    proration_behavior="none",
+-                    stripe_account=club.stripe_account_id,
+-                    idempotency_key=key,
+-                )
+-                restored_id = old_stripe_item["id"]
+-            else:
+-                key = stripe_idempotency_key(
+-                    mutation,
+-                    "cancel_change_restore_old_item_create"
+-                )
+-                created_stripe_item = stripe.SubscriptionItem.create(
+-                    subscription=subscription.stripe_subscription_id,
+-                    price=old_item.plan.stripe_price_id,
+-                    quantity=desired_old_qty,
+-                    proration_behavior="none",
+-                    stripe_account=club.stripe_account_id,
+-                    idempotency_key=key,
+-                )
+-                restored_id = created_stripe_item["id"]
++        if old_stripe_item:
++            key = stripe_idempotency_key(
++                mutation,
++                "cancel_change_restore_old_item_modify"
++            )
++            stripe.SubscriptionItem.modify(
++                old_stripe_item["id"],
++                quantity=desired_old_qty,
++                proration_behavior="none",
++                stripe_account=club.stripe_account_id,
++                idempotency_key=key,
++            )
++            restored_id = old_stripe_item["id"]
++        else:
++            key = stripe_idempotency_key(
++                mutation,
++                "cancel_change_restore_old_item_create"
++            )
++            created_stripe_item = stripe.SubscriptionItem.create(
++                subscription=subscription.stripe_subscription_id,
++                price=old_price_id,
++                quantity=desired_old_qty,
++                proration_behavior="none",
++                stripe_account=club.stripe_account_id,
++                idempotency_key=key,
++            )
++            restored_id = created_stripe_item["id"]
+     
+-            with transaction.atomic():
++        with transaction.atomic():
+ 
+-                # restore old item
+-                old_item.stripe_subscription_item_id = restored_id
+-                old_item.deleted_at = None
+-                old_item.access_until = None
+-                old_item.save(update_fields=[
+-                    "deleted_at",
+-                    "access_until",
+-                    "stripe_subscription_item_id"
+-                ])
++            # restore old item
++            old_item.stripe_subscription_item_id = restored_id
++            old_item.deleted_at = None
++            old_item.access_until = None
++            old_item.save(update_fields=[
++                "deleted_at",
++                "access_until",
++                "stripe_subscription_item_id"
++            ])
+     
+-                # SOFT CANCEL new item (IMPORTANT CHANGE)
+-                new_item.deleted_at = now
+-                new_item.access_until = now
+-                new_item.source_item = None
+-                new_item.save(update_fields=[
+-                    "deleted_at",
+-                    "access_until",
+-                    "source_item",
+-                ])
++            # SOFT CANCEL new item (IMPORTANT CHANGE)
++            new_item.deleted_at = now
++            new_item.access_until = now
++            new_item.source_item = None
++            new_item.save(update_fields=[
++                "deleted_at",
++                "access_until",
++                "source_item",
++            ])
+     
+-                # mark mutation success
+-                mutation.status = SubscriptionMutation.Status.SUCCEEDED
+-                mutation.processed_at = now
++            # mark mutation success
++            mutation.status = SubscriptionMutation.Status.SUCCEEDED
++            mutation.processed_at = now
+     
+-                if subscription.current_period_end:
+-                    mutation.secondary_mutation_blocked_until = subscription.current_period_end
+-                else:
+-                    mutation.secondary_mutation_blocked_until = now
++            if subscription.current_period_end:
++                mutation.secondary_mutation_blocked_until = subscription.current_period_end
++            else:
++                mutation.secondary_mutation_blocked_until = now
+     
+-                mutation.save()
++            mutation.save()
+     
+diff --git a/kaibaru/service_subscription_cash.py b/kaibaru/service_subscription_cash.py
+index 6fb12c9..bdde245 100644
+--- a/kaibaru/service_subscription_cash.py
++++ b/kaibaru/service_subscription_cash.py
+@@ -2,6 +2,7 @@ from django.db import transaction
+ from django.utils import timezone
+ 
+ from .models import SubscriptionItem
++from .rules_subscriptions import assert_plan_is_activatable
+ 
+ 
+ class CashSubscriptionItemService:
+@@ -16,6 +17,7 @@ class CashSubscriptionItemService:
+         subscription,
+         club,
+     ):
++        assert_plan_is_activatable(item.plan)
+ 
+         with transaction.atomic():
+ 
+@@ -106,6 +108,7 @@ class CashSubscriptionItemService:
+         club,
+         old_item_is_grace: bool,
+     ):
++        assert_plan_is_activatable(new_plan)
+ 
+ 
+         now = timezone.now()
+@@ -201,8 +204,14 @@ class CashSubscriptionItemService:
+         old_item,
+         subscription,
+         club,
+-        old_plan_deleted,
++        old_plan_deleted=None,
+     ):
++        # `old_plan_deleted` is kept for call-site compatibility but the
++        # actual gate is evaluated here against the plan's current state,
++        # matching the Stripe implementation. Cancelling a pending plan
++        # change must not revive an item on a plan that has since been
++        # scheduled for deletion (or deleted).
++        assert_plan_is_activatable(old_item.plan)
+ 
+         now = timezone.now()
+ 
+diff --git a/kaibaru/stripe_views.py b/kaibaru/stripe_views.py
+index 4ddeacb..48d8d8b 100644
+--- a/kaibaru/stripe_views.py
++++ b/kaibaru/stripe_views.py
+@@ -309,6 +309,7 @@ def change_member_plan(request, item_id, new_plan_id):
+         id=new_plan_id,
+         club=club,
+         is_deleted=False,
++        scheduled_for_deletion=False,
+         active=True
+     )
+ 
+@@ -460,6 +461,21 @@ def resume_member_subscription(request, item_id):
+         subscription__owner=request.user
+     )
+ 
++    if (
++        not item.plan
++        or item.plan.is_deleted
++        or item.plan.scheduled_for_deletion
++    ):
++        return JsonResponse(
++            {
++                "error": (
++                    "このプランは削除されているため、"
++                    "再開できません。"
++                )
++            },
++            status=400,
++        )
++
+     state = item_state(item)
+ 
+     if state == "expired":
+@@ -563,6 +579,20 @@ def cancel_member_plan_change(request, new_item_id):
+ 
+     old_item = new_item.source_item
+ 
++    if old_item.plan and (
++        old_item.plan.is_deleted
++        or old_item.plan.scheduled_for_deletion
++    ):
++        return JsonResponse(
++            {
++                "error": (
++                    "このプランはすでに削除されているため、"
++                    "プラン変更を取り消すことはできません。"
++                )
++            },
++            status=400,
++        )
++
+ 
+    
+     subscription = old_item.subscription
+@@ -575,7 +605,6 @@ def cancel_member_plan_change(request, new_item_id):
+ 
+     club = subscription.club
+ 
+-    old_plan_deleted = old_item.plan and old_item.plan.deleted_at is not None
+ 
+     try:
+         with subscription_lock(subscription.id, timeout=300):
+@@ -584,7 +613,6 @@ def cancel_member_plan_change(request, new_item_id):
+                 old_item=old_item,
+                 subscription=subscription,
+                 club=club,
+-                old_plan_deleted=old_plan_deleted,
+             )
+ 
+     except CacheLockError:
+@@ -668,6 +696,7 @@ def change_cash_member_plan(request, item_id, new_plan_id):
+         id=new_plan_id,
+         club=club,
+         is_deleted=False,
++        scheduled_for_deletion=False,
+         active=True
+     )
+ 
+@@ -872,6 +901,20 @@ def resume_cash_member_subscription(request, item_id):
+         subscription__owner=request.user
+     )
+ 
++    if (
++        not item.plan
++        or item.plan.is_deleted
++        or item.plan.scheduled_for_deletion
++    ):
++        return JsonResponse(
++            {
++                "error": (
++                    "このプランは削除されているため、"
++                    "再開できません。"
++                )
++            },
++            status=400,
++        )
+ 
+     state = item_state(item)
+ 
+@@ -1012,6 +1055,19 @@ def cancel_cash_member_plan_change(request, new_item_id):
+ 
+     old_item = new_item.source_item
+ 
++    if old_item.plan and (
++        old_item.plan.is_deleted
++        or old_item.plan.scheduled_for_deletion
++    ):
++        return JsonResponse(
++            {
++                "error": (
++                    "このプランはすでに削除されているため、"
++                    "プラン変更を取り消すことはできません。"
++                )
++            },
++            status=400,
++        )
+ 
+     subscription = old_item.subscription
+ 
+@@ -1147,7 +1203,14 @@ def create_member_checkout_session(request, club_id, plan_id):
+             status=400
+         )
+ 
+-    plan = get_object_or_404(MembershipPlan, id=plan_id, club=club, is_deleted=False, active=True)
++    plan = get_object_or_404(
++        MembershipPlan,
++        id=plan_id,
++        club=club,
++        is_deleted=False,
++        scheduled_for_deletion=False,
++        active=True,
++    )
+     if not plan.stripe_price_id:
+         return JsonResponse({"error": "Plan not configured correctly"}, status=400)
+ 
+@@ -1300,6 +1363,7 @@ def create_member_cash_subscription(
+         id=plan_id,
+         club=club,
+         is_deleted=False,
++        scheduled_for_deletion=False,
+         active=True,
+     )
+ 
+@@ -1483,7 +1547,14 @@ def add_plan_to_subscription_view(request, club_id, plan_id):
+             status=400
+         )
+ 
+-    plan = get_object_or_404(MembershipPlan, id=plan_id, club=club, is_deleted=False, active=True)
++    plan = get_object_or_404(
++        MembershipPlan,
++        id=plan_id,
++        club=club,
++        is_deleted=False,
++        scheduled_for_deletion=False,
++        active=True,
++    )
+ 
+     if not plan.stripe_price_id:
+         return JsonResponse({"error": "Plan not configured correctly"}, status=400)
+@@ -1635,6 +1706,7 @@ def add_plan_to_cash_subscription_view(
+         id=plan_id,
+         club=club,
+         is_deleted=False,
++        scheduled_for_deletion=False,
+         active=True,
+     )
+ 
+diff --git a/kaibaru/stripe_webhooks.py b/kaibaru/stripe_webhooks.py
+index 1b1e916..228bf9b 100644
+--- a/kaibaru/stripe_webhooks.py
++++ b/kaibaru/stripe_webhooks.py
+@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
+ 
+ stripe.api_key = settings.STRIPE_SECRET_KEY
+ 
+-from .locks_and_reconciliation import subscription_lock, CacheLockError, StripeToCashInvoiceReconciler
++from .locks_and_reconciliation import subscription_lock, CacheLockError, StripeToCashInvoiceReconciler, CheckoutSubscriptionReconciler
+ 
+ from .discounts import calculate_discounted_amount
+ from .billing import (
+@@ -686,6 +686,47 @@ def stripe_connected_webhook(request):
+             logger.error("Plan not found for session %s", session["id"])
+             return webhook_ok(event_record)
+ 
++        # -----------------------------------------------------------
++        # INVARIANT: a plan that is scheduled for deletion (or already
++        # deleted) must never gain a new/reactivated active
++        # SubscriptionItem.
++        #
++        # It's possible for a member to start checkout for a plan
++        # that the owner then schedules for deletion before the
++        # checkout completes. In that case we must NOT create/
++        # activate a local Subscription/SubscriptionItem for it.
++        #
++        # We reuse the existing orphan-checkout cleanup path to
++        # cancel the Stripe subscription immediately. If that call
++        # itself fails, the periodic checkout reconciliation task
++        # will still find and cancel this Stripe subscription later
++        # since no local Subscription row is ever created for it.
++        # -----------------------------------------------------------
++        if plan.scheduled_for_deletion or plan.is_deleted:
++            logger.warning(
++                "[checkout.session.completed] Plan=%s is scheduled "
++                "for deletion or already deleted; refusing to "
++                "activate stripe_subscription=%s session=%s",
++                plan.id,
++                sub.id,
++                session["id"],
++            )
++
++            try:
++                CheckoutSubscriptionReconciler.cancel_orphan(
++                    stripe_sub=sub,
++                    club=club,
++                )
++            except Exception:
++                logger.exception(
++                    "[checkout.session.completed] Failed to cancel "
++                    "stripe_subscription=%s for scheduled/deleted "
++                    "plan=%s",
++                    sub.id,
++                    plan.id,
++                )
++
++            return webhook_ok(event_record)
+ 
+         stripe_customer_obj = get_or_create_stripe_customer(member.owner, club)
+ 
+diff --git a/kaibaru/tasks.py b/kaibaru/tasks.py
+index 653090e..7f2eafc 100644
+--- a/kaibaru/tasks.py
++++ b/kaibaru/tasks.py
+@@ -11,7 +11,7 @@ from .tasks_emails import send_subscription_activated_emails, send_club_deleted_
+ 
+ logger = logging.getLogger(__name__)
+ 
+-from .models import Participation, Club, Subscription, Invoice
++from .models import Participation, Club, Subscription, Invoice, MembershipPlan
+ from .utils import sync_member_quantity
+ from django.db.models import Exists, OuterRef, CharField
+ from django.db.models.functions import TruncDate, Cast
+@@ -22,6 +22,7 @@ from .locks_and_reconciliation import (
+     StripeSubscriptionReconciler,
+     CheckoutSubscriptionReconciler,
+     StripeToCashInvoiceReconciler,
++    MembershipPlanDeletionReconciler,
+     subscription_lock, 
+     CacheLockError,
+ )
+@@ -765,4 +766,105 @@ def reconcile_member_reservation_payments():
+             "Payment reconciliation failed"
+         )
+ 
+-        raise
+\ No newline at end of file
++        raise
++
++
++@shared_task
++def delete_membership_plan_task(plan_id):
++    """
++    Fired once when an owner schedules a MembershipPlan for deletion
++    (MembershipPlanViewSet.perform_destroy).
++
++    Cancels every active SubscriptionItem for the plan using the
++    existing SubscriptionItemService.cancel_item(), then marks the
++    plan is_deleted=True once (and only once) zero active items
++    remain.
++
++    Safe to run more than once:
++        - Re-loads the plan from the DB and no-ops if it's already
++          deleted, or if it was never actually scheduled.
++        - Delegates the cancellation/finalization work to
++          MembershipPlanDeletionReconciler.process_plan(), which is
++          shared with reconcile_scheduled_plan_deletions() below and
++          is itself idempotent/lock-safe.
++
++    If some cancellations fail (Stripe error, subscription lock held,
++    worker crash, etc.) the plan is simply left with
++    scheduled_for_deletion=True / is_deleted=False, and
++    reconcile_scheduled_plan_deletions() will retry the remaining
++    items on its next run.
++    """
++
++    stripe.api_key = settings.STRIPE_SECRET_KEY
++
++    try:
++        plan = MembershipPlan.objects.get(id=plan_id)
++    except MembershipPlan.DoesNotExist:
++        logger.warning(
++            "[PLAN DELETE TASK] plan=%s no longer exists",
++            plan_id,
++        )
++        return {"plan_id": plan_id, "status": "missing"}
++
++    if plan.is_deleted:
++        logger.info(
++            "[PLAN DELETE TASK] plan=%s already deleted, nothing to do",
++            plan_id,
++        )
++        return {"plan_id": plan_id, "status": "already_deleted"}
++
++    if not plan.scheduled_for_deletion:
++        logger.warning(
++            "[PLAN DELETE TASK] plan=%s is not scheduled for "
++            "deletion; skipping",
++            plan_id,
++        )
++        return {"plan_id": plan_id, "status": "not_scheduled"}
++
++    logger.info(
++        "[PLAN DELETE TASK] Starting cancellation for plan=%s",
++        plan_id,
++    )
++
++    result = MembershipPlanDeletionReconciler.process_plan(plan)
++
++    logger.info(
++        "[PLAN DELETE TASK] Finished plan=%s result=%s",
++        plan_id,
++        result,
++    )
++
++    return result
++
++
++@shared_task
++def reconcile_scheduled_plan_deletions():
++    """
++    Periodic safety-net for MembershipPlan deletions.
++
++    delete_membership_plan_task() can fail partway through (Stripe
++    errors, held subscription/mutation locks, a worker crash, etc.),
++    so this task periodically re-scans every plan that is still
++    scheduled_for_deletion=True / is_deleted=False, retries
++    cancellation of its remaining active SubscriptionItems, and
++    finalizes (is_deleted=True) any plan that now has zero active
++    items left.
++
++    Plans with active items remaining are simply left
++    scheduled_for_deletion=True for the next periodic run to retry.
++    """
++
++    stripe.api_key = settings.STRIPE_SECRET_KEY
++
++    logger.info(
++        "[PLAN DELETE RECONCILE] Starting scan"
++    )
++
++    results = MembershipPlanDeletionReconciler.reconcile_all()
++
++    logger.info(
++        "[PLAN DELETE RECONCILE] Finished scan results=%s",
++        results,
++    )
++
++    return results
+\ No newline at end of file
+diff --git a/kaibaru/viewsets.py b/kaibaru/viewsets.py
+index 8ba93d3..b3a380d 100644
+--- a/kaibaru/viewsets.py
++++ b/kaibaru/viewsets.py
+@@ -24,7 +24,7 @@ from django.db.models import Prefetch
+ from django.core.exceptions import ValidationError
+ stripe.api_key = settings.STRIPE_SECRET_KEY
+ 
+-from .tasks_emails import send_plan_deletion_emails
++from .tasks import delete_membership_plan_task
+ 
+ from .discounts import calculate_discounted_amount
+ import uuid
+@@ -50,8 +50,6 @@ from .rules_subscriptions import validate_plan_set
+ from django.core.files.base import ContentFile
+ import os
+ from django.utils.timezone import now
+-from .service_subscription import SubscriptionItemService
+-
+ class PreviewMember:
+ 
+     def __init__(
+@@ -871,6 +869,24 @@ class MembershipPlanViewSet(viewsets.ModelViewSet):
+         context["club"] = club
+         return context
+ 
++    def destroy(self, request, *args, **kwargs):
++        instance = self.get_object()
++        result = self.perform_destroy(instance)
++
++        if result and result.get("scheduled"):
++            return Response(
++                {
++                    "detail": (
++                        "プランの削除を予約しました。既存の契約者の"
++                        "解約処理が完了すると自動的に削除されます。"
++                    ),
++                    "scheduled_for_deletion": True,
++                },
++                status=status.HTTP_202_ACCEPTED,
++            )
++
++        return Response(status=status.HTTP_204_NO_CONTENT)
++
+     def perform_destroy(self, instance):
+         if self.request.user != instance.club.owner:
+             raise serializers.ValidationError(
+@@ -882,6 +898,19 @@ class MembershipPlanViewSet(viewsets.ModelViewSet):
+                 "Cannot delete plan because it would leave a bundle with <2 plans."
+             )
+ 
++        # ---------------------------------------------------------
++        # Already deleted / already scheduled → nothing to do.
++        # ---------------------------------------------------------
++        if instance.is_deleted or instance.scheduled_for_deletion:
++            raise serializers.ValidationError(
++                {
++                    "detail": (
++                        "This plan is already deleted or already "
++                        "scheduled for deletion."
++                    )
++                }
++            )
++
+         # ---------------------------------------------------------
+         # STEP 1: Check ANY subscription history
+         # ---------------------------------------------------------
+@@ -889,82 +918,38 @@ class MembershipPlanViewSet(viewsets.ModelViewSet):
+             plan=instance
+         ).exists()
+ 
+-        active_items = SubscriptionItem.objects.filter(
++        has_active_items = SubscriptionItem.objects.filter(
+             plan=instance,
+             deleted_at__isnull=True
+-        ).select_related("subscription")
++        ).exists()
+ 
+         # ---------------------------------------------------------
+-        # CASE 1: ACTIVE ITEMS EXIST → cancel them
++        # CASE 1: ACTIVE ITEMS EXIST → schedule background cancellation.
++        #
++        # We do NOT cancel potentially hundreds of Stripe subscription
++        # items synchronously inside the HTTP request. Instead we mark
++        # the plan as scheduled for deletion (blocking any new
++        # activation immediately) and hand the actual cancellation
++        # work off to delete_membership_plan_task, which is safe to
++        # retry and is also backed by reconcile_scheduled_plan_deletions.
+         # ---------------------------------------------------------
+-        if active_items.exists():
+-
+-            owner_map = defaultdict(lambda: {
+-                "members": set(),
+-                "plans": set(),
+-                "access_until": None,
+-            })
+-
+-            for item in active_items:
+-                owner = item.member.owner
+-                group = owner_map[owner.id]
+-
+-                group["members"].add(
+-                    item.member.full_name
+-                )
+-
+-                group["plans"].add(
+-                    item.plan.name
+-                )
+-
+-                group["access_until"] = (
+-                    item.subscription.access_until
+-                )
+-
+-            for item in active_items:
+-                SubscriptionItemService.cancel_item(
+-                    item=item,
+-                    subscription=item.subscription,
+-                    club=instance.club
+-                )
+-
+-            instance.is_deleted = True
+-            instance.deleted_at = timezone.now()
++        if has_active_items:
+ 
++            instance.scheduled_for_deletion = True
+             instance.save(
+                 update_fields=[
+-                    "is_deleted",
+-                    "deleted_at"
++                    "scheduled_for_deletion",
+                 ]
+             )
+ 
+-            serializable_owner_map = {
+-                str(owner_id): {
+-                    "members": list(
+-                        data["members"]
+-                    ),
+-                    "plans": list(
+-                        data["plans"]
+-                    ),
+-                    "access_until": (
+-                        data["access_until"].isoformat()
+-                        if data["access_until"]
+-                        else None
+-                    ),
+-                }
+-                for owner_id, data in owner_map.items()
+-            }
+-
+             transaction.on_commit(
+-                lambda: send_plan_deletion_emails.delay(
+-                    serializable_owner_map
+-                )
++                lambda: delete_membership_plan_task.delay(instance.id)
+             )
+ 
+-            return
++            return {"scheduled": True}
+ 
+         # ---------------------------------------------------------
+-        # STEP 3: HAS HISTORY → SOFT DELETE ONLY
++        # STEP 3: HAS HISTORY, NO ACTIVE ITEMS → SOFT DELETE ONLY
+         # ---------------------------------------------------------
+         if has_history:
+ 
+@@ -978,7 +963,7 @@ class MembershipPlanViewSet(viewsets.ModelViewSet):
+                 ]
+             )
+ 
+-            return
++            return None
+ 
+         # ---------------------------------------------------------
+         # STEP 4: NEVER USED → SAFE HARD DELETE
+@@ -986,6 +971,8 @@ class MembershipPlanViewSet(viewsets.ModelViewSet):
+         instance.bundled_plans.clear()
+         instance.delete()
+ 
++        return None
++
+     def perform_create(self, serializer):
+         subdomain = self.request.data.get(
+             "club_subdomain"
+@@ -1372,6 +1359,7 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
+             if (
+                 plan.club_id != club.id
+                 or plan.is_deleted
++                or plan.scheduled_for_deletion
+                 or not plan.active
+             )
+         ]

@@ -16,6 +16,7 @@ from .pricing import (
 )
 
 from .discounts import calculate_discounted_amount
+from .rules_subscriptions import assert_plan_is_activatable
 
 
 class CashAddPlanService:
@@ -28,6 +29,7 @@ class CashAddPlanService:
         plan,
         subscription,
     ):
+        assert_plan_is_activatable(plan)
 
         today = timezone.localtime().date()
 

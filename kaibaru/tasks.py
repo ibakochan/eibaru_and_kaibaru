@@ -11,7 +11,7 @@ from .tasks_emails import send_subscription_activated_emails, send_club_deleted_
 
 logger = logging.getLogger(__name__)
 
-from .models import Participation, Club, Subscription, Invoice
+from .models import Participation, Club, Subscription, Invoice, MembershipPlan
 from .utils import sync_member_quantity
 from django.db.models import Exists, OuterRef, CharField
 from django.db.models.functions import TruncDate, Cast
@@ -22,6 +22,7 @@ from .locks_and_reconciliation import (
     StripeSubscriptionReconciler,
     CheckoutSubscriptionReconciler,
     StripeToCashInvoiceReconciler,
+    MembershipPlanDeletionReconciler,
     subscription_lock, 
     CacheLockError,
 )
@@ -766,3 +767,104 @@ def reconcile_member_reservation_payments():
         )
 
         raise
+
+
+@shared_task
+def delete_membership_plan_task(plan_id):
+    """
+    Fired once when an owner schedules a MembershipPlan for deletion
+    (MembershipPlanViewSet.perform_destroy).
+
+    Cancels every active SubscriptionItem for the plan using the
+    existing SubscriptionItemService.cancel_item(), then marks the
+    plan is_deleted=True once (and only once) zero active items
+    remain.
+
+    Safe to run more than once:
+        - Re-loads the plan from the DB and no-ops if it's already
+          deleted, or if it was never actually scheduled.
+        - Delegates the cancellation/finalization work to
+          MembershipPlanDeletionReconciler.process_plan(), which is
+          shared with reconcile_scheduled_plan_deletions() below and
+          is itself idempotent/lock-safe.
+
+    If some cancellations fail (Stripe error, subscription lock held,
+    worker crash, etc.) the plan is simply left with
+    scheduled_for_deletion=True / is_deleted=False, and
+    reconcile_scheduled_plan_deletions() will retry the remaining
+    items on its next run.
+    """
+
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+
+    try:
+        plan = MembershipPlan.objects.get(id=plan_id)
+    except MembershipPlan.DoesNotExist:
+        logger.warning(
+            "[PLAN DELETE TASK] plan=%s no longer exists",
+            plan_id,
+        )
+        return {"plan_id": plan_id, "status": "missing"}
+
+    if plan.is_deleted:
+        logger.info(
+            "[PLAN DELETE TASK] plan=%s already deleted, nothing to do",
+            plan_id,
+        )
+        return {"plan_id": plan_id, "status": "already_deleted"}
+
+    if not plan.scheduled_for_deletion:
+        logger.warning(
+            "[PLAN DELETE TASK] plan=%s is not scheduled for "
+            "deletion; skipping",
+            plan_id,
+        )
+        return {"plan_id": plan_id, "status": "not_scheduled"}
+
+    logger.info(
+        "[PLAN DELETE TASK] Starting cancellation for plan=%s",
+        plan_id,
+    )
+
+    result = MembershipPlanDeletionReconciler.process_plan(plan)
+
+    logger.info(
+        "[PLAN DELETE TASK] Finished plan=%s result=%s",
+        plan_id,
+        result,
+    )
+
+    return result
+
+
+@shared_task
+def reconcile_scheduled_plan_deletions():
+    """
+    Periodic safety-net for MembershipPlan deletions.
+
+    delete_membership_plan_task() can fail partway through (Stripe
+    errors, held subscription/mutation locks, a worker crash, etc.),
+    so this task periodically re-scans every plan that is still
+    scheduled_for_deletion=True / is_deleted=False, retries
+    cancellation of its remaining active SubscriptionItems, and
+    finalizes (is_deleted=True) any plan that now has zero active
+    items left.
+
+    Plans with active items remaining are simply left
+    scheduled_for_deletion=True for the next periodic run to retry.
+    """
+
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+
+    logger.info(
+        "[PLAN DELETE RECONCILE] Starting scan"
+    )
+
+    results = MembershipPlanDeletionReconciler.reconcile_all()
+
+    logger.info(
+        "[PLAN DELETE RECONCILE] Finished scan results=%s",
+        results,
+    )
+
+    return results

@@ -27,8 +27,9 @@ from .service_mutations import (
     stripe_idempotency_key,
     get_or_create_mutation_strict,
 )
-
+from datetime import datetime
 from .invoice_creation import create_local_invoice_from_stripe_invoice
+from .rules_subscriptions import assert_plan_is_activatable
 
 class SubscriptionAddPlanService:
 
@@ -44,6 +45,7 @@ class SubscriptionAddPlanService:
         PURE EXTRACTION of existing 'sub exists' add-plan logic.
         NO BEHAVIOR CHANGES.
         """
+        assert_plan_is_activatable(plan)
 
         today = timezone.localtime().date()
         billing_user = member.owner
@@ -138,9 +140,40 @@ class SubscriptionAddPlanService:
                 "mutation_key": f"add_plan_member_{member.id}_plan_{plan.id}",
                 "member_id": member.id,
                 "plan_id": plan.id,
+                "price_at_subscription": plan.price,
                 "stripe_price_id": plan.stripe_price_id,
                 "expected_invoice_items": expected_invoice_items,
+                "ticket_grant": {
+                    "quantity": pricing["ticket_quantity"],
+                    "ticket_type_id": plan.ticket_type_id,
+                    "expires_at": (
+                        calculate_ticket_expiration(
+                            plan=plan,
+                            granted_at=timezone.now(),
+                        ).isoformat()
+                    ),
+                },
             },
+        )
+
+        ticket_grant_data = mutation.payload.get(
+            "ticket_grant",
+            {},
+        )
+
+        ticket_grant_quantity = ticket_grant_data.get(
+            "quantity",
+            0,
+        )
+
+        ticket_grant_expires_at = ticket_grant_data.get(
+            "expires_at",
+        )
+
+        ticket_grant_expires_at = (
+            datetime.fromisoformat(ticket_grant_expires_at)
+            if ticket_grant_expires_at
+            else None
         )
 
         if created:
@@ -560,10 +593,13 @@ class SubscriptionAddPlanService:
         # =========================================================
         # DB UPDATE (UNCHANGED)
         # =========================================================
-        ticket_grant_quantity = None
+        frozen_price = payload.get("price_at_subscription")
 
-        if plan.plan_type == "ticket_plan":
-            ticket_grant_quantity = pricing["ticket_quantity"]
+        if frozen_price is None:
+            raise ValueError(
+                f"ADD_PLAN mutation {mutation.id} is missing "
+                "frozen price_at_subscription"
+            )
 
         with transaction.atomic():
             item = SubscriptionItem.objects.filter(
@@ -574,8 +610,8 @@ class SubscriptionAddPlanService:
     
             if item:
                 item.deleted_at = None
-                item.price_at_subscription = plan.price
-                item.stripe_price_id_at_subscription = plan.stripe_price_id
+                item.price_at_subscription = frozen_price
+                item.stripe_price_id_at_subscription = frozen_stripe_price_id
                 item.save()
     
             else:
@@ -584,28 +620,31 @@ class SubscriptionAddPlanService:
                     subscription=subscription,
                     plan=plan,
                     stripe_subscription_item_id=stripe_item_id,
-                    price_at_subscription=plan.price,
+                    price_at_subscription=frozen_price,
                     stripe_price_id_at_subscription=plan.stripe_price_id,
                 )
 
             # ---------------------------------------------------------
             # INITIAL TICKET GRANT
             # ---------------------------------------------------------
-        
+
+
             if (
                 plan.plan_type == "ticket_plan"
-                and pricing.get("ticket_quantity", 0) > 0
+                and ticket_grant_quantity > 0
             ):
+                existing_grant = TicketGrant.objects.filter(
+                    mutation=mutation,
+                ).first()
         
-                TicketGrant.objects.create(
+                if not existing_grant:
+                    TicketGrant.objects.create(
                     member=member,
-                    ticket_type=plan.ticket_type,
+                    mutation=mutation,
+                    ticket_type_id=ticket_grant_data["ticket_type_id"],
                     source=TicketGrant.Source.SUBSCRIPTION,
-                    quantity=pricing["ticket_quantity"],
-                    expires_at=calculate_ticket_expiration(
-                        plan=plan,
-                        granted_at=timezone.now(),
-                    ),
+                    quantity=ticket_grant_quantity,
+                    expires_at=ticket_grant_expires_at,
                 )
 
             if joining_fee_amount > 0:
