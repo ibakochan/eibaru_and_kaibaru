@@ -5,8 +5,17 @@ from datetime import datetime, timedelta, timezone as dt_timezone
 from django.db import transaction, IntegrityError
 from django.utils import timezone
 
-from .models import Subscription, SubscriptionItem, Invoice, InvoiceItem
-from .pricing import get_effective_subscription_price
+from .models import (
+    Subscription,
+    SubscriptionItem,
+    Invoice,
+    InvoiceItem,
+    TicketGrant,
+)
+from .pricing import (
+    calculate_ticket_expiration,
+    get_effective_subscription_price,
+)
 from .discounts import calculate_discounted_amount
 from .billing import (
     get_next_billing_cycle_anchor,
@@ -163,6 +172,7 @@ class CashSubscriptionCycleInvoiceService:
                     .select_related(
                         "member",
                         "plan",
+                        "plan__ticket_type",
                     )
                     .order_by("id")
                 )
@@ -301,7 +311,39 @@ class CashSubscriptionCycleInvoiceService:
                     )
 
                 # -----------------------------------------------------
-                # 9. Calculate NEXT subscription period
+                # 9. Grant full-cycle tickets
+                # -----------------------------------------------------
+
+                ticket_grant_count = 0
+                granted_at = timezone.now()
+
+                for subscription_item in subscription_items:
+                    member = subscription_item.member
+                    plan = subscription_item.plan
+
+                    if (
+                        not member
+                        or not plan
+                        or plan.plan_type != "ticket_plan"
+                        or not plan.ticket_type_id
+                        or not plan.ticket_quantity
+                    ):
+                        continue
+
+                    TicketGrant.objects.create(
+                        member=member,
+                        ticket_type=plan.ticket_type,
+                        source=TicketGrant.Source.SUBSCRIPTION,
+                        quantity=plan.ticket_quantity,
+                        expires_at=calculate_ticket_expiration(
+                            plan=plan,
+                            granted_at=granted_at,
+                        ),
+                    )
+                    ticket_grant_count += 1
+
+                # -----------------------------------------------------
+                # 10. Calculate NEXT subscription period
                 # -----------------------------------------------------
 
                 # billing_cycle_start is the period that was just invoiced.
@@ -342,7 +384,7 @@ class CashSubscriptionCycleInvoiceService:
                 )
 
                 # -----------------------------------------------------
-                # 10. Calculate access_until
+                # 11. Calculate access_until
                 # -----------------------------------------------------
 
                 next_access_until = get_access_until(
@@ -363,7 +405,7 @@ class CashSubscriptionCycleInvoiceService:
                     )
 
                 # -----------------------------------------------------
-                # 11. Advance subscription entitlement
+                # 12. Advance subscription entitlement
                 # -----------------------------------------------------
 
                 subscription.current_period_end = next_period_end
@@ -377,7 +419,7 @@ class CashSubscriptionCycleInvoiceService:
                 )
 
                 # -----------------------------------------------------
-                # 12. Email only after successful DB commit
+                # 13. Email only after successful DB commit
                 # -----------------------------------------------------
 
                 transaction.on_commit(
@@ -406,6 +448,7 @@ class CashSubscriptionCycleInvoiceService:
                     "amount_due": total,
                     "invoice_item_count": len(invoice_items),
                     "billing_cycle_key": billing_cycle_key,
+                    "ticket_grant_count": ticket_grant_count,
                     "current_period_end": (
                         subscription.current_period_end.date()
                     ),

@@ -1745,6 +1745,51 @@ def stripe_connected_webhook(request):
                         )
                     )
 
+                    ticket_grant_count = 0
+                    granted_at = timezone.now()
+                    cycle_items = (
+                        SubscriptionItem.objects
+                        .filter(
+                            subscription=sub,
+                            deleted_at__isnull=True,
+                            plan__plan_type="ticket_plan",
+                        )
+                        .select_related("member", "plan", "plan__ticket_type")
+                    )
+
+                    for subscription_item in cycle_items:
+                        member = subscription_item.member
+                        plan = subscription_item.plan
+
+                        if (
+                            not member
+                            or not plan.ticket_type_id
+                            or not plan.ticket_quantity
+                        ):
+                            continue
+
+                        # The webhook event is retried with the same ID.
+                        # Include the item ID so one cycle event can grant
+                        # tickets for several members/plans idempotently.
+                        _, created = TicketGrant.objects.get_or_create(
+                            stripe_event_id=(
+                                f"{event_id}:cycle:{subscription_item.id}"
+                            ),
+                            defaults={
+                                "member": member,
+                                "ticket_type": plan.ticket_type,
+                                "source": TicketGrant.Source.SUBSCRIPTION,
+                                "quantity": plan.ticket_quantity,
+                                "expires_at": calculate_ticket_expiration(
+                                    plan=plan,
+                                    granted_at=granted_at,
+                                ),
+                            },
+                        )
+
+                        if created:
+                            ticket_grant_count += 1
+
                     periods = [
                         line["period"]["end"]
                         for line in invoice.get("lines", {}).get("data", [])
@@ -1782,7 +1827,7 @@ def stripe_connected_webhook(request):
                     "local_invoice=%s stripe_invoice=%s "
                     "period_end=%s access_until=%s "
                     "payment=%s amount_due=%s payment_method=%s "
-                    "original_payment_method=%s",
+                    "original_payment_method=%s ticket_grants=%s",
                     local_invoice.id,
                     invoice["id"],
                     sub.current_period_end,
@@ -1790,7 +1835,8 @@ def stripe_connected_webhook(request):
                     local_payment.id,
                     invoice.get("amount_due", 0),
                     local_invoice.payment_method,
-                                    local_invoice.original_payment_method,
+                    local_invoice.original_payment_method,
+                    ticket_grant_count,
                 )
             
         except CacheLockError:
