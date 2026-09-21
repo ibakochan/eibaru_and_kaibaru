@@ -28,11 +28,13 @@ NOW = now()
 def get_visible_membership_plan_ids(club, request):
     now = timezone.now()
 
-    # Always visible:
-    # every plan that has not been deleted.
+    # Always visible: normal active plans.
+    # scheduled_for_deletion / is_deleted plans are opt-in below,
+    # and only for members who still have a qualifying item.
     visible_plan_ids = set(
         club.membership_plans.filter(
             is_deleted=False,
+            scheduled_for_deletion=False,
         ).values_list("id", flat=True)
     )
 
@@ -42,29 +44,35 @@ def get_visible_membership_plan_ids(club, request):
     user = request.user
 
     # ---------------------------------------------------------
-    # Deleted plans that are still in an active/grace period
+    # Deleted / scheduled-for-deletion plans that this viewer
+    # should still see:
+    #
+    # - access_until is still in the future (grace period), OR
+    # - the item is still fully active (deleted_at and
+    #   access_until both null) because cancellation has not
+    #   finished yet.
     # ---------------------------------------------------------
 
     qs = SubscriptionItem.objects.filter(
         subscription__club=club,
-        plan__is_deleted=True,
-        access_until__gt=now,
+    ).filter(
+        Q(plan__is_deleted=True) | Q(plan__scheduled_for_deletion=True),
+    ).filter(
+        Q(deleted_at__isnull=True, access_until__isnull=True)
+        | Q(access_until__gt=now)
     )
 
-    # Club owner sees deleted plans still used by ANY member.
+    # Club owner sees those plans still used by ANY member.
     if user.id != club.owner_id:
-        # Normal user only sees deleted plans belonging to
-        # their own billing/subscription owner.
+        # Normal user only sees plans belonging to their own
+        # billing/subscription owner.
         qs = qs.filter(
             subscription__owner=user,
         )
 
-    grace_plan_ids = qs.values_list(
-        "plan_id",
-        flat=True,
+    visible_plan_ids.update(
+        qs.values_list("plan_id", flat=True)
     )
-
-    visible_plan_ids.update(grace_plan_ids)
 
     return visible_plan_ids
 
@@ -409,6 +417,8 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
 
             "deleted_at",
             "apply_current_price_to_existing",
+            "is_deleted",
+            "scheduled_for_deletion",
 
             # Plan type
             "plan_type",
