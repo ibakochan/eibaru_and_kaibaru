@@ -1,5 +1,5 @@
-from django.db.models import Q
-from django.utils import timezone
+import calendar
+
 from django.db.models import Q
 from django.utils import timezone
 from django.core.exceptions import ValidationError
@@ -33,7 +33,7 @@ def validate_plan_set(plan_ids, club):
 
     if len(plans_by_id) != len(plan_ids):
         raise ValidationError(
-            "One or more plans are invalid for this club."
+            "選択されたプランの一部がこのクラブでは利用できません。"
         )
 
     bundle_map = get_bundle_map(club)
@@ -87,7 +87,10 @@ def ensure_group_exclusive(subscription, member, plan):
     ).exists()
 
     if conflict:
-        raise ValidationError("Already subscribed in this group")
+        raise ValidationError(
+            "このグループではすでに別のプランを契約しています。"
+            "グループ内では1つのプランのみ契約できます。"
+        )
 
 
 def get_bundle_map(club):
@@ -120,7 +123,10 @@ def validate_group_rule(active_plan_ids, plans_by_id):
         group_counts[plan.group_id] += 1
 
     if any(v > 1 for v in group_counts.values()):
-        raise ValidationError("Only one plan per group allowed")
+        raise ValidationError(
+            "同じグループのプランは同時に契約できません。"
+            "グループ内では1つのプランのみ選択してください。"
+        )
 
 
 def validate_bundle_rule(active_plan_ids, bundle_map):
@@ -150,14 +156,18 @@ def validate_bundle_rule(active_plan_ids, bundle_map):
 
     for b in touched_bundles[1:]:
         if b != bundle_members:
-            raise ValidationError("Cannot subscribe to multiple bundles")
+            raise ValidationError(
+                "セットプランは1つだけ契約できます。"
+                "複数のセットプランを同時に契約することはできません。"
+            )
 
     # prevent partial bundle mixing
     intersection = active & bundle_members
 
     if intersection and len(intersection) != len(bundle_members):
         raise ValidationError(
-            "Cannot mix bundle plan with individual bundle components"
+            "セットプランとその内訳プランを同時に契約することはできません。"
+            "セットプランか個別プランのどちらかを選んでください。"
         )
 
 

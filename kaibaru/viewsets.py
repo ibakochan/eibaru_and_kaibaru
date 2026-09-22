@@ -22,6 +22,7 @@ import stripe
 from django.conf import settings
 from django.db.models import Prefetch
 from django.core.exceptions import ValidationError
+from .user_errors import format_validation_error
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
 from .tasks import delete_membership_plan_task
@@ -776,11 +777,11 @@ class MemberPricingAdjustmentViewSet(viewsets.ModelViewSet):
 
         club = Club.objects.filter(id=club_id, is_deleted=False).first()
         if not club:
-            raise serializers.ValidationError({"club": "Club not found"})
+            raise serializers.ValidationError({"club": "クラブが見つかりません。"})
 
         # permission check (same pattern as your other viewsets)
         if club.owner_id != self.request.user.id:
-            raise serializers.ValidationError({"detail": "Not allowed"})
+            raise serializers.ValidationError({"detail": "この操作を行う権限がありません。"})
 
         member = Member.objects.filter(id=member_id, club=club).first()
         if not member:
@@ -795,7 +796,7 @@ class MemberPricingAdjustmentViewSet(viewsets.ModelViewSet):
         obj = self.get_object()
 
         if obj.club.owner_id != self.request.user.id:
-            raise serializers.ValidationError({"detail": "Not allowed"})
+            raise serializers.ValidationError({"detail": "この操作を行う権限がありません。"})
 
         # optional safety: prevent cross-club reassignment
         serializer.save(club=obj.club)
@@ -805,7 +806,7 @@ class MemberPricingAdjustmentViewSet(viewsets.ModelViewSet):
     # -------------------------
     def perform_destroy(self, instance):
         if instance.club.owner_id != self.request.user.id:
-            raise serializers.ValidationError({"detail": "Not allowed"})
+            raise serializers.ValidationError({"detail": "この操作を行う権限がありません。"})
 
         instance.delete()
 
@@ -829,10 +830,10 @@ class DiscountViewSet(viewsets.ModelViewSet):
         club = Club.objects.filter(id=club_id).first()
 
         if not club:
-            raise serializers.ValidationError({"club": "Club not found."})
+            raise serializers.ValidationError({"club": "クラブが見つかりません。"})
 
         if club.owner != self.request.user:
-            raise serializers.ValidationError({"detail": "Not allowed."})
+            raise serializers.ValidationError({"detail": "この操作を行う権限がありません。"})
 
         serializer.save(club=club)
 
@@ -840,13 +841,13 @@ class DiscountViewSet(viewsets.ModelViewSet):
         discount = self.get_object()
 
         if discount.club.owner != self.request.user:
-            raise serializers.ValidationError({"detail": "Not allowed."})
+            raise serializers.ValidationError({"detail": "この操作を行う権限がありません。"})
 
         serializer.save()
 
     def perform_destroy(self, instance):
         if instance.club.owner != self.request.user:
-            raise serializers.ValidationError({"detail": "Not allowed."})
+            raise serializers.ValidationError({"detail": "この操作を行う権限がありません。"})
 
         instance.delete()
 
@@ -890,12 +891,12 @@ class MembershipPlanViewSet(viewsets.ModelViewSet):
     def perform_destroy(self, instance):
         if self.request.user != instance.club.owner:
             raise serializers.ValidationError(
-                {"detail": "Only owner can delete plans."}
+                {"detail": "プランを削除できるのはオーナーのみです。"}
             )
 
         if would_break_any_bundle(instance):
             raise serializers.ValidationError(
-                "Cannot delete plan because it would leave a bundle with <2 plans."
+                "このプランを削除するとセットプランの内訳が2つ未満になるため、削除できません。先にセットプランを変更してください。"
             )
 
         # ---------------------------------------------------------
@@ -905,8 +906,7 @@ class MembershipPlanViewSet(viewsets.ModelViewSet):
             raise serializers.ValidationError(
                 {
                     "detail": (
-                        "This plan is already deleted or already "
-                        "scheduled for deletion."
+                        "このプランはすでに削除済み、または削除予約済みです。"
                     )
                 }
             )
@@ -981,7 +981,7 @@ class MembershipPlanViewSet(viewsets.ModelViewSet):
         if not subdomain:
             raise serializers.ValidationError({
                 "club_subdomain": (
-                    "This field is required."
+                    "この項目は必須です。"
                 )
             })
 
@@ -992,12 +992,12 @@ class MembershipPlanViewSet(viewsets.ModelViewSet):
 
         if not club:
             raise serializers.ValidationError({
-                "club_subdomain": "Club not found."
+                "club_subdomain": "クラブが見つかりません。"
             })
 
         if self.request.user != club.owner:
             raise serializers.ValidationError({
-                "detail": "Only owner can create plans."
+                "detail": "プランを作成できるのはオーナーのみです。"
             })
 
         name = serializer.validated_data.get(
@@ -1010,13 +1010,13 @@ class MembershipPlanViewSet(viewsets.ModelViewSet):
 
         if not name:
             raise serializers.ValidationError({
-                "name": "Name cannot be empty."
+                "name": "プラン名を入力してください。"
             })
 
         if price is None or price <= 0:
             raise serializers.ValidationError({
                 "price": (
-                    "Price must be greater than 0."
+                    "料金は1円以上にしてください。"
                 )
             })
 
@@ -1068,8 +1068,7 @@ class MembershipPlanViewSet(viewsets.ModelViewSet):
             if not ticket_type:
                 raise serializers.ValidationError({
                     "ticket_type": (
-                        "Ticket plans must specify "
-                        "a ticket type."
+                        "チケットプランでは、発行するチケット種類を選択してください。"
                     )
                 })
 
@@ -1079,8 +1078,7 @@ class MembershipPlanViewSet(viewsets.ModelViewSet):
             ):
                 raise serializers.ValidationError({
                     "ticket_quantity": (
-                        "Ticket quantity must be "
-                        "greater than 0."
+                        "毎月付与するチケット枚数は1以上にしてください。"
                     )
                 })
 
@@ -1095,8 +1093,7 @@ class MembershipPlanViewSet(viewsets.ModelViewSet):
                 ):
                     raise serializers.ValidationError({
                         "ticket_expiration_days": (
-                            "Expiration days must be "
-                            "greater than 0."
+                            "チケットの有効期限日数は1以上にしてください。"
                         )
                     })
 
@@ -1166,7 +1163,7 @@ class MembershipPlanViewSet(viewsets.ModelViewSet):
 
         if self.request.user != club.owner:
             raise serializers.ValidationError({
-                "detail": "Only owner can update plans."
+                "detail": "プランを更新できるのはオーナーのみです。"
             })
 
         # ---------------------------------------------------------
@@ -1185,8 +1182,7 @@ class MembershipPlanViewSet(viewsets.ModelViewSet):
         ):
             raise serializers.ValidationError({
                 "plan_type": (
-                    "Plan type cannot be changed "
-                    "after creation."
+                    "プランの種類は作成後に変更できません。"
                 )
             })
 
@@ -1323,7 +1319,7 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
     
         if not club:
             raise serializers.ValidationError(
-                {"club_subdomain": "Club not found."}
+                {"club_subdomain": "クラブが見つかりません。"}
             )
     
         if not is_family:
@@ -1336,7 +1332,7 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
     
             if existing:
                 raise serializers.ValidationError(
-                    {"detail": "You already have a pending request."}
+                    {"detail": "すでに入会申請を送信しています。承認をお待ちください。"}
                 )
 
         selected_plans = serializer.validated_data.get(
@@ -1368,7 +1364,7 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
             raise serializers.ValidationError(
                 {
                     "already_subscribed_plans": (
-                        "One or more selected plans are invalid."
+                        "選択したプランの一部が無効です。削除済みまたは利用できないプランが含まれています。"
                     )
                 }
             )
@@ -1385,7 +1381,7 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
         except ValidationError as e:
             raise serializers.ValidationError(
                 {
-                    "already_subscribed_plans": str(e)
+                    "already_subscribed_plans": format_validation_error(e)
                 }
             )
 
@@ -1410,7 +1406,7 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
         join_requests = JoinRequest.objects.filter(id__in=ids).select_related("club")
 
         if join_requests.exclude(club__owner_id=request.user.id).exists():
-            return Response({"detail": "Not allowed"}, status=403)
+            return Response({"detail": "この操作を行う権限がありません。"}, status=403)
     
         if not join_requests.exists():
             return Response(
@@ -1506,7 +1502,7 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
         # ❗ validate ownership BEFORE delete
         if join_requests.exclude(club__owner_id=request.user.id).exists():
             return Response(
-                {"detail": "Not allowed for some requests"},
+                {"detail": "一部の申請に対してこの操作を行う権限がありません。"},
                 status=status.HTTP_403_FORBIDDEN
             )
     
@@ -1619,7 +1615,7 @@ class TicketTypeViewSet(viewsets.ModelViewSet):
 
         if not subdomain:
             raise serializers.ValidationError({
-                "club_subdomain": "This field is required."
+                "club_subdomain": "この項目は必須です。"
             })
 
         club = Club.objects.filter(
@@ -1629,12 +1625,12 @@ class TicketTypeViewSet(viewsets.ModelViewSet):
 
         if not club:
             raise serializers.ValidationError({
-                "club_subdomain": "Club not found."
+                "club_subdomain": "クラブが見つかりません。"
             })
 
         if club.owner_id != self.request.user.id:
             raise serializers.ValidationError({
-                "detail": "Only owner can create ticket types."
+                "detail": "チケット種類を作成できるのはオーナーのみです。"
             })
 
         serializer.save(club=club)
@@ -1644,7 +1640,7 @@ class TicketTypeViewSet(viewsets.ModelViewSet):
 
         if ticket_type.club.owner_id != self.request.user.id:
             raise serializers.ValidationError({
-                "detail": "Only owner can update ticket types."
+                "detail": "チケット種類を更新できるのはオーナーのみです。"
             })
 
         serializer.save(club=ticket_type.club)
@@ -1652,7 +1648,7 @@ class TicketTypeViewSet(viewsets.ModelViewSet):
     def perform_destroy(self, instance):
         if instance.club.owner_id != self.request.user.id:
             raise serializers.ValidationError({
-                "detail": "Only owner can delete ticket types."
+                "detail": "チケット種類を削除できるのはオーナーのみです。"
             })
 
         # Don't actually delete it if packages/grants may reference it.
@@ -1714,7 +1710,7 @@ class TicketPackageViewSet(viewsets.ModelViewSet):
 
         if not subdomain:
             raise serializers.ValidationError({
-                "club_subdomain": "This field is required."
+                "club_subdomain": "この項目は必須です。"
             })
 
         club = Club.objects.filter(
@@ -1724,12 +1720,12 @@ class TicketPackageViewSet(viewsets.ModelViewSet):
 
         if not club:
             raise serializers.ValidationError({
-                "club_subdomain": "Club not found."
+                "club_subdomain": "クラブが見つかりません。"
             })
 
         if club.owner_id != self.request.user.id:
             raise serializers.ValidationError({
-                "detail": "Only owner can create ticket packages."
+                "detail": "チケットパッケージを作成できるのはオーナーのみです。"
             })
 
         if not club.stripe_account_id:
@@ -1788,7 +1784,7 @@ class TicketPackageViewSet(viewsets.ModelViewSet):
 
         if package.club.owner_id != self.request.user.id:
             raise serializers.ValidationError({
-                "detail": "Only owner can update ticket packages."
+                "detail": "チケットパッケージを更新できるのはオーナーのみです。"
             })
 
         old_name = package.name
@@ -1873,7 +1869,7 @@ class TicketPackageViewSet(viewsets.ModelViewSet):
     def perform_destroy(self, instance):
         if instance.club.owner_id != self.request.user.id:
             raise serializers.ValidationError({
-                "detail": "Only owner can delete ticket packages."
+                "detail": "チケットパッケージを削除できるのはオーナーのみです。"
             })
     
         instance.active = False
@@ -2197,17 +2193,17 @@ class LessonViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         subdomain = self.request.data.get("club_subdomain")
         if not subdomain:
-            raise serializers.ValidationError({"club_subdomain": "This field is required."})
+            raise serializers.ValidationError({"club_subdomain": "この項目は必須です。"})
 
         club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
         if not club:
-            raise serializers.ValidationError({"club_subdomain": "Club not found."})
+            raise serializers.ValidationError({"club_subdomain": "クラブが見つかりません。"})
         
         section_id = self.request.data.get("section_id")
 
         if section_id is None:
             raise serializers.ValidationError(
-                {"section_id": "This field is required."}
+                {"section_id": "この項目は必須です。"}
             )
         instructor = None
         instructor_id = self.request.data.get("instructor_id")

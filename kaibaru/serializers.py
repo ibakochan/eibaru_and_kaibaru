@@ -96,12 +96,12 @@ class MemberPricingAdjustmentSerializer(serializers.ModelSerializer):
 
     def validate_value(self, value):
         if value < 0:
-            raise serializers.ValidationError("value must be >= 0")
+            raise serializers.ValidationError("値は0以上にしてください。")
         return value
 
     def validate(self, data):
         if data["discount_type"] == "percentage" and data["value"] > 100:
-            raise serializers.ValidationError("percentage cannot exceed 100")
+            raise serializers.ValidationError("割引率は100%以下にしてください。")
         return data
 
 
@@ -442,7 +442,7 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
 
         if not club:
             raise serializers.ValidationError({
-                "club_subdomain": "Club is required."
+                "club_subdomain": "クラブの指定が必要です。"
             })
 
         bundled = attrs.get("bundled_plans")
@@ -469,9 +469,9 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
 
             elif len(bundled) == 1:
                 raise serializers.ValidationError({
-                    "bundled_plans": (
-                        "A bundle must contain at least 2 plans."
-                    )
+                        "bundled_plans": (
+                            "セットプランには2つ以上のプランが必要です。"
+                        )
                 })
 
             else:
@@ -485,7 +485,7 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
                     MembershipPlan.PlanType.TICKET_PLAN,
                 ]:
                     raise serializers.ValidationError({
-                        "plan_type": "Invalid plan type."
+                        "plan_type": "プランの種類が正しくありません。"
                     })
 
             # -----------------------------------------------------
@@ -502,7 +502,7 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
                 if not attrs.get("ticket_type"):
                     raise serializers.ValidationError({
                         "ticket_type": (
-                            "Ticket plans must specify a ticket type."
+                            "チケットプランでは、発行するチケット種類を選択してください。"
                         )
                     })
 
@@ -513,7 +513,7 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
                 if not ticket_quantity or ticket_quantity <= 0:
                     raise serializers.ValidationError({
                         "ticket_quantity": (
-                            "Ticket quantity must be greater than 0."
+                            "毎月付与するチケット枚数は1以上にしてください。"
                         )
                     })
 
@@ -533,7 +533,7 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
                     if not expiration_days or expiration_days <= 0:
                         raise serializers.ValidationError({
                             "ticket_expiration_days": (
-                                "Expiration days must be greater than 0."
+                                "チケットの有効期限日数は1以上にしてください。"
                             )
                         })
                 else:
@@ -562,7 +562,7 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
                 if len(new_set) < 2:
                     raise serializers.ValidationError({
                         "bundled_plans": (
-                            "A bundle must contain at least 2 plans."
+                            "セットプランには2つ以上のプランが必要です。"
                         )
                     })
 
@@ -580,8 +580,7 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
                 if invalid_plans:
                     raise serializers.ValidationError({
                         "bundled_plans": (
-                            "All bundled plans must belong to this "
-                            "club and be active."
+                            "セットに含めるプランは、このクラブの有効なプランである必要があります。"
                         )
                     })
 
@@ -594,7 +593,7 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
                 if nested_bundles.exists():
                     raise serializers.ValidationError({
                         "bundled_plans": (
-                            "Bundles cannot contain other bundles."
+                            "セットプランの中に、別のセットプランを含めることはできません。"
                         )
                     })
 
@@ -615,7 +614,7 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
                     if existing_set == new_set:
                         raise serializers.ValidationError({
                             "bundled_plans": (
-                                "An identical bundle already exists."
+                                "同じ組み合わせのセットプランがすでに存在します。"
                             )
                         })
 
@@ -637,7 +636,7 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
         ):
             raise serializers.ValidationError({
                 "plan_type": (
-                    "Plan type cannot be changed after creation."
+                    "プランの種類は作成後に変更できません。"
                 )
             })
 
@@ -660,7 +659,7 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
                 if len(bundled) < 2:
                     raise serializers.ValidationError({
                         "bundled_plans": (
-                            "A bundle must contain at least 2 plans."
+                            "セットプランには2つ以上のプランが必要です。"
                         )
                     })
 
@@ -669,8 +668,7 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
                 if len(bundled) > 0:
                     raise serializers.ValidationError({
                         "bundled_plans": (
-                            "Only bundle plans can contain "
-                            "bundled plans."
+                            "セットプラン以外に、他のプランを含めることはできません。"
                         )
                     })
 
@@ -688,8 +686,7 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
                 if self.instance.id in new_set:
                     raise serializers.ValidationError({
                         "bundled_plans": (
-                            "A plan cannot include itself "
-                            "in a bundle."
+                            "プラン自身をセットの内訳に含めることはできません。"
                         )
                     })
 
@@ -706,8 +703,7 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
                 if invalid_plans:
                     raise serializers.ValidationError({
                         "bundled_plans": (
-                            "All bundled plans must belong to "
-                            "this club and be active."
+                            "セットに含めるプランは、このクラブの有効なプランである必要があります。"
                         )
                     })
 
@@ -721,7 +717,7 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
                 if nested_bundles.exists():
                     raise serializers.ValidationError({
                         "bundled_plans": (
-                            "Bundles cannot contain other bundles."
+                            "セットプランの中に、別のセットプランを含めることはできません。"
                         )
                     })
 
@@ -743,7 +739,7 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
                     if existing_set == new_set:
                         raise serializers.ValidationError({
                             "bundled_plans": (
-                                "An identical bundle already exists."
+                                "同じ組み合わせのセットプランがすでに存在します。"
                             )
                         })
 
@@ -781,14 +777,14 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
             if not ticket_type:
                 raise serializers.ValidationError({
                     "ticket_type": (
-                        "Ticket plans must specify a ticket type."
+                        "チケットプランでは、発行するチケット種類を選択してください。"
                     )
                 })
 
             if not ticket_quantity or ticket_quantity <= 0:
                 raise serializers.ValidationError({
                     "ticket_quantity": (
-                        "Ticket quantity must be greater than 0."
+                        "毎月付与するチケット枚数は1以上にしてください。"
                     )
                 })
 
@@ -800,7 +796,7 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
                 if not expiration_days or expiration_days <= 0:
                     raise serializers.ValidationError({
                         "ticket_expiration_days": (
-                            "Expiration days must be greater than 0."
+                            "チケットの有効期限日数は1以上にしてください。"
                         )
                     })
 
@@ -817,8 +813,7 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
             ):
                 raise serializers.ValidationError({
                     "plan_type": (
-                        "Only ticket plans can have "
-                        "ticket configuration."
+                        "チケット設定はチケットプランのみで利用できます。"
                     )
                 })
 
@@ -924,8 +919,7 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
                     if default_plan.group_id != group.id:
                         raise serializers.ValidationError({
                             "default_plan_id": (
-                                "Default plan must belong "
-                                "to the group."
+                                "デフォルトプランは、同じグループに属するプランを選んでください。"
                             )
                         })
 
@@ -1127,8 +1121,7 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
                 ):
                     raise serializers.ValidationError({
                         "default_plan_id": (
-                            "Default plan must belong "
-                            "to the group."
+                            "デフォルトプランは、同じグループに属するプランを選んでください。"
                         )
                     })
 
@@ -1699,7 +1692,7 @@ class LessonSerializer(serializers.ModelSerializer):
 
         if not club:
             raise serializers.ValidationError({
-                "club": "Club is required."
+                "club": "クラブの指定が必要です。"
             })
 
         allowed_plans = attrs.get(
@@ -1734,8 +1727,7 @@ class LessonSerializer(serializers.ModelSerializer):
         if invalid_plans:
             raise serializers.ValidationError({
                 "allowed_plans": (
-                    "All selected plans must belong to the same club "
-                    "as the lesson."
+                    "レッスンの対象プランは、このクラブのプランのみ選択できます。"
                 )
             })
 
@@ -1748,8 +1740,7 @@ class LessonSerializer(serializers.ModelSerializer):
         if bundle_plans:
             raise serializers.ValidationError({
                 "allowed_plans": (
-                    "Bundle plans cannot be used as required plans "
-                    "for lessons."
+                    "セットプランはレッスンの対象プランに指定できません。内訳の個別プランを選んでください。"
                 )
             })
 
@@ -1761,7 +1752,7 @@ class LessonSerializer(serializers.ModelSerializer):
         ):
             raise serializers.ValidationError({
                 "reservation_limit": (
-                    "Reservation limit must be at least 1."
+                    "予約上限は1以上にしてください。"
                 )
             })
 
@@ -1769,8 +1760,7 @@ class LessonSerializer(serializers.ModelSerializer):
         if reservation_only and allowed_plans:
             raise serializers.ValidationError({
                 "allowed_plans": (
-                    "Reservation-only lessons cannot have "
-                    "membership plans."
+                    "予約専用レッスンには会員プランを設定できません。"
                 )
             })
 
@@ -2255,7 +2245,7 @@ class TicketTypeSerializer(serializers.ModelSerializer):
 
         if not club:
             raise serializers.ValidationError({
-                "club_subdomain": "Club is required."
+                "club_subdomain": "クラブの指定が必要です。"
             })
 
         eligible_plans = attrs.get(
@@ -2358,7 +2348,7 @@ class TicketPackageSerializer(serializers.ModelSerializer):
 
         if not club:
             raise serializers.ValidationError({
-                "club_subdomain": "Club is required."
+                "club_subdomain": "クラブの指定が必要です。"
             })
 
         ticket_type = attrs.get(

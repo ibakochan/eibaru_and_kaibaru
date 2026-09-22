@@ -74,8 +74,7 @@ def get_or_create_mutation_strict(*, subscription, item, mutation_type, payload=
 
             # ❌ same item/subscription but different action → BLOCK HARD
             raise Exception(
-                f"Conflicting mutation in progress: "
-                f"{existing.type} vs {mutation_type}"
+                "別の変更処理が進行中です。完了してから再度お試しください。"
             )
 
         mutation = SubscriptionMutation.objects.create(

@@ -13,6 +13,11 @@ from datetime import datetime, timezone as dt_timezone
 from django.utils import timezone
 import calendar
 import logging
+from django.core.exceptions import ValidationError
+from .user_errors import (
+    json_validation_error_response,
+    json_validation_errors,
+)
 from django.core.cache import cache
 
 from django.db import transaction
@@ -108,11 +113,13 @@ def reconcile_subscription_mutations_manual(request, subscription_id):
     except CacheLockError:
         return JsonResponse(
             {
-                "error": "Subscription is currently being reconciled"
+                "error": "この契約は現在同期処理中です。しばらくしてから再度お試しください。"
             },
             status=429
         )
 
+    except ValidationError as e:
+        return json_validation_error_response(e)
     except Exception as e:
         logger.exception(
             "Manual mutation reconciliation failed subscription=%s",
@@ -141,6 +148,8 @@ def reconcile_checkout_subscriptions_manual(request):
     try:
         CheckoutSubscriptionReconciler.reconcile_recent_checkouts()
 
+    except ValidationError as e:
+        return json_validation_error_response(e)
     except Exception as e:
         logger.exception(
             "Manual checkout reconciliation failed"
@@ -173,7 +182,7 @@ def create_checkout_session(request, club_id):
         sub = stripe.Subscription.retrieve(club.stripe_subscription_id)
 
         if sub.status in ["active", "trialing", "past_due", "unpaid", "incomplete"]:
-            return JsonResponse({"error": "Already subscribed"}, status=400)
+            return JsonResponse({"error": "すでに契約済みです。"}, status=400)
        
 
     if not club.stripe_customer_id:
@@ -220,7 +229,7 @@ def unsubscribe(request, club_id):
         return HttpResponseForbidden()
 
     if not club.stripe_subscription_id:
-        return JsonResponse({"error": "No subscription"}, status=400)
+        return JsonResponse({"error": "契約がありません。"}, status=400)
 
     sub = stripe.Subscription.modify(
         club.stripe_subscription_id,
@@ -271,6 +280,7 @@ def resume_club_subscription(request, club_id):
 
 @login_required
 @require_POST
+@json_validation_errors
 def change_member_plan(request, item_id, new_plan_id):
 
     item = get_object_or_404(
@@ -293,7 +303,7 @@ def change_member_plan(request, item_id, new_plan_id):
 
     if subscription.billing_method != "stripe":
         return JsonResponse(
-            {"error": "Stripe subscription must use stripe operation"},
+            {"error": "クレジットカード契約の操作は、クレジットカード用の手続きから行ってください。"},
             status=400
         )
 
@@ -362,6 +372,8 @@ def change_member_plan(request, item_id, new_plan_id):
             status=409
         )
 
+    except ValidationError as e:
+        return json_validation_error_response(e)
     except Exception as e:
         logger.error(f"Plan change failed for item {item.id}: {e}")
         return JsonResponse({"error": str(e)}, status=500)
@@ -375,6 +387,7 @@ def change_member_plan(request, item_id, new_plan_id):
 
 @login_required
 @require_POST
+@json_validation_errors
 def cancel_member_subscription(request, item_id):
 
     item = get_object_or_404(
@@ -402,7 +415,7 @@ def cancel_member_subscription(request, item_id):
 
     if subscription.billing_method != "stripe":
         return JsonResponse(
-            {"error": "Stripe subscription must use stripe operation"},
+            {"error": "クレジットカード契約の操作は、クレジットカード用の手続きから行ってください。"},
             status=400
         )
 
@@ -439,6 +452,8 @@ def cancel_member_subscription(request, item_id):
             status=409
         )
     
+    except ValidationError as e:
+        return json_validation_error_response(e)
     except Exception as e:
         logger.error(f"Stripe delete failed for item {item.id}: {e}")
         return JsonResponse({"error": str(e)}, status=500)
@@ -454,6 +469,7 @@ def cancel_member_subscription(request, item_id):
 
 @login_required
 @require_POST
+@json_validation_errors
 def resume_member_subscription(request, item_id):
     item = get_object_or_404(
         SubscriptionItem,
@@ -503,7 +519,7 @@ def resume_member_subscription(request, item_id):
 
     if subscription.billing_method != "stripe":
         return JsonResponse(
-            {"error": "Stripe subscription must use stripe operation"},
+            {"error": "クレジットカード契約の操作は、クレジットカード用の手続きから行ってください。"},
             status=400
         )
 
@@ -549,6 +565,8 @@ def resume_member_subscription(request, item_id):
             status=409
         )
 
+    except ValidationError as e:
+        return json_validation_error_response(e)
     except Exception as e:
         logger.error(f"Failed to resume Stripe item {item.id}: {e}")
         return JsonResponse({"error": str(e)}, status=500)
@@ -564,6 +582,7 @@ def resume_member_subscription(request, item_id):
 
 @login_required
 @require_POST
+@json_validation_errors
 def cancel_member_plan_change(request, new_item_id):
     new_item = get_object_or_404(
         SubscriptionItem,
@@ -599,7 +618,7 @@ def cancel_member_plan_change(request, new_item_id):
 
     if subscription.billing_method != "stripe":
         return JsonResponse(
-            {"error": "Stripe subscription must use stripe operation"},
+            {"error": "クレジットカード契約の操作は、クレジットカード用の手続きから行ってください。"},
             status=400
         )
 
@@ -632,6 +651,8 @@ def cancel_member_plan_change(request, new_item_id):
             status=409
         )
 
+    except ValidationError as e:
+        return json_validation_error_response(e)
     except Exception as e:
         logger.error(f"Cancel plan change failed {new_item.id}: {e}")
         return JsonResponse({"error": str(e)}, status=500)
@@ -647,6 +668,7 @@ def cancel_member_plan_change(request, new_item_id):
 
 @login_required
 @require_POST
+@json_validation_errors
 def change_cash_member_plan(request, item_id, new_plan_id):
 
     item = get_object_or_404(
@@ -670,7 +692,7 @@ def change_cash_member_plan(request, item_id, new_plan_id):
 
     if subscription.billing_method == "stripe":
         return JsonResponse(
-            {"error": "Non Stripe subscription can't use Stripe operation"},
+            {"error": "現金払いの契約では、クレジットカード用の手続きは使えません。"},
             status=400
         )
 
@@ -764,6 +786,8 @@ def change_cash_member_plan(request, item_id, new_plan_id):
         )
 
 
+    except ValidationError as e:
+        return json_validation_error_response(e)
     except Exception as e:
 
         logger.error(
@@ -788,6 +812,7 @@ def change_cash_member_plan(request, item_id, new_plan_id):
 
 @login_required
 @require_POST
+@json_validation_errors
 def cancel_cash_member_subscription(request, item_id):
 
     item = get_object_or_404(
@@ -824,7 +849,7 @@ def cancel_cash_member_subscription(request, item_id):
 
     if subscription.billing_method == "stripe":
         return JsonResponse(
-            {"error": "Non Stripe subscription can't use Stripe operation"},
+            {"error": "現金払いの契約では、クレジットカード用の手続きは使えません。"},
             status=400
         )
 
@@ -870,6 +895,8 @@ def cancel_cash_member_subscription(request, item_id):
         )
 
 
+    except ValidationError as e:
+        return json_validation_error_response(e)
     except Exception as e:
 
         logger.error(
@@ -893,6 +920,7 @@ def cancel_cash_member_subscription(request, item_id):
 
 @login_required
 @require_POST
+@json_validation_errors
 def resume_cash_member_subscription(request, item_id):
 
     item = get_object_or_404(
@@ -960,7 +988,7 @@ def resume_cash_member_subscription(request, item_id):
     if subscription.billing_method == "stripe":
 
         return JsonResponse(
-            {"error": "Non Stripe subscription can't use Stripe operation"},
+            {"error": "現金払いの契約では、クレジットカード用の手続きは使えません。"},
             status=400
         )
 
@@ -1009,6 +1037,8 @@ def resume_cash_member_subscription(request, item_id):
         )
 
 
+    except ValidationError as e:
+        return json_validation_error_response(e)
     except Exception as e:
 
         logger.error(
@@ -1033,6 +1063,7 @@ def resume_cash_member_subscription(request, item_id):
 
 @login_required
 @require_POST
+@json_validation_errors
 def cancel_cash_member_plan_change(request, new_item_id):
 
     new_item = get_object_or_404(
@@ -1075,7 +1106,7 @@ def cancel_cash_member_plan_change(request, new_item_id):
     if subscription.billing_method == "stripe":
 
         return JsonResponse(
-            {"error": "Non Stripe subscription can't use Stripe operation"},
+            {"error": "現金払いの契約では、クレジットカード用の手続きは使えません。"},
             status=400
         )
 
@@ -1116,6 +1147,8 @@ def cancel_cash_member_plan_change(request, new_item_id):
         )
 
 
+    except ValidationError as e:
+        return json_validation_error_response(e)
     except Exception as e:
 
         logger.error(
@@ -1146,7 +1179,7 @@ def create_stripe_account_link(request, club_id):
     club = get_object_or_404(Club, id=club_id, is_deleted=False)
 
     if club.owner != request.user:
-        return JsonResponse({"error": "Not allowed"}, status=403)
+        return JsonResponse({"error": "この操作を行う権限がありません。"}, status=403)
 
     
 
@@ -1169,19 +1202,20 @@ def create_stripe_account_link(request, club_id):
 
 @login_required
 @require_POST
+@json_validation_errors
 def create_member_checkout_session(request, club_id, plan_id):
     
 
     club = get_object_or_404(Club, id=club_id, is_deleted=False)
     if club.subscription_mode not in ["regular", "monthly"]:
-        return JsonResponse({"error": "Invalid billing configuration"}, status=400)
+        return JsonResponse({"error": "課金設定が正しくありません。月謝または定期課金を設定してください。"}, status=400)
 
 
     if not club.stripe_anchor_date:
-        return JsonResponse({"error": "Billing anchor not configured"}, status=400)
+        return JsonResponse({"error": "請求日が設定されていません。クラブの課金設定を確認してください。"}, status=400)
 
     if not club.stripe_account_id:
-        return JsonResponse({"error": "Club has no Stripe account"}, status=400)
+        return JsonResponse({"error": "このクラブはまだクレジットカード決済（Stripe）に接続されていません。"}, status=400)
 
     member_id = request.POST.get("member_id")
     member = get_object_or_404(Member, id=member_id, club=club)
@@ -1191,7 +1225,7 @@ def create_member_checkout_session(request, club_id, plan_id):
     
     
     if member.owner != request.user:
-        return JsonResponse({"error": "Not allowed"}, status=403)
+        return JsonResponse({"error": "この操作を行う権限がありません。"}, status=403)
 
     billing_user = member.owner
 
@@ -1199,7 +1233,7 @@ def create_member_checkout_session(request, club_id, plan_id):
 
     if not billing_user:
         return JsonResponse(
-            {"error": "No billing owner set for this member"},
+            {"error": "この会員の支払い担当者が設定されていません。"},
             status=400
         )
 
@@ -1212,7 +1246,7 @@ def create_member_checkout_session(request, club_id, plan_id):
         active=True,
     )
     if not plan.stripe_price_id:
-        return JsonResponse({"error": "Plan not configured correctly"}, status=400)
+        return JsonResponse({"error": "このプランの決済設定が完了していません。"}, status=400)
 
     
     
@@ -1227,7 +1261,7 @@ def create_member_checkout_session(request, club_id, plan_id):
     
     if existing:
         return JsonResponse(
-            {"error": "Already has this plan (active or grace period)"},
+            {"error": "このプランはすでに契約中、または解約後の利用期間中です。"},
             status=400
         )
 
@@ -1312,6 +1346,7 @@ def create_member_checkout_session(request, club_id, plan_id):
 
 @login_required
 @require_POST
+@json_validation_errors
 def create_member_cash_subscription(
     request,
     club_id,
@@ -1330,14 +1365,14 @@ def create_member_cash_subscription(
         "monthly",
     ]:
         return JsonResponse(
-            {"error": "Invalid billing configuration"},
+            {"error": "課金設定が正しくありません。月謝または定期課金を設定してください。"},
             status=400
         )
 
 
     if not club.stripe_anchor_date:
         return JsonResponse(
-            {"error": "Billing anchor not configured"},
+            {"error": "請求日が設定されていません。クラブの課金設定を確認してください。"},
             status=400
         )
 
@@ -1353,7 +1388,7 @@ def create_member_cash_subscription(
 
     if member.owner != request.user:
         return JsonResponse(
-            {"error": "Not allowed"},
+            {"error": "この操作を行う権限がありません。"},
             status=403
         )
 
@@ -1381,7 +1416,7 @@ def create_member_cash_subscription(
         return JsonResponse(
             {
                 "error":
-                "Already has this plan (active or grace period)"
+                "このプランはすでに契約中、または解約後の利用期間中です。"
             },
             status=400
         )
@@ -1496,6 +1531,8 @@ def create_member_cash_subscription(
         )
 
 
+    except ValidationError as e:
+        return json_validation_error_response(e)
     except Exception as e:
 
         logger.exception(
@@ -1516,18 +1553,19 @@ def create_member_cash_subscription(
 
 @login_required
 @require_POST
+@json_validation_errors
 def add_plan_to_subscription_view(request, club_id, plan_id):
 
     club = get_object_or_404(Club, id=club_id, is_deleted=False)
 
     if club.subscription_mode not in ["regular", "monthly"]:
-        return JsonResponse({"error": "Invalid billing configuration"}, status=400)
+        return JsonResponse({"error": "課金設定が正しくありません。月謝または定期課金を設定してください。"}, status=400)
 
     if not club.stripe_anchor_date:
-        return JsonResponse({"error": "Billing anchor not configured"}, status=400)
+        return JsonResponse({"error": "請求日が設定されていません。クラブの課金設定を確認してください。"}, status=400)
 
     if not club.stripe_account_id:
-        return JsonResponse({"error": "Club has no Stripe account"}, status=400)
+        return JsonResponse({"error": "このクラブはまだクレジットカード決済（Stripe）に接続されていません。"}, status=400)
 
     member_id = request.POST.get("member_id")
     member = get_object_or_404(Member, id=member_id, club=club)
@@ -1535,7 +1573,7 @@ def add_plan_to_subscription_view(request, club_id, plan_id):
     today = timezone.localtime().date()
 
     if member.owner != request.user:
-        return JsonResponse({"error": "Not allowed"}, status=403)
+        return JsonResponse({"error": "この操作を行う権限がありません。"}, status=403)
 
     billing_user = member.owner
 
@@ -1543,7 +1581,7 @@ def add_plan_to_subscription_view(request, club_id, plan_id):
 
     if not billing_user:
         return JsonResponse(
-            {"error": "No billing owner set for this member"},
+            {"error": "この会員の支払い担当者が設定されていません。"},
             status=400
         )
 
@@ -1557,7 +1595,7 @@ def add_plan_to_subscription_view(request, club_id, plan_id):
     )
 
     if not plan.stripe_price_id:
-        return JsonResponse({"error": "Plan not configured correctly"}, status=400)
+        return JsonResponse({"error": "このプランの決済設定が完了していません。"}, status=400)
 
     existing = SubscriptionItem.objects.filter(
         member=member,
@@ -1569,7 +1607,7 @@ def add_plan_to_subscription_view(request, club_id, plan_id):
 
     if existing:
         return JsonResponse(
-            {"error": "Already has this plan (active or grace period)"},
+            {"error": "このプランはすでに契約中、または解約後の利用期間中です。"},
             status=400
         )
 
@@ -1582,7 +1620,7 @@ def add_plan_to_subscription_view(request, club_id, plan_id):
     
     if not sub:
         return JsonResponse(
-            {"error": "Stripe subscription not found"},
+            {"error": "クレジットカード契約が見つかりません。"},
             status=400
         )
 
@@ -1642,6 +1680,8 @@ def add_plan_to_subscription_view(request, club_id, plan_id):
             status=409
         )
     
+    except ValidationError as e:
+        return json_validation_error_response(e)
     except Exception as e:
         logger.error(
             f"Add plan failed for member {member.id}, plan {plan.id}: {e}"
@@ -1659,6 +1699,7 @@ def add_plan_to_subscription_view(request, club_id, plan_id):
 
 @login_required
 @require_POST
+@json_validation_errors
 def add_plan_to_cash_subscription_view(
     request,
     club_id,
@@ -1677,7 +1718,7 @@ def add_plan_to_cash_subscription_view(
         "monthly",
     ]:
         return JsonResponse(
-            {"error": "Invalid billing configuration"},
+            {"error": "課金設定が正しくありません。月謝または定期課金を設定してください。"},
             status=400
         )
 
@@ -1695,7 +1736,7 @@ def add_plan_to_cash_subscription_view(
     if member.owner != request.user:
 
         return JsonResponse(
-            {"error": "Not allowed"},
+            {"error": "この操作を行う権限がありません。"},
             status=403
         )
 
@@ -1726,7 +1767,7 @@ def add_plan_to_cash_subscription_view(
         return JsonResponse(
             {
                 "error":
-                "Already has this plan"
+                "このプランはすでに契約中です。"
             },
             status=400
         )
@@ -1749,7 +1790,7 @@ def add_plan_to_cash_subscription_view(
 
     if not subscription:
         return JsonResponse(
-            {"error": "Cash subscription not found"},
+            {"error": "現金払いの契約が見つかりません。"},
             status=400
         )
 
@@ -1805,6 +1846,8 @@ def add_plan_to_cash_subscription_view(
         )
 
 
+    except ValidationError as e:
+        return json_validation_error_response(e)
     except Exception as e:
 
         logger.exception(
@@ -1823,6 +1866,7 @@ def add_plan_to_cash_subscription_view(
 
 @login_required
 @require_POST
+@json_validation_errors
 def migrate_cash_subscription_to_stripe(request, club_id):
   
     """
@@ -1855,13 +1899,13 @@ def migrate_cash_subscription_to_stripe(request, club_id):
         "monthly",
     ]:
         return JsonResponse(
-            {"error": "Invalid billing configuration"},
+            {"error": "課金設定が正しくありません。月謝または定期課金を設定してください。"},
             status=400,
         )
 
     if not club.stripe_account_id:
         return JsonResponse(
-            {"error": "Club has no Stripe account"},
+            {"error": "このクラブはまだクレジットカード決済（Stripe）に接続されていません。"},
             status=400,
         )
 
@@ -1873,7 +1917,7 @@ def migrate_cash_subscription_to_stripe(request, club_id):
 
     if not member_id:
         return JsonResponse(
-            {"error": "member_id is required"},
+            {"error": "会員を選択してください。"},
             status=400,
         )
 
@@ -1894,7 +1938,7 @@ def migrate_cash_subscription_to_stripe(request, club_id):
 
     if member.owner != request.user:
         return JsonResponse(
-            {"error": "Not allowed"},
+            {"error": "この操作を行う権限がありません。"},
             status=403,
         )
 
@@ -1902,7 +1946,7 @@ def migrate_cash_subscription_to_stripe(request, club_id):
 
     if not billing_user:
         return JsonResponse(
-            {"error": "No billing owner set for this member"},
+            {"error": "この会員の支払い担当者が設定されていません。"},
             status=400,
         )
 
@@ -1924,7 +1968,7 @@ def migrate_cash_subscription_to_stripe(request, club_id):
 
     if not subscription:
         return JsonResponse(
-            {"error": "No subscription found"},
+            {"error": "契約が見つかりません。"},
             status=400,
         )
 
@@ -1936,8 +1980,7 @@ def migrate_cash_subscription_to_stripe(request, club_id):
         return JsonResponse(
             {
                 "error": (
-                    "Only cash subscriptions can be "
-                    "migrated to Stripe"
+                    "現金払いの契約のみ、クレジットカード決済へ変更できます。"
                 )
             },
             status=400,
@@ -1951,8 +1994,7 @@ def migrate_cash_subscription_to_stripe(request, club_id):
         return JsonResponse(
             {
                 "error": (
-                    "This subscription already has a "
-                    "Stripe subscription"
+                    "この契約はすでにクレジットカード決済に接続されています。"
                 )
             },
             status=400,
@@ -2007,8 +2049,7 @@ def migrate_cash_subscription_to_stripe(request, club_id):
         return JsonResponse(
             {
                 "error": (
-                    "Cannot migrate a subscription "
-                    "with no active plans"
+                    "有効なプランがない契約は、クレジットカード決済へ変更できません。"
                 )
             },
             status=400,
@@ -2027,8 +2068,7 @@ def migrate_cash_subscription_to_stripe(request, club_id):
         return JsonResponse(
             {
                 "error": (
-                    "This member does not have an active "
-                    "item on the subscription"
+                    "この会員は現在の契約に有効なプランを持っていません。"
                 )
             },
             status=400,
@@ -2068,8 +2108,8 @@ def migrate_cash_subscription_to_stripe(request, club_id):
             return JsonResponse(
                 {
                     "error": (
-                        "Stripe migration is already "
-                        "being processed"
+                        "クレジットカードへの変更はすでに処理中です。"
+                        "完了するまでお待ちください。"
                     )
                 },
                 status=400,
@@ -2078,8 +2118,7 @@ def migrate_cash_subscription_to_stripe(request, club_id):
         return JsonResponse(
             {
                 "error": (
-                    "An existing Stripe subscription "
-                    "already exists for this club"
+                    "このクラブにはすでにクレジットカード契約があります。"
                 )
             },
             status=400,
@@ -2103,8 +2142,7 @@ def migrate_cash_subscription_to_stripe(request, club_id):
                 return JsonResponse(
                     {
                         "error": (
-                            "Subscription is no longer "
-                            "a cash subscription"
+                            "この契約はすでに現金払いではありません。"
                         )
                     },
                     status=400,
@@ -2114,8 +2152,7 @@ def migrate_cash_subscription_to_stripe(request, club_id):
                 return JsonResponse(
                     {
                         "error": (
-                            "Subscription already has "
-                            "a Stripe subscription"
+                            "この契約はすでにクレジットカード決済に接続されています。"
                         )
                     },
                     status=400,
@@ -2165,6 +2202,8 @@ def migrate_cash_subscription_to_stripe(request, club_id):
             status=400,
         )
 
+    except ValidationError as e:
+        return json_validation_error_response(e)
     except Exception as e:
 
         logger.exception(
@@ -2182,6 +2221,7 @@ def migrate_cash_subscription_to_stripe(request, club_id):
 
 @login_required
 @require_POST
+@json_validation_errors
 def change_stripe_payment_method(request, club_id):
 
     # ---------------------------------------------------------
@@ -2205,13 +2245,13 @@ def change_stripe_payment_method(request, club_id):
         "monthly",
     ]:
         return JsonResponse(
-            {"error": "Invalid billing configuration"},
+            {"error": "課金設定が正しくありません。月謝または定期課金を設定してください。"},
             status=400,
         )
 
     if not club.stripe_account_id:
         return JsonResponse(
-            {"error": "Club has no Stripe account"},
+            {"error": "このクラブはまだクレジットカード決済（Stripe）に接続されていません。"},
             status=400,
         )
 
@@ -2225,7 +2265,7 @@ def change_stripe_payment_method(request, club_id):
 
     if not member_id:
         return JsonResponse(
-            {"error": "member_id is required"},
+            {"error": "会員を選択してください。"},
             status=400,
         )
 
@@ -2237,7 +2277,7 @@ def change_stripe_payment_method(request, club_id):
 
     if member.owner != request.user:
         return JsonResponse(
-            {"error": "Not allowed"},
+            {"error": "この操作を行う権限がありません。"},
             status=403,
         )
 
@@ -2245,7 +2285,7 @@ def change_stripe_payment_method(request, club_id):
 
     if not billing_user:
         return JsonResponse(
-            {"error": "No billing owner set for this member"},
+            {"error": "この会員の支払い担当者が設定されていません。"},
             status=400,
         )
 
@@ -2265,7 +2305,7 @@ def change_stripe_payment_method(request, club_id):
 
     if not subscription:
         return JsonResponse(
-            {"error": "No subscription found"},
+            {"error": "契約が見つかりません。"},
             status=400,
         )
 
@@ -2277,8 +2317,7 @@ def change_stripe_payment_method(request, club_id):
         return JsonResponse(
             {
                 "error": (
-                    "Only Stripe subscriptions can "
-                    "change their payment method"
+                    "クレジットカード契約のみ、支払い方法を変更できます。"
                 )
             },
             status=400,
@@ -2292,8 +2331,7 @@ def change_stripe_payment_method(request, club_id):
         return JsonResponse(
             {
                 "error": (
-                    "This subscription does not have "
-                    "a Stripe subscription"
+                    "この契約にはクレジットカード情報がありません。"
                 )
             },
             status=400,
@@ -2392,7 +2430,7 @@ def change_stripe_payment_method(request, club_id):
         )
 
         return JsonResponse(
-            {"error": "Stripe customer mismatch"},
+            {"error": "Stripeの顧客情報が一致しません。サポートにお問い合わせください。"},
             status=400,
         )
 
@@ -2452,7 +2490,7 @@ def stripe_oauth_callback(request):
     club = get_object_or_404(Club, id=state, is_deleted=False)
 
     if club.owner != request.user:
-        return JsonResponse({"error": "Not allowed"}, status=403)
+        return JsonResponse({"error": "この操作を行う権限がありません。"}, status=403)
 
     if club.stripe_account_id and club.stripe_onboarding_completed:
         return JsonResponse({"message": "Stripe already connected"})
@@ -2468,11 +2506,11 @@ def stripe_oauth_callback(request):
         stripe_account_id = resp["stripe_user_id"]
 
         if not stripe_account_id:
-            return JsonResponse({"error": "Invalid Stripe account"}, status=400)
+            return JsonResponse({"error": "Stripeアカウントが無効です。"}, status=400)
 
         if Club.objects.filter(stripe_account_id=stripe_account_id).exclude(id=club.id).exists():
             return JsonResponse(
-                {"error": "This Stripe account is already connected to another club."},
+                {"error": "このStripeアカウントは別のクラブにすでに接続されています。"},
                 status=400
             )
 
@@ -2507,6 +2545,7 @@ def stripe_oauth_callback(request):
 
 
 @require_POST
+@json_validation_errors
 def create_visitor_reservation(
     request,
     lesson_id,
@@ -2659,6 +2698,7 @@ def create_visitor_reservation(
     return JsonResponse(result)
 
 @require_POST
+@json_validation_errors
 def create_member_reservation(
     request,
     lesson_id,
@@ -2804,6 +2844,7 @@ def create_member_reservation(
 
 
 @require_POST
+@json_validation_errors
 def create_ticket_purchase(
     request,
     package_id,
