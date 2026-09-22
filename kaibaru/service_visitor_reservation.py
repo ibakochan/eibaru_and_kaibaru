@@ -12,6 +12,11 @@ from .models import Lesson, Reservation
 from datetime import datetime, timezone as dt_timezone
 
 from .rules_eligibility import assert_visitor_eligible_for_lesson
+from .rules_reservations import (
+    assert_reservation_horizon,
+    assert_visitor_reservation_caps,
+    resolve_max_days_ahead,
+)
 
 STRIPE_CHECKOUT_MINUTES = 30
 RESERVATION_HOLD_MINUTES = 31
@@ -82,6 +87,14 @@ class VisitorReservationService:
             age=age,
             gender=gender,
             lesson=lesson,
+        )
+
+        assert_reservation_horizon(
+            reservation_date=reservation_date,
+            max_days_ahead=resolve_max_days_ahead(
+                lesson.visitor_reservation_max_days_ahead,
+                club.visitor_reservation_max_days_ahead,
+            ),
         )
 
         # -------------------------
@@ -217,6 +230,13 @@ class VisitorReservationService:
                     raise ValueError(
                         "このレッスンは満員です。"
                     )
+
+            assert_visitor_reservation_caps(
+                club=club,
+                lesson=locked_lesson,
+                email=email,
+                hold_cutoff=hold_cutoff,
+            )
 
             # -------------------------
             # Create local reservation

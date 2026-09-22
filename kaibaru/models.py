@@ -71,6 +71,27 @@ class Club(models.Model):
 
     member_reservations_disabled = models.BooleanField(default=False, help_text="If enabled, member reservations are unavailable for all lessons.")
 
+    member_reservation_max_count = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Maximum upcoming member reservations per member. Empty means unlimited.",
+    )
+    member_reservation_max_days_ahead = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="How many days ahead a member may reserve. Empty means no date horizon. 0 means today only.",
+    )
+    visitor_reservation_max_count = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Maximum upcoming visitor reservations per email. Empty means unlimited.",
+    )
+    visitor_reservation_max_days_ahead = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="How many days ahead a visitor may reserve. Empty means no date horizon. 0 means today only.",
+    )
+
     subscription_active = models.BooleanField(default=False)
     last_paid_invoice_id = models.CharField(max_length=255, blank=True, null=True)
     subscription_cancel_at_period_end = models.BooleanField(default=False)
@@ -969,6 +990,27 @@ class Lesson(models.Model):
     member_reservation_disabled = models.BooleanField(
         default=False,
         help_text="If enabled, member reservations are not allowed for this lesson."
+    )
+
+    member_reservation_max_count = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Maximum upcoming member reservations for this lesson. Empty means no extra lesson cap.",
+    )
+    member_reservation_max_days_ahead = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="How many days ahead a member may reserve this lesson. Empty uses the club setting.",
+    )
+    visitor_reservation_max_count = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Maximum upcoming visitor reservations for this lesson per email. Empty means no extra lesson cap.",
+    )
+    visitor_reservation_max_days_ahead = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="How many days ahead a visitor may reserve this lesson. Empty uses the club setting.",
     )
 
     age_min = models.PositiveIntegerField(null=True, blank=True)

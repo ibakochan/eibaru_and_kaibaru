@@ -60,7 +60,38 @@ def validate_age_range_attrs(attrs, instance=None):
         })
 
 
-def validate_allowed_gender_value(value):
+def validate_reservation_cap_attrs(attrs, instance=None):
+    cap_fields = (
+        "member_reservation_max_count",
+        "visitor_reservation_max_count",
+    )
+    day_fields = (
+        "member_reservation_max_days_ahead",
+        "visitor_reservation_max_days_ahead",
+    )
+
+    errors = {}
+
+    for field in cap_fields:
+        value = (
+            attrs[field]
+            if field in attrs
+            else (getattr(instance, field, None) if instance else None)
+        )
+        if value is not None and value < 1:
+            errors[field] = "予約上限は1以上にしてください。"
+
+    for field in day_fields:
+        value = (
+            attrs[field]
+            if field in attrs
+            else (getattr(instance, field, None) if instance else None)
+        )
+        if value is not None and value < 0:
+            errors[field] = "予約できる日数は0以上にしてください。"
+
+    if errors:
+        raise serializers.ValidationError(errors)
     if value in ("", None):
         return None
     if value not in ("male", "female"):
@@ -1735,6 +1766,22 @@ class LessonSerializer(serializers.ModelSerializer):
         allow_blank=True,
         allow_null=True,
     )
+    member_reservation_max_count = BlankableIntegerField(
+        required=False,
+        allow_null=True,
+    )
+    member_reservation_max_days_ahead = BlankableIntegerField(
+        required=False,
+        allow_null=True,
+    )
+    visitor_reservation_max_count = BlankableIntegerField(
+        required=False,
+        allow_null=True,
+    )
+    visitor_reservation_max_days_ahead = BlankableIntegerField(
+        required=False,
+        allow_null=True,
+    )
 
     total_participation = serializers.SerializerMethodField()
     monthly_participation = serializers.SerializerMethodField()
@@ -1775,6 +1822,11 @@ class LessonSerializer(serializers.ModelSerializer):
             "member_reservation_price",
             "member_reservation_disabled",
 
+            "member_reservation_max_count",
+            "member_reservation_max_days_ahead",
+            "visitor_reservation_max_count",
+            "visitor_reservation_max_days_ahead",
+
             "age_min",
             "age_max",
             "allowed_gender",
@@ -1798,6 +1850,7 @@ class LessonSerializer(serializers.ModelSerializer):
             })
 
         validate_age_range_attrs(attrs, self.instance)
+        validate_reservation_cap_attrs(attrs, self.instance)
 
         allowed_plans = attrs.get(
             "allowed_plans",
@@ -2044,6 +2097,10 @@ class ClubSerializer(serializers.ModelSerializer):
 
             "member_reservation_price",
             "member_reservations_disabled",
+            "member_reservation_max_count",
+            "member_reservation_max_days_ahead",
+            "visitor_reservation_max_count",
+            "visitor_reservation_max_days_ahead",
 
             "ticket_types",
             "ticket_packages",
@@ -2061,7 +2118,11 @@ class ClubSerializer(serializers.ModelSerializer):
             "stripe_account_id",
             "stripe_subscription_id",
         ]
-    
+
+    def validate(self, attrs):
+        validate_reservation_cap_attrs(attrs, self.instance)
+        return attrs
+
     def get_membership_plans(self, club):
         request = self.context.get("request")
     

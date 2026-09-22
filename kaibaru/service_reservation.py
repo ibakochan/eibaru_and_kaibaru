@@ -17,6 +17,11 @@ from .models import (
 )
 from .discounts import calculate_age
 from .rules_eligibility import assert_member_eligible_for_lesson
+from .rules_reservations import (
+    assert_member_reservation_caps,
+    assert_reservation_horizon,
+    resolve_max_days_ahead,
+)
 
 
 STRIPE_CHECKOUT_MINUTES = 30
@@ -180,6 +185,14 @@ class MemberReservationService:
             )
 
         assert_member_eligible_for_lesson(member, lesson)
+
+        assert_reservation_horizon(
+            reservation_date=reservation_date,
+            max_days_ahead=resolve_max_days_ahead(
+                lesson.member_reservation_max_days_ahead,
+                club.member_reservation_max_days_ahead,
+            ),
+        )
 
         # --------------------------------------------------
         # Determine member reservation price.
@@ -451,6 +464,13 @@ class MemberReservationService:
                     raise ValueError(
                         "このレッスンは満員です。"
                     )
+
+            assert_member_reservation_caps(
+                club=club,
+                lesson=locked_lesson,
+                member=member,
+                hold_cutoff=hold_cutoff,
+            )
 
             # --------------------------------------------------
             # Create local reservation
