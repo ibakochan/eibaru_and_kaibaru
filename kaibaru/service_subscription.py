@@ -23,7 +23,7 @@ class SubscriptionItemService:
 
     @staticmethod
     def resume_item(*, item, subscription, club):
-        assert_plan_is_activatable(item.plan)
+        assert_plan_is_activatable(item.plan, item.member)
 
         assert_mutation_not_locked(
             item=item,
@@ -263,7 +263,7 @@ class SubscriptionItemService:
         club,
         old_item_is_grace: bool
     ):
-        assert_plan_is_activatable(new_plan)
+        assert_plan_is_activatable(new_plan, item.member)
 
         assert_mutation_not_locked(
             item=item,
@@ -490,7 +490,7 @@ class SubscriptionItemService:
         # old plan has since been scheduled for deletion (or deleted),
         # that revival must be refused - the plan change cancellation
         # must not resurrect an item on a plan that's going away.
-        assert_plan_is_activatable(old_item.plan)
+        assert_plan_is_activatable(old_item.plan, old_item.member)
 
         assert_mutation_not_locked(
             item=old_item,

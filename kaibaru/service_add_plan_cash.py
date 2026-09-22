@@ -29,7 +29,7 @@ class CashAddPlanService:
         plan,
         subscription,
     ):
-        assert_plan_is_activatable(plan)
+        assert_plan_is_activatable(plan, member)
 
         today = timezone.localtime().date()
 

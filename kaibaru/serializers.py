@@ -1,5 +1,7 @@
 from rest_framework import serializers
 from .models import TicketType, TicketPackage, Reservation, MembershipPlanGroup, MemberPricingAdjustment, Discount, DiscountCondition, Member, Club, Lesson, Participation, SlateImage, JoinRequest, InvoiceItem, Invoice, Subscription, SubscriptionItem
+from types import SimpleNamespace
+from django.core.exceptions import ValidationError as DjangoValidationError
 
 from google.cloud import storage
 from django.db.models import Q
@@ -20,10 +22,52 @@ from .models import MembershipPlan
 
 from django.db import transaction
 from .rules_plans import enforce_membership_plan_invariants
+from .rules_eligibility import assert_member_eligible_for_plan
+from .user_errors import format_validation_error
 
 from django.utils.timezone import now
 
 NOW = now()
+
+
+class BlankableIntegerField(serializers.IntegerField):
+    def to_internal_value(self, data):
+        if data in ("", None, "null"):
+            if self.allow_null:
+                return None
+        return super().to_internal_value(data)
+
+
+def validate_age_range_attrs(attrs, instance=None):
+    age_min = (
+        attrs["age_min"]
+        if "age_min" in attrs
+        else (instance.age_min if instance else None)
+    )
+    age_max = (
+        attrs["age_max"]
+        if "age_max" in attrs
+        else (instance.age_max if instance else None)
+    )
+
+    if (
+        age_min is not None
+        and age_max is not None
+        and age_min > age_max
+    ):
+        raise serializers.ValidationError({
+            "age_max": "最大年齢は最小年齢以上にしてください。"
+        })
+
+
+def validate_allowed_gender_value(value):
+    if value in ("", None):
+        return None
+    if value not in ("male", "female"):
+        raise serializers.ValidationError(
+            "性別の指定が正しくありません。"
+        )
+    return value
 
 def get_visible_membership_plan_ids(club, request):
     now = timezone.now()
@@ -387,6 +431,19 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True
     )
+    age_min = BlankableIntegerField(
+        required=False,
+        allow_null=True,
+    )
+    age_max = BlankableIntegerField(
+        required=False,
+        allow_null=True,
+    )
+    allowed_gender = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+    )
 
     class Meta:
         model = MembershipPlan
@@ -399,10 +456,9 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
             "currency",
             "interval",
 
-            "max_lessons_per_month",
-            "member_category",
             "age_min",
             "age_max",
+            "allowed_gender",
 
             "bundled_plans",
 
@@ -437,6 +493,9 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
 
+    def validate_allowed_gender(self, value):
+        return validate_allowed_gender_value(value)
+
     def validate(self, attrs):
         club = self.context.get("club")
 
@@ -444,6 +503,8 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({
                 "club_subdomain": "クラブの指定が必要です。"
             })
+
+        validate_age_range_attrs(attrs, self.instance)
 
         bundled = attrs.get("bundled_plans")
 
@@ -1344,6 +1405,26 @@ class JoinRequestSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "status", "created_at"]
 
+    def validate(self, attrs):
+        plans = attrs.get("already_subscribed_plans") or []
+        birth_date = attrs.get("birth_date")
+        gender = attrs.get("gender")
+
+        fake_member = SimpleNamespace(
+            birth_date=birth_date,
+            gender=gender,
+        )
+
+        for plan in plans:
+            try:
+                assert_member_eligible_for_plan(fake_member, plan)
+            except DjangoValidationError as e:
+                raise serializers.ValidationError({
+                    "already_subscribed_plans": format_validation_error(e)
+                })
+
+        return attrs
+
 class SlateImageSerializer(serializers.ModelSerializer):
 
     class Meta:
@@ -1641,6 +1722,20 @@ class LessonSerializer(serializers.ModelSerializer):
     # NEW: Lesson background color.
     background_color = serializers.CharField(max_length=7, required=False, default="#FFFFFF")
 
+    age_min = BlankableIntegerField(
+        required=False,
+        allow_null=True,
+    )
+    age_max = BlankableIntegerField(
+        required=False,
+        allow_null=True,
+    )
+    allowed_gender = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+    )
+
     total_participation = serializers.SerializerMethodField()
     monthly_participation = serializers.SerializerMethodField()
     monthly_average = serializers.SerializerMethodField()
@@ -1679,9 +1774,16 @@ class LessonSerializer(serializers.ModelSerializer):
             # Member
             "member_reservation_price",
             "member_reservation_disabled",
+
+            "age_min",
+            "age_max",
+            "allowed_gender",
             
         ]
         read_only_fields = ["id"]
+
+    def validate_allowed_gender(self, value):
+        return validate_allowed_gender_value(value)
 
     def validate(self, attrs):
         club = (
@@ -1694,6 +1796,8 @@ class LessonSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({
                 "club": "クラブの指定が必要です。"
             })
+
+        validate_age_range_attrs(attrs, self.instance)
 
         allowed_plans = attrs.get(
             "allowed_plans",
@@ -2468,6 +2572,8 @@ class ReservationSerializer(serializers.ModelSerializer):
             "full_name",
             "email",
             "phone_number",
+            "age",
+            "gender",
 
             # Payment
             "amount",

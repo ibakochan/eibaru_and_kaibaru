@@ -15,6 +15,8 @@ from .models import (
     TicketGrant,
     TicketUsage,
 )
+from .discounts import calculate_age
+from .rules_eligibility import assert_member_eligible_for_lesson
 
 
 STRIPE_CHECKOUT_MINUTES = 30
@@ -177,6 +179,8 @@ class MemberReservationService:
                 "選択した日付がレッスンの曜日と一致していません。"
             )
 
+        assert_member_eligible_for_lesson(member, lesson)
+
         # --------------------------------------------------
         # Determine member reservation price.
         #
@@ -289,6 +293,8 @@ class MemberReservationService:
         phone_number = (
             member.phone_number or ""
         ).strip()
+        reservation_age = calculate_age(member.birth_date)
+        reservation_gender = member.gender or ""
 
         # --------------------------------------------------
         # Reservation idempotency key
@@ -523,6 +529,8 @@ class MemberReservationService:
                     full_name=full_name,
                     email=email,
                     phone_number=phone_number,
+                    age=reservation_age,
+                    gender=reservation_gender,
                     amount=reservation_price,
                     currency="jpy",
                     reservation_date=reservation_date,
@@ -551,6 +559,8 @@ class MemberReservationService:
                     full_name=full_name,
                     email=email,
                     phone_number=phone_number,
+                    age=reservation_age,
+                    gender=reservation_gender,
                     amount=reservation_price,
                     currency="jpy",
                     reservation_date=reservation_date,

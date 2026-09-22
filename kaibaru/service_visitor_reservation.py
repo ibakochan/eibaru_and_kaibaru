@@ -11,6 +11,8 @@ from .models import Lesson, Reservation
 
 from datetime import datetime, timezone as dt_timezone
 
+from .rules_eligibility import assert_visitor_eligible_for_lesson
+
 STRIPE_CHECKOUT_MINUTES = 30
 RESERVATION_HOLD_MINUTES = 31
 
@@ -27,6 +29,8 @@ class VisitorReservationService:
         email,
         phone_number="",
         user=None,
+        age=None,
+        gender="",
     ):
         if lesson.club_id != club.id:
             raise ValueError(
@@ -73,6 +77,12 @@ class VisitorReservationService:
             raise ValueError(
                 "選択した日付がレッスンの曜日と一致していません。"
             )
+
+        assert_visitor_eligible_for_lesson(
+            age=age,
+            gender=gender,
+            lesson=lesson,
+        )
 
         # -------------------------
         # Stripe
@@ -225,6 +235,8 @@ class VisitorReservationService:
                 full_name=full_name,
                 email=email,
                 phone_number=phone_number,
+                age=age,
+                gender=gender or "",
                 amount=reservation_price,
                 currency="jpy",
                 reservation_date=reservation_date,

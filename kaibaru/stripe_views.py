@@ -2603,6 +2603,9 @@ def create_visitor_reservation(
         "",
     ).strip()
 
+    age_raw = request.POST.get("age", "").strip()
+    gender = request.POST.get("gender", "").strip()
+
     reservation_date = request.POST.get(
         "reservation_date",
         "",
@@ -2661,6 +2664,34 @@ def create_visitor_reservation(
             status=400,
         )
 
+    age = None
+    if age_raw:
+        try:
+            age = int(age_raw)
+        except ValueError:
+            return JsonResponse(
+                {
+                    "error": "年齢の形式が正しくありません。"
+                },
+                status=400,
+            )
+
+        if age < 0 or age > 120:
+            return JsonResponse(
+                {
+                    "error": "年齢の形式が正しくありません。"
+                },
+                status=400,
+            )
+
+    if gender and gender not in ("male", "female"):
+        return JsonResponse(
+            {
+                "error": "性別の指定が正しくありません。"
+            },
+            status=400,
+        )
+
     try:
 
         result = VisitorReservationService.create_reservation(
@@ -2671,6 +2702,8 @@ def create_visitor_reservation(
             email=email,
             phone_number=phone_number,
             user=user,
+            age=age,
+            gender=gender,
         )
 
     except ValueError as e:

@@ -17,7 +17,7 @@ class CashSubscriptionItemService:
         subscription,
         club,
     ):
-        assert_plan_is_activatable(item.plan)
+        assert_plan_is_activatable(item.plan, item.member)
 
         with transaction.atomic():
 
@@ -108,7 +108,7 @@ class CashSubscriptionItemService:
         club,
         old_item_is_grace: bool,
     ):
-        assert_plan_is_activatable(new_plan)
+        assert_plan_is_activatable(new_plan, item.member)
 
 
         now = timezone.now()
@@ -211,7 +211,7 @@ class CashSubscriptionItemService:
         # matching the Stripe implementation. Cancelling a pending plan
         # change must not revive an item on a plan that has since been
         # scheduled for deletion (or deleted).
-        assert_plan_is_activatable(old_item.plan)
+        assert_plan_is_activatable(old_item.plan, old_item.member)
 
         now = timezone.now()
 

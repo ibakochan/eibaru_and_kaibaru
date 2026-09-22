@@ -24,6 +24,7 @@ from .billing import (
     get_next_billing_cycle_anchor,
     resolve_and_apply_subscription_period,
 )
+from .rules_subscriptions import assert_plan_is_activatable
 
 
 class MemberCashSubscriptionService:
@@ -37,6 +38,8 @@ class MemberCashSubscriptionService:
     ):
 
         today = timezone.localtime().date()
+
+        assert_plan_is_activatable(plan, member)
 
 
         with transaction.atomic():

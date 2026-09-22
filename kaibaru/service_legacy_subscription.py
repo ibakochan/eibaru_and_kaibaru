@@ -11,6 +11,7 @@ from .billing import (
     get_next_billing_cycle_anchor,
     resolve_and_apply_subscription_period,
 )
+from .rules_subscriptions import assert_plan_is_activatable
 
 class LegacySubscriptionService:
 
@@ -79,6 +80,7 @@ class LegacySubscriptionService:
             # -------------------------------------------------
 
             for plan in plans:
+                assert_plan_is_activatable(plan, member)
 
                 item, item_created = (
                     SubscriptionItem.objects.get_or_create(

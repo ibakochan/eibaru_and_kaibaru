@@ -45,7 +45,7 @@ class SubscriptionAddPlanService:
         PURE EXTRACTION of existing 'sub exists' add-plan logic.
         NO BEHAVIOR CHANGES.
         """
-        assert_plan_is_activatable(plan)
+        assert_plan_is_activatable(plan, member)
 
         today = timezone.localtime().date()
         billing_user = member.owner

@@ -5,6 +5,7 @@ from django.utils import timezone
 from django.core.exceptions import ValidationError
 
 from .models import SubscriptionItem, MembershipPlan, SubscriptionMutation
+from .rules_eligibility import assert_member_eligible_for_plan
 
 
 def validate_plan_set(plan_ids, club):
@@ -171,7 +172,7 @@ def validate_bundle_rule(active_plan_ids, bundle_map):
         )
 
 
-def assert_plan_is_activatable(plan):
+def assert_plan_is_activatable(plan, member=None):
     """
     A plan that is scheduled for deletion or already deleted must
     never gain a new/reactivated active SubscriptionItem.
@@ -183,6 +184,10 @@ def assert_plan_is_activatable(plan):
     existing historical/active rows are handled separately by the
     plan-deletion task/reconciliation and must not be invalidated by
     this check.
+
+    When ``member`` is provided, age/gender restrictions on the plan
+    are also enforced. Existing subscribers who later fall outside
+    those restrictions are not automatically moved off the plan.
     """
     if plan is None:
         return
@@ -192,6 +197,9 @@ def assert_plan_is_activatable(plan):
             "このプランは削除されているため、選択できません。"
         )
 
+    if member is not None:
+        assert_member_eligible_for_plan(member, plan)
+
 
 def validate_subscription_transition(
     subscription,
@@ -199,7 +207,7 @@ def validate_subscription_transition(
     new_plan,
     old_plan_id=None,
 ):
-    assert_plan_is_activatable(new_plan)
+    assert_plan_is_activatable(new_plan, member)
 
     now = timezone.now()
 

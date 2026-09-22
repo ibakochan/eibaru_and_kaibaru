@@ -259,14 +259,15 @@ class MembershipPlan(models.Model):
     active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    max_lessons_per_month = models.PositiveIntegerField(null=True, blank=True)
-    member_category = models.CharField(
-        max_length=50,
-        blank=True,
-        help_text="e.g. junior, adult, senior"
-    )
     age_min = models.PositiveIntegerField(null=True, blank=True)
     age_max = models.PositiveIntegerField(null=True, blank=True)
+    allowed_gender = models.CharField(
+        max_length=10,
+        choices=[("male", "Male"), ("female", "Female")],
+        null=True,
+        blank=True,
+        help_text="If set, only this gender may join. Empty means any gender.",
+    )
 
     bundled_plans = models.ManyToManyField(
         "self",
@@ -970,6 +971,16 @@ class Lesson(models.Model):
         help_text="If enabled, member reservations are not allowed for this lesson."
     )
 
+    age_min = models.PositiveIntegerField(null=True, blank=True)
+    age_max = models.PositiveIntegerField(null=True, blank=True)
+    allowed_gender = models.CharField(
+        max_length=10,
+        choices=[("male", "Male"), ("female", "Female")],
+        null=True,
+        blank=True,
+        help_text="If set, only this gender may reserve. Empty means any gender.",
+    )
+
     creation_date = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -1055,6 +1066,13 @@ class Reservation(models.Model):
     phone_number = models.CharField(
         max_length=30,
         blank=True
+    )
+
+    age = models.PositiveIntegerField(null=True, blank=True)
+    gender = models.CharField(
+        max_length=10,
+        choices=[("male", "Male"), ("female", "Female")],
+        blank=True,
     )
 
     # Actual amount charged for this reservation.
