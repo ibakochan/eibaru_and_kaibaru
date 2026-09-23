@@ -1,5 +1,5 @@
 from django.urls import re_path, path, include
-from . import views, stripe_views, stripe_webhooks
+from . import views, stripe_views, stripe_webhooks, views_reservation_start
 from . import viewsets
 from rest_framework.routers import DefaultRouter
 from django.contrib.sitemaps.views import sitemap, index
@@ -69,6 +69,11 @@ urlpatterns = [
 
     path('create_visitor_reservation/<int:lesson_id>/', stripe_views.create_visitor_reservation, name='create_visitor_reservation'),
     path('create_trial_reservation/<int:lesson_id>/', stripe_views.create_trial_reservation, name='create_trial_reservation'),
+    path(
+        'start_reservation/<str:token>/',
+        views_reservation_start.start_reservation,
+        name='start_reservation',
+    ),
     path('change_stripe_payment_method/<int:club_id>/', stripe_views.change_stripe_payment_method, name='change_stripe_payment_method'),
 
     path(

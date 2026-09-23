@@ -1,6 +1,6 @@
 from celery import shared_task
 from django.conf import settings
-from django.core.mail import send_mail
+from django.core.mail import EmailMessage, send_mail
 from accounts.models import CustomUser
 import logging
 logger = logging.getLogger(__name__)
@@ -1252,24 +1252,57 @@ def send_visitor_reservation_confirmation_email(
         f"¥{reservation.amount:,}"
     )
 
-    subject = (
-        f"【{club_name}】ご予約・お支払い完了のお知らせ"
+    is_free = reservation.amount == 0
+    is_trial = (
+        reservation.reservation_type
+        == Reservation.ReservationType.TRIAL
     )
+
+    if is_free and is_trial:
+        subject = f"【{club_name}】体験予約確定のお知らせ"
+        intro = (
+            f"{club_name}の体験予約ありがとうございます。\n"
+            f"体験予約が確定しました。\n\n"
+        )
+        payment_section = (
+            "■ 料金\n"
+            "無料\n\n"
+        )
+    elif is_free:
+        subject = f"【{club_name}】ご予約確定のお知らせ"
+        intro = (
+            f"{club_name}へのご予約ありがとうございます。\n"
+            f"ご予約が確定しました。\n\n"
+        )
+        payment_section = (
+            "■ 料金\n"
+            "無料\n\n"
+        )
+    else:
+        subject = (
+            f"【{club_name}】ご予約・お支払い完了のお知らせ"
+        )
+        intro = (
+            f"{club_name}へのご予約ありがとうございます。\n"
+            f"お支払いが完了し、ご予約が確定しました。\n\n"
+        )
+        payment_section = (
+            f"■ お支払い\n"
+            f"金額：{amount_text}\n"
+            f"お支払い方法：クレジットカード\n\n"
+        )
 
     message = (
         f"{recipient_name} 様\n\n"
 
-        f"{club_name}へのご予約ありがとうございます。\n"
-        f"お支払いが完了し、ご予約が確定しました。\n\n"
+        f"{intro}"
 
         f"■ ご予約内容\n"
         f"レッスン：{lesson.title}\n"
         f"日時：{reservation_date}（{weekday}）\n"
         f"時間：{start_time}〜{end_time}\n\n"
 
-        f"■ お支払い\n"
-        f"金額：{amount_text}\n"
-        f"お支払い方法：クレジットカード\n\n"
+        f"{payment_section}"
 
         f"■ ご予約番号\n"
         f"{reservation.id}\n\n"
@@ -1301,6 +1334,132 @@ def send_visitor_reservation_confirmation_email(
         "[EMAIL] Visitor reservation confirmation sent "
         "reservation=%s recipient=%s club=%s",
         reservation.id,
+        reservation.email,
+        club_name,
+    )
+
+
+@shared_task(
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=30,
+    retry_kwargs={"max_retries": 5},
+)
+def send_reservation_start_email(self, start_token):
+    from .models import Reservation
+    from .rules_reservations import START_LINK_HOURS
+
+    reservations = list(
+        Reservation.objects
+        .select_related(
+            "club",
+            "club__owner",
+            "lesson",
+        )
+        .filter(start_token=start_token)
+        .exclude(status=Reservation.Status.PAID)
+        .order_by("id")
+    )
+
+    if not reservations:
+        logger.warning(
+            "[EMAIL] No pending reservations for start token."
+        )
+        return
+
+    reservation = reservations[0]
+    club = reservation.club
+    lesson = reservation.lesson
+
+    club_name = club.title or club.subdomain or "クラブ"
+    kind = (
+        "体験予約"
+        if reservation.reservation_type == Reservation.ReservationType.TRIAL
+        else "ビジター予約"
+    )
+
+    weekday_names = [
+        "月曜日",
+        "火曜日",
+        "水曜日",
+        "木曜日",
+        "金曜日",
+        "土曜日",
+        "日曜日",
+    ]
+    weekday = weekday_names[reservation.reservation_date.weekday()]
+    reservation_date = reservation.reservation_date.strftime("%Y年%m月%d日")
+    start_time = lesson.start_time.strftime("%H:%M")
+    end_time = lesson.end_time.strftime("%H:%M")
+
+    people = []
+    for person in reservations:
+        if person.age is None:
+            people.append(f"・{person.full_name}")
+        else:
+            people.append(f"・{person.full_name}（{person.age}歳）")
+
+    people_text = "\n".join(people)
+
+    total = sum(person.amount for person in reservations)
+    if total == 0:
+        price_text = "無料"
+    elif len(reservations) == 1:
+        price_text = f"¥{total:,}"
+    else:
+        price_text = f"¥{total:,}（{len(reservations)}名）"
+
+    greeting = (
+        reservation.full_name
+        if len(reservations) == 1
+        else "お客様"
+    )
+    link = (
+        f"https://{club.subdomain}.kaibaru.jp/"
+        f"start_reservation/{start_token}/"
+    )
+
+    subject = f"【{club_name}】{kind}手続きのご案内"
+    message = (
+        f"{greeting} 様\n\n"
+        f"{club_name}の{kind}をお申し込みいただきありがとうございます。\n"
+        f"まだ予約は確定していません。\n"
+        f"以下のリンクを開き、手続きを完了してください。\n\n"
+        f"■ お申し込み内容\n"
+        f"レッスン：{lesson.title}\n"
+        f"日時：{reservation_date}（{weekday}）\n"
+        f"時間：{start_time}〜{end_time}\n"
+        f"予約者：\n"
+        f"{people_text}\n\n"
+        f"料金：{price_text}\n\n"
+        f"手続きを続ける：\n"
+        f"{link}\n\n"
+        f"このリンクの有効期限は{START_LINK_HOURS}時間です。\n"
+        f"リンクを開いて手続きを始めるまで、レッスンの枠は確保されません。\n\n"
+        f"{club_name}"
+    )
+
+    reply_to = None
+    if (
+        club.owner
+        and club.owner.email
+        and club.owner.email != reservation.email
+    ):
+        reply_to = [club.owner.email]
+
+    email = EmailMessage(
+        subject=subject,
+        body=message,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        to=[reservation.email],
+        reply_to=reply_to,
+    )
+    email.send()
+
+    logger.info(
+        "[EMAIL] Reservation start email sent "
+        "reservations=%s recipient=%s club=%s",
+        [person.id for person in reservations],
         reservation.email,
         club_name,
     )

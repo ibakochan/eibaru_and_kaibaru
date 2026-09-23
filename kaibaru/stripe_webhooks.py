@@ -6,7 +6,8 @@ from django.http import HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 
 from .models import TicketPurchase, TicketGrant, Reservation, Club, Member, Subscription, SubscriptionItem, MembershipPlan, StripeWebhookEvent, StripeCustomer, Invoice, InvoiceItem, Payment, SubscriptionMutation
-from .tasks_emails import send_visitor_reservation_confirmation_email, send_stripe_payment_failure_warning_email, send_subscription_activated_emails, send_invoice_paid_email
+from .tasks_emails import send_stripe_payment_failure_warning_email, send_subscription_activated_emails, send_invoice_paid_email
+from .service_reservation_start import complete_paid_checkout
 from django.db import transaction
 
 from datetime import datetime, timezone as dt_timezone
@@ -150,157 +151,46 @@ def stripe_connected_webhook(request):
         # VISITOR RESERVATION CHECKOUT
         # =========================================================
 
-        reservation_id = metadata.get("reservation_id")
+        reservation_ids_raw = (
+            metadata.get("reservation_ids")
+            or metadata.get("reservation_id")
+        )
 
-        if reservation_id:
-
-            # This checkout belongs to a visitor reservation.
-            # Do not process it as a membership checkout.
-
-            reservation = (
-                Reservation.objects
-                .filter(
-                    id=reservation_id,
-                    club__stripe_account_id=account_id,
-                )
-                .first()
-            )
-
-            if not reservation:
-                logger.error(
-                    "[VISITOR RESERVATION] Reservation not found "
-                    "reservation_id=%s session=%s account=%s",
-                    reservation_id,
-                    session["id"],
-                    account_id,
-                )
-
-                return webhook_ok(event_record)
-
-            # Make sure the Stripe session matches the
-            # reservation we created locally.
-            if (
-                reservation.stripe_checkout_session_id
-                and reservation.stripe_checkout_session_id
-                != session["id"]
-            ):
-                logger.error(
-                    "[VISITOR RESERVATION] Checkout session "
-                    "mismatch reservation=%s expected=%s actual=%s",
-                    reservation.id,
-                    reservation.stripe_checkout_session_id,
-                    session["id"],
-                )
-
-                return webhook_ok(event_record)
-
-            # -----------------------------------------------------
-            # Only mark the reservation paid when Stripe says
-            # the Checkout Session payment has actually succeeded.
-            # -----------------------------------------------------
+        if reservation_ids_raw:
 
             if session.get("payment_status") != "paid":
                 logger.warning(
-                    "[VISITOR RESERVATION] Checkout completed "
+                    "[RESERVATION CHECKOUT] Checkout completed "
                     "but payment is not paid yet. "
-                    "reservation=%s payment_status=%s",
-                    reservation.id,
+                    "reservations=%s payment_status=%s",
+                    reservation_ids_raw,
                     session.get("payment_status"),
                 )
 
                 return webhook_ok(event_record)
 
-            payment_intent_id = session.get(
-                "payment_intent"
+            try:
+                reservation_ids = [
+                    int(part)
+                    for part in str(reservation_ids_raw).split(",")
+                    if part.strip()
+                ]
+            except ValueError:
+                logger.error(
+                    "[RESERVATION CHECKOUT] Invalid reservation ids "
+                    "raw=%s session=%s",
+                    reservation_ids_raw,
+                    session["id"],
+                )
+                return webhook_ok(event_record)
+
+            complete_paid_checkout(
+                reservation_ids=reservation_ids,
+                session_id=session["id"],
+                payment_intent_id=session.get("payment_intent"),
+                account_id=account_id,
             )
 
-            # -----------------------------------------------------
-            # Mark reservation paid.
-            #
-            # This is intentionally idempotent. Stripe can retry
-            # webhook events, so running this more than once must
-            # be harmless.
-            # -----------------------------------------------------
-            newly_paid = False
-
-            with transaction.atomic():
-
-                reservation = (
-                    Reservation.objects
-                    .select_for_update()
-                    .filter(
-                        id=reservation.id,
-                        club__stripe_account_id=account_id,
-                    )
-                    .first()
-                )
-            
-                if not reservation:
-                    logger.error(
-                        "[VISITOR RESERVATION] Reservation "
-                        "disappeared during processing. "
-                        "reservation_id=%s",
-                        reservation_id,
-                    )
-            
-                    return webhook_ok(event_record)
-            
-                if reservation.status == Reservation.Status.PAID:
-            
-                    logger.info(
-                        "[VISITOR RESERVATION] Reservation "
-                        "already paid. reservation=%s",
-                        reservation.id,
-                    )
-            
-                else:
-            
-                    reservation.status = (
-                        Reservation.Status.PAID
-                    )
-            
-                    reservation.paid_at = timezone.now()
-            
-                    if payment_intent_id:
-                        reservation.stripe_payment_intent_id = (
-                            payment_intent_id
-                        )
-            
-                    reservation.save(
-                        update_fields=[
-                            "status",
-                            "paid_at",
-                            "stripe_payment_intent_id",
-                        ]
-                    )
-            
-                    newly_paid = True
-
-                    if newly_paid:
-                        if reservation.reservation_type == Reservation.ReservationType.MEMBER:
-                            send_visitor_reservation_confirmation_email.delay(
-                                reservation.id
-                            )
-                        else:
-                            send_visitor_reservation_confirmation_email.delay(
-                                reservation.id
-                            )
-            
-                    logger.info(
-                        "[VISITOR RESERVATION] "
-                        "Reservation successfully paid. "
-                        "reservation=%s session=%s "
-                        "payment_intent=%s",
-                        reservation.id,
-                        session["id"],
-                        payment_intent_id,
-                    )
-
-            if newly_paid:
-                send_visitor_reservation_confirmation_email.delay(
-                    reservation.id
-                )
-            
             return webhook_ok(event_record)
 
         # =========================================================

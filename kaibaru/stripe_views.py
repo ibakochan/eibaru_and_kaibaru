@@ -2774,11 +2774,6 @@ def create_trial_reservation(
             status=400,
         )
 
-    full_name = request.POST.get(
-        "full_name",
-        "",
-    ).strip()
-
     email = request.POST.get(
         "email",
         "",
@@ -2789,21 +2784,10 @@ def create_trial_reservation(
         "",
     ).strip()
 
-    age_raw = request.POST.get("age", "").strip()
-    gender = request.POST.get("gender", "").strip()
-
     reservation_date = request.POST.get(
         "reservation_date",
         "",
     ).strip()
-
-    if not full_name:
-        return JsonResponse(
-            {
-                "error": "お名前を入力してください。"
-            },
-            status=400,
-        )
 
     if not user and not email:
         return JsonResponse(
@@ -2850,46 +2834,28 @@ def create_trial_reservation(
             status=400,
         )
 
-    age = None
-    if age_raw:
-        try:
-            age = int(age_raw)
-        except ValueError:
-            return JsonResponse(
-                {
-                    "error": "年齢の形式が正しくありません。"
-                },
-                status=400,
+    try:
+        participants = (
+            TrialReservationService.participants_from_post(
+                request.POST
             )
-
-        if age < 0 or age > 120:
-            return JsonResponse(
-                {
-                    "error": "年齢の形式が正しくありません。"
-                },
-                status=400,
-            )
-
-    if gender and gender not in ("male", "female"):
+        )
+    except ValueError as exc:
         return JsonResponse(
-            {
-                "error": "性別の指定が正しくありません。"
-            },
+            {"error": str(exc)},
             status=400,
         )
 
     try:
 
-        result = TrialReservationService.create_reservation(
+        result = TrialReservationService.create_reservations(
             club=club,
             lesson=lesson,
             reservation_date=reservation_date,
-            full_name=full_name,
             email=email,
             phone_number=phone_number,
             user=user,
-            age=age,
-            gender=gender,
+            participants=participants,
         )
 
     except ValueError as e:

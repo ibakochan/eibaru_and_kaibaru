@@ -1,0 +1,159 @@
+{% load humanize %}
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>{% if club_name %}{{ club_name }}の予約手続き{% else %}予約手続き{% endif %}</title>
+  <style>
+    body {
+      margin: 0;
+      background: #eef1f4;
+      color: #1f2933;
+      font-family: "Hiragino Sans", "Noto Sans JP", sans-serif;
+    }
+    main {
+      max-width: 480px;
+      margin: 32px auto;
+      padding: 24px 20px;
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 22px;
+      text-align: center;
+    }
+    .kind {
+      margin: 0 0 20px;
+      text-align: center;
+      color: #52606d;
+    }
+    dl {
+      margin: 0 0 16px;
+    }
+    dt {
+      font-size: 12px;
+      color: #7b8794;
+    }
+    dd {
+      margin: 0 0 12px;
+      font-size: 16px;
+    }
+    .people {
+      margin: 0;
+      padding-left: 18px;
+    }
+    .message {
+      margin: 0 0 16px;
+      padding: 12px;
+      border-radius: 8px;
+      background: #fff4f2;
+      border: 1px solid #f5c2c7;
+      color: #9b1c1c;
+      line-height: 1.5;
+    }
+    .success {
+      margin: 0 0 16px;
+      padding: 12px;
+      border-radius: 8px;
+      background: #eefbf3;
+      border: 1px solid #b7ebc6;
+      color: #17663a;
+      line-height: 1.5;
+    }
+    button, .home {
+      display: block;
+      width: 100%;
+      box-sizing: border-box;
+      margin-top: 8px;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 16px;
+      text-align: center;
+      text-decoration: none;
+    }
+    button {
+      border: 0;
+      background: #1d4ed8;
+      color: #fff;
+      cursor: pointer;
+    }
+    .home {
+      background: #e4e7eb;
+      color: #1f2933;
+    }
+    .note {
+      margin: 12px 0 0;
+      color: #52606d;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    {% if mode == "invalid" %}
+      <h1>リンクを確認できません</h1>
+      <p class="message">{{ message|default:"このリンクは無効です。" }}</p>
+    {% else %}
+      <h1>{{ club_name }}</h1>
+      <p class="kind">{{ kind }}</p>
+
+      <dl>
+        <dt>レッスン</dt>
+        <dd>{{ lesson_title }}</dd>
+        <dt>日時</dt>
+        <dd>{{ when_text }}</dd>
+        <dt>予約者</dt>
+        <dd>
+          <ul class="people">
+            {% for person in people %}
+              <li>
+                {{ person.name }}
+                {% if person.age is not None %}（{{ person.age }}歳）{% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        </dd>
+        <dt>料金</dt>
+        <dd>
+          {% if is_free %}
+            無料
+          {% else %}
+            ¥{{ total_amount|intcomma }}
+          {% endif %}
+        </dd>
+      </dl>
+
+      {% if message %}
+        <p class="message">{{ message }}</p>
+      {% endif %}
+
+      {% if mode == "done" %}
+        <p class="success">
+          予約が確定しました。確認メールをお送りしました。
+        </p>
+      {% elif mode == "ready" %}
+        <form method="post">
+          {% csrf_token %}
+          <button type="submit">{{ continue_label }}</button>
+        </form>
+        <p class="note">
+          {% if is_free %}
+            ボタンを押すと予約が確定し、レッスンの枠が確保されます。
+          {% else %}
+            ボタンを押すとお支払いが始まり、その間レッスンの枠が確保されます。
+          {% endif %}
+        </p>
+      {% endif %}
+
+      {% if home_url %}
+        <a class="home" href="{{ home_url }}">クラブのページへ</a>
+      {% endif %}
+    {% endif %}
+  </main>
+</body>
+</html>

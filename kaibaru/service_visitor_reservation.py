@@ -1,25 +1,20 @@
-# service_reservation.py
+import secrets
 
-import hashlib
-import stripe
-
-from django.db import transaction
-from django.db.models import Q
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
-from .models import Lesson, Reservation
-
-from datetime import datetime, timezone as dt_timezone
-
+from .models import Reservation
 from .rules_eligibility import assert_visitor_eligible_for_lesson
 from .rules_reservations import (
     assert_reservation_horizon,
-    assert_visitor_reservation_caps,
+    display_reservation_name,
+    hold_cutoff_at,
+    hold_is_active,
+    make_reservation_key,
+    request_is_fresh,
     resolve_max_days_ahead,
 )
-
-STRIPE_CHECKOUT_MINUTES = 30
-RESERVATION_HOLD_MINUTES = 31
+from .service_reservation_start import queue_reservation_start_email
 
 
 class VisitorReservationService:
@@ -37,304 +32,273 @@ class VisitorReservationService:
         age=None,
         gender="",
     ):
-        if lesson.club_id != club.id:
-            raise ValueError(
-                "このレッスンは指定されたクラブに属していません。"
-            )
-
-        # -------------------------
-        # Reservation availability
-        # -------------------------
-
-        if club.visitor_reservations_disabled:
-            raise ValueError(
-                "現在、ビジター予約を受け付けていません。"
-            )
-
-        if lesson.visitor_reservation_disabled:
-            raise ValueError(
-                "このレッスンではビジター予約を受け付けていません。"
-            )
-
-        # -------------------------
-        # Determine price
-        # -------------------------
-
-        if lesson.visitor_reservation_price is not None:
-            reservation_price = (
-                lesson.visitor_reservation_price
-            )
-        else:
-            reservation_price = (
-                club.visitor_reservation_price
-            )
-
-        if reservation_price is None:
-            raise ValueError(
-                "このレッスンはビジター予約を受け付けていません。"
-            )
-
-        # -------------------------
-        # Validate date
-        # -------------------------
-
-        if lesson.weekday != reservation_date.weekday():
-            raise ValueError(
-                "選択した日付がレッスンの曜日と一致していません。"
-            )
-
-        assert_visitor_eligible_for_lesson(
+        prepared = _prepare_visitor_request(
+            club=club,
+            lesson=lesson,
+            reservation_date=reservation_date,
+            full_name=full_name,
+            email=email,
+            phone_number=phone_number,
+            user=user,
             age=age,
             gender=gender,
-            lesson=lesson,
         )
 
-        assert_reservation_horizon(
-            reservation_date=reservation_date,
-            max_days_ahead=resolve_max_days_ahead(
-                lesson.visitor_reservation_max_days_ahead,
-                club.visitor_reservation_max_days_ahead,
-            ),
-        )
-
-        # -------------------------
-        # Stripe
-        # -------------------------
-
-        if not club.stripe_account_id:
-            raise ValueError(
-                "このクラブではオンライン決済が設定されていません。"
-            )
-
-        # -------------------------
-        # Customer information
-        # -------------------------
-
-        email = email.strip().lower()
-        full_name = full_name.strip()
-        phone_number = phone_number.strip()
-
-        if not full_name:
-            raise ValueError(
-                "お名前を入力してください。"
-            )
-
-        if user is not None:
-            email = user.email.strip().lower()
-
-            if not email:
-                raise ValueError(
-                    "アカウントにメールアドレスが"
-                    "登録されていません。"
+        try:
+            with transaction.atomic():
+                token, reservation_ids = _save_visitor_reservation(
+                    **prepared
                 )
-        else:
-            email = email.strip().lower()
-
-            if not email:
-                raise ValueError(
-                    "メールアドレスを入力してください。"
-            )
-        # -------------------------
-        # Idempotency key
-        # -------------------------
-
-        reservation_key = hashlib.sha256(
-            (
-                f"visitor:"
-                f"{lesson.id}:"
-                f"{reservation_date.isoformat()}:"
-                f"{email}"
-            ).encode()
-        ).hexdigest()
-
-        now = timezone.now()
-
-        hold_cutoff = (
-            now
-            - timezone.timedelta(
-                minutes=RESERVATION_HOLD_MINUTES
-            )
-        )
-
-        # -------------------------
-        # Create reservation
-        # -------------------------
-
-        with transaction.atomic():
-
-            locked_lesson = (
-                Lesson.objects
-                .select_for_update()
-                .get(id=lesson.id)
-            )
-
-            # Prevent duplicate reservation attempts.
+                queue_reservation_start_email(token)
+        except IntegrityError:
             existing = (
                 Reservation.objects
-                .filter(
-                    reservation_key=reservation_key
-                )
+                .filter(reservation_key=prepared["reservation_key"])
                 .first()
             )
 
-            if existing:
-
-                if (
-                    existing.status
-                    == Reservation.Status.PAID
-                ):
-                    raise ValueError(
-                        "このレッスンはすでに予約済みです。"
-                    )
-
-                raise ValueError(
-                    "このレッスンの予約処理が"
-                    "すでに開始されています。"
+            if existing and existing.start_token:
+                from .tasks_emails import (
+                    send_reservation_start_email,
                 )
 
-            # -------------------------
-            # Reservation limit
-            # -------------------------
-
-            if (
-                locked_lesson.reservation_limit
-                is not None
-            ):
-
-                active_reservations = (
-                    Reservation.objects
-                    .filter(
-                        lesson=locked_lesson,
-                        reservation_date=reservation_date,
-                    )
-                    .filter(
-                        Q(
-                            status=
-                            Reservation.Status.PAID
-                        )
-                        |
-                        Q(
-                            status=
-                            Reservation.Status.UNPAID,
-                            created_at__gte=
-                            hold_cutoff,
-                        )
-                    )
-                    .count()
+                send_reservation_start_email.delay(
+                    existing.start_token
                 )
 
-                if (
-                    active_reservations
-                    >= locked_lesson.reservation_limit
-                ):
-                    raise ValueError(
-                        "このレッスンは満員です。"
-                    )
+                return _email_sent_result([existing.id])
 
-            assert_visitor_reservation_caps(
-                club=club,
-                lesson=locked_lesson,
-                email=email,
-                hold_cutoff=hold_cutoff,
+            raise ValueError(
+                "このレッスンの予約処理がすでに開始されています。"
             )
 
-            # -------------------------
-            # Create local reservation
-            # -------------------------
+        return _email_sent_result(reservation_ids)
 
-            reservation = Reservation.objects.create(
-                lesson=locked_lesson,
-                club=club,
-                member=None,
-                user=user,
-                payment_method="stripe",
-                reservation_type=(
-                    Reservation.ReservationType.VISITOR
-                ),
-                status=Reservation.Status.UNPAID,
-                full_name=full_name,
-                email=email,
-                phone_number=phone_number,
-                age=age,
-                gender=gender or "",
-                amount=reservation_price,
-                currency="jpy",
-                reservation_date=reservation_date,
-                reservation_key=reservation_key,
-            )
 
-        # -------------------------
-        # Stripe Checkout
-        # -------------------------
+def _email_sent_result(reservation_ids):
+    return {
+        "success": True,
+        "email_sent": True,
+        "requires_checkout": False,
+        "paid": False,
+        "reservation_id": reservation_ids[0],
+        "reservation_ids": reservation_ids,
+    }
 
-        try:
 
-            session = stripe.checkout.Session.create(
-                mode="payment",
-                payment_method_types=["card"],
-                customer_email=email,
-                expires_at=int(
-                    (timezone.now() + timezone.timedelta(minutes=STRIPE_CHECKOUT_MINUTES))
-                    .timestamp()
-                ),
-                line_items=[
-                    {
-                        "price_data": {
-                            "currency":
-                                reservation.currency,
-                            "product_data": {
-                                "name":
-                                    locked_lesson.title,
-                            },
-                            "unit_amount":
-                                reservation.amount,
-                        },
-                        "quantity": 1,
-                    }
-                ],
-                metadata={
-                    "reservation_id":
-                        str(reservation.id),
-                    "club_id":
-                        str(club.id),
-                    "lesson_id":
-                        str(locked_lesson.id),
-                    "reservation_type":
-                        "visitor",
-                },
-                success_url=(
-                    f"https://{club.subdomain}.kaibaru.jp/"
-                    f"?reservation=success"
-                    f"&reservation_id={reservation.id}"
-                ),
-                cancel_url=(
-                    f"https://{club.subdomain}.kaibaru.jp/"
-                    f"?reservation=cancel"
-                    f"&reservation_id={reservation.id}"
-                ),
-                stripe_account=club.stripe_account_id,
-                idempotency_key=(
-                    f"visitor_reservation_"
-                    f"{reservation.id}"
-                ),
-            )
-
-        except Exception:
-            reservation.delete()
-            raise
-
-        reservation.stripe_checkout_session_id = (
-            session.id
+def _prepare_visitor_request(
+    *,
+    club,
+    lesson,
+    reservation_date,
+    full_name,
+    email,
+    phone_number,
+    user,
+    age,
+    gender,
+):
+    if lesson.club_id != club.id:
+        raise ValueError(
+            "このレッスンは指定されたクラブに属していません。"
         )
 
-        reservation.save(
-            update_fields=[
-                "stripe_checkout_session_id"
-            ]
+    if club.visitor_reservations_disabled:
+        raise ValueError(
+            "現在、ビジター予約を受け付けていません。"
         )
 
-        return {
-            "reservation_id": reservation.id,
-            "checkout_session_id": session.id,
-            "checkout_url": session.url,
-        }
+    if lesson.visitor_reservation_disabled:
+        raise ValueError(
+            "このレッスンではビジター予約を受け付けていません。"
+        )
+
+    if lesson.visitor_reservation_price is not None:
+        reservation_price = lesson.visitor_reservation_price
+    else:
+        reservation_price = club.visitor_reservation_price
+
+    if reservation_price is None:
+        raise ValueError(
+            "このレッスンはビジター予約を受け付けていません。"
+        )
+
+    if lesson.weekday != reservation_date.weekday():
+        raise ValueError(
+            "選択した日付がレッスンの曜日と一致していません。"
+        )
+
+    assert_visitor_eligible_for_lesson(
+        age=age,
+        gender=gender,
+        lesson=lesson,
+    )
+
+    assert_reservation_horizon(
+        reservation_date=reservation_date,
+        max_days_ahead=resolve_max_days_ahead(
+            lesson.visitor_reservation_max_days_ahead,
+            club.visitor_reservation_max_days_ahead,
+        ),
+    )
+
+    if reservation_price > 0 and not club.stripe_account_id:
+        raise ValueError(
+            "このクラブではオンライン決済が設定されていません。"
+        )
+
+    full_name = display_reservation_name(full_name)
+    phone_number = (phone_number or "").strip()
+    gender = gender or ""
+
+    if not full_name:
+        raise ValueError("お名前を入力してください。")
+
+    if user is not None:
+        email = (user.email or "").strip().lower()
+
+        if not email:
+            raise ValueError(
+                "アカウントにメールアドレスが登録されていません。"
+            )
+    else:
+        email = (email or "").strip().lower()
+
+        if not email:
+            raise ValueError("メールアドレスを入力してください。")
+
+    reservation_key = make_reservation_key(
+        kind="visitor",
+        lesson_id=lesson.id,
+        reservation_date=reservation_date,
+        email=email,
+    )
+
+    return {
+        "club": club,
+        "lesson": lesson,
+        "reservation_date": reservation_date,
+        "full_name": full_name,
+        "email": email,
+        "phone_number": phone_number,
+        "user": user,
+        "age": age,
+        "gender": gender,
+        "reservation_price": reservation_price,
+        "reservation_key": reservation_key,
+    }
+
+
+def _save_visitor_reservation(
+    *,
+    club,
+    lesson,
+    reservation_date,
+    full_name,
+    email,
+    phone_number,
+    user,
+    age,
+    gender,
+    reservation_price,
+    reservation_key,
+):
+    now = timezone.now()
+    hold_cutoff = hold_cutoff_at(now)
+
+    existing = (
+        Reservation.objects
+        .select_for_update()
+        .filter(reservation_key=reservation_key)
+        .first()
+    )
+
+    if existing:
+        if existing.status == Reservation.Status.PAID:
+            raise ValueError("このレッスンはすでに予約済みです。")
+
+        if (
+            existing.status == Reservation.Status.UNPAID
+            and hold_is_active(existing, hold_cutoff)
+        ):
+            raise ValueError(
+                "このレッスンの予約はお支払い手続き中です。"
+                "メールのリンクからお支払いを続けてください。"
+            )
+
+        if (
+            existing.status == Reservation.Status.NOT_STARTED
+            and request_is_fresh(existing, now)
+            and existing.start_token
+        ):
+            existing.full_name = full_name
+            existing.phone_number = phone_number
+            existing.age = age
+            existing.gender = gender
+            existing.amount = reservation_price
+            existing.user = user
+            existing.requested_at = now
+            existing.save(
+                update_fields=[
+                    "full_name",
+                    "phone_number",
+                    "age",
+                    "gender",
+                    "amount",
+                    "user",
+                    "requested_at",
+                ]
+            )
+
+            return existing.start_token, [existing.id]
+
+        token = secrets.token_urlsafe(32)
+        existing.lesson = lesson
+        existing.club = club
+        existing.user = user
+        existing.payment_method = "stripe"
+        existing.reservation_type = Reservation.ReservationType.VISITOR
+        existing.status = Reservation.Status.NOT_STARTED
+        existing.full_name = full_name
+        existing.email = email
+        existing.phone_number = phone_number
+        existing.age = age
+        existing.gender = gender
+        existing.amount = reservation_price
+        existing.currency = "jpy"
+        existing.reservation_date = reservation_date
+        existing.start_token = token
+        existing.requested_at = now
+        existing.checkout_started_at = None
+        existing.stripe_checkout_session_id = None
+        existing.stripe_payment_intent_id = None
+        existing.paid_at = None
+        existing.confirmation_email_sent = False
+        existing.save()
+
+        return token, [existing.id]
+
+    token = secrets.token_urlsafe(32)
+
+    reservation = Reservation.objects.create(
+        lesson=lesson,
+        club=club,
+        member=None,
+        user=user,
+        payment_method="stripe",
+        reservation_type=Reservation.ReservationType.VISITOR,
+        status=Reservation.Status.NOT_STARTED,
+        full_name=full_name,
+        email=email,
+        phone_number=phone_number,
+        age=age,
+        gender=gender,
+        amount=reservation_price,
+        currency="jpy",
+        reservation_date=reservation_date,
+        reservation_key=reservation_key,
+        start_token=token,
+        requested_at=now,
+    )
+
+    return token, [reservation.id]

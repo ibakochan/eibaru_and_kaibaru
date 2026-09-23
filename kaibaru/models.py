@@ -1039,6 +1039,7 @@ class Reservation(models.Model):
     class Status(models.TextChoices):
         UNPAID = "unpaid", "Unpaid"
         PAID = "paid", "Paid"
+        NOT_STARTED = "not_started", "Not started"
 
     class PaymentMethod(models.TextChoices):
         STRIPE = "stripe", "Stripe"
@@ -1095,14 +1096,31 @@ class Reservation(models.Model):
         max_length=255,
         null=True,
         blank=True,
-        unique=True
     )
 
     stripe_payment_intent_id = models.CharField(
         max_length=255,
         null=True,
         blank=True,
-        unique=True
+    )
+
+    # Shared by everyone submitted on one form. The email link
+    # looks this up and starts checkout for the whole group.
+    start_token = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        db_index=True,
+    )
+
+    requested_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    checkout_started_at = models.DateTimeField(
+        null=True,
+        blank=True,
     )
 
     phone_number = models.CharField(

@@ -21,6 +21,7 @@ from .rules_reservations import (
     assert_member_reservation_caps,
     assert_reservation_horizon,
     resolve_max_days_ahead,
+    unpaid_hold_q,
 )
 
 
@@ -442,17 +443,9 @@ class MemberReservationService:
                         reservation_date=reservation_date,
                     )
                     .filter(
-                        Q(
-                            status=
-                            Reservation.Status.PAID
-                        )
+                        Q(status=Reservation.Status.PAID)
                         |
-                        Q(
-                            status=
-                            Reservation.Status.UNPAID,
-                            created_at__gte=
-                            hold_cutoff,
-                        )
+                        unpaid_hold_q(hold_cutoff)
                     )
                     .count()
                 )
