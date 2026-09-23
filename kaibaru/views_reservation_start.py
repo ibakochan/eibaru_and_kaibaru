@@ -42,6 +42,8 @@ def _render(request, context, status=200):
         context,
         status=status,
     )
-    response["Referrer-Policy"] = "no-referrer"
+    # no-referrer makes the browser send Origin: null, which Django
+    # rejects. strict-origin still hides the token path from Stripe.
+    response["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response["X-Robots-Tag"] = "noindex, nofollow"
     return response
