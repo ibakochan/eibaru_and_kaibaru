@@ -49,6 +49,7 @@ from .locks_and_reconciliation import subscription_lock, CacheLockError, StripeS
 import urllib.parse
 
 from .service_visitor_reservation import VisitorReservationService
+from .service_trial_reservation import TrialReservationService
 
 from .billing import (
     get_next_month_start,
@@ -2729,6 +2730,192 @@ def create_visitor_reservation(
         )
 
     return JsonResponse(result)
+
+
+@require_POST
+@json_validation_errors
+def create_trial_reservation(
+    request,
+    lesson_id,
+):
+
+    lesson = get_object_or_404(
+        Lesson,
+        id=lesson_id,
+    )
+
+    club = lesson.club
+
+    user = (
+        request.user
+        if request.user.is_authenticated
+        else None
+    )
+
+    if user:
+        member_exists = Member.objects.filter(
+            club=club,
+            user=request.user,
+        ).exists()
+
+        if member_exists:
+            return JsonResponse(
+                {
+                    "error": "会員の方は体験予約をご利用できません。"
+                },
+                status=400,
+            )
+
+    if club.is_deleted:
+        return JsonResponse(
+            {
+                "error": "このクラブは利用できません。"
+            },
+            status=400,
+        )
+
+    full_name = request.POST.get(
+        "full_name",
+        "",
+    ).strip()
+
+    email = request.POST.get(
+        "email",
+        "",
+    ).strip()
+
+    phone_number = request.POST.get(
+        "phone_number",
+        "",
+    ).strip()
+
+    age_raw = request.POST.get("age", "").strip()
+    gender = request.POST.get("gender", "").strip()
+
+    reservation_date = request.POST.get(
+        "reservation_date",
+        "",
+    ).strip()
+
+    if not full_name:
+        return JsonResponse(
+            {
+                "error": "お名前を入力してください。"
+            },
+            status=400,
+        )
+
+    if not user and not email:
+        return JsonResponse(
+            {
+                "error": (
+                    "メールアドレスを入力してください。"
+                )
+            },
+            status=400,
+        )
+
+    if user and not user.email:
+        return JsonResponse(
+            {
+                "error": (
+                    "アカウントにメールアドレスが"
+                    "登録されていません。"
+                )
+            },
+            status=400,
+        )
+
+    if not reservation_date:
+        return JsonResponse(
+            {
+                "error": "予約日を指定してください。"
+            },
+            status=400,
+        )
+
+    try:
+
+        reservation_date = datetime.strptime(
+            reservation_date,
+            "%Y-%m-%d",
+        ).date()
+
+    except ValueError:
+
+        return JsonResponse(
+            {
+                "error": "予約日の形式が正しくありません。"
+            },
+            status=400,
+        )
+
+    age = None
+    if age_raw:
+        try:
+            age = int(age_raw)
+        except ValueError:
+            return JsonResponse(
+                {
+                    "error": "年齢の形式が正しくありません。"
+                },
+                status=400,
+            )
+
+        if age < 0 or age > 120:
+            return JsonResponse(
+                {
+                    "error": "年齢の形式が正しくありません。"
+                },
+                status=400,
+            )
+
+    if gender and gender not in ("male", "female"):
+        return JsonResponse(
+            {
+                "error": "性別の指定が正しくありません。"
+            },
+            status=400,
+        )
+
+    try:
+
+        result = TrialReservationService.create_reservation(
+            club=club,
+            lesson=lesson,
+            reservation_date=reservation_date,
+            full_name=full_name,
+            email=email,
+            phone_number=phone_number,
+            user=user,
+            age=age,
+            gender=gender,
+        )
+
+    except ValueError as e:
+
+        return JsonResponse(
+            {
+                "error": str(e)
+            },
+            status=400,
+        )
+
+    except Exception:
+
+        logger.exception(
+            "Trial reservation creation failed"
+        )
+
+        return JsonResponse(
+            {
+                "error": "予約処理中にエラーが発生しました。"
+            },
+            status=500,
+        )
+
+    return JsonResponse(result)
+
 
 @require_POST
 @json_validation_errors

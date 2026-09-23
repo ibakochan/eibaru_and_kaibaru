@@ -68,6 +68,7 @@ urlpatterns = [
     path("create_ticket_purchase/<int:package_id>/", stripe_views.create_ticket_purchase, name="create_ticket_purchase",),
 
     path('create_visitor_reservation/<int:lesson_id>/', stripe_views.create_visitor_reservation, name='create_visitor_reservation'),
+    path('create_trial_reservation/<int:lesson_id>/', stripe_views.create_trial_reservation, name='create_trial_reservation'),
     path('change_stripe_payment_method/<int:club_id>/', stripe_views.change_stripe_payment_method, name='change_stripe_payment_method'),
 
     path(

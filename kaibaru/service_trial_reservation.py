@@ -1,0 +1,335 @@
+import hashlib
+import stripe
+
+from django.db import transaction
+from django.db.models import Q
+from django.utils import timezone
+
+from .models import Lesson, Member, Reservation
+from .rules_eligibility import assert_visitor_eligible_for_lesson
+from .tasks_emails import send_visitor_reservation_confirmation_email
+
+STRIPE_CHECKOUT_MINUTES = 30
+RESERVATION_HOLD_MINUTES = 31
+
+
+class TrialReservationService:
+
+    @staticmethod
+    def create_reservation(
+        *,
+        club,
+        lesson,
+        reservation_date,
+        full_name,
+        email,
+        phone_number="",
+        user=None,
+        age=None,
+        gender="",
+    ):
+        if lesson.club_id != club.id:
+            raise ValueError(
+                "このレッスンは指定されたクラブに属していません。"
+            )
+
+        if user is not None:
+            member_exists = Member.objects.filter(
+                club=club,
+                user=user,
+            ).exists()
+
+            if member_exists:
+                raise ValueError(
+                    "会員の方は体験予約をご利用できません。"
+                )
+
+        # -------------------------
+        # Reservation availability
+        # -------------------------
+
+        if club.trials_disabled:
+            raise ValueError(
+                "現在、体験予約を受け付けていません。"
+            )
+
+        if lesson.trial_disabled:
+            raise ValueError(
+                "このレッスンでは体験予約を受け付けていません。"
+            )
+
+        # -------------------------
+        # Determine price
+        # -------------------------
+
+        if lesson.trial_price is not None:
+            reservation_price = lesson.trial_price
+        else:
+            reservation_price = club.trial_price
+
+        if reservation_price is None:
+            reservation_price = 0
+
+        # -------------------------
+        # Validate date
+        # -------------------------
+
+        if lesson.weekday != reservation_date.weekday():
+            raise ValueError(
+                "選択した日付がレッスンの曜日と一致していません。"
+            )
+
+        assert_visitor_eligible_for_lesson(
+            age=age,
+            gender=gender,
+            lesson=lesson,
+        )
+
+        # -------------------------
+        # Stripe
+        # -------------------------
+
+        if reservation_price > 0 and not club.stripe_account_id:
+            raise ValueError(
+                "このクラブではオンライン決済が設定されていません。"
+            )
+
+        # -------------------------
+        # Customer information
+        # -------------------------
+
+        full_name = full_name.strip()
+        phone_number = phone_number.strip()
+
+        if not full_name:
+            raise ValueError(
+                "お名前を入力してください。"
+            )
+
+        if user is not None:
+            email = user.email.strip().lower()
+
+            if not email:
+                raise ValueError(
+                    "アカウントにメールアドレスが"
+                    "登録されていません。"
+                )
+        else:
+            email = email.strip().lower()
+
+            if not email:
+                raise ValueError(
+                    "メールアドレスを入力してください。"
+                )
+
+        # -------------------------
+        # Idempotency key
+        # -------------------------
+
+        reservation_key = hashlib.sha256(
+            (
+                f"trial:"
+                f"{lesson.id}:"
+                f"{reservation_date.isoformat()}:"
+                f"{email}"
+            ).encode()
+        ).hexdigest()
+
+        now = timezone.now()
+
+        hold_cutoff = (
+            now
+            - timezone.timedelta(
+                minutes=RESERVATION_HOLD_MINUTES
+            )
+        )
+
+        is_free = reservation_price == 0
+
+        # -------------------------
+        # Create reservation
+        # -------------------------
+
+        with transaction.atomic():
+
+            locked_lesson = (
+                Lesson.objects
+                .select_for_update()
+                .get(id=lesson.id)
+            )
+
+            existing = (
+                Reservation.objects
+                .filter(
+                    reservation_key=reservation_key
+                )
+                .first()
+            )
+
+            if existing:
+
+                if (
+                    existing.status
+                    == Reservation.Status.PAID
+                ):
+                    raise ValueError(
+                        "このレッスンはすでに予約済みです。"
+                    )
+
+                raise ValueError(
+                    "このレッスンの予約処理が"
+                    "すでに開始されています。"
+                )
+
+            # -------------------------
+            # Reservation limit
+            # -------------------------
+
+            if (
+                locked_lesson.reservation_limit
+                is not None
+            ):
+
+                active_reservations = (
+                    Reservation.objects
+                    .filter(
+                        lesson=locked_lesson,
+                        reservation_date=reservation_date,
+                    )
+                    .filter(
+                        Q(
+                            status=
+                            Reservation.Status.PAID
+                        )
+                        |
+                        Q(
+                            status=
+                            Reservation.Status.UNPAID,
+                            created_at__gte=
+                            hold_cutoff,
+                        )
+                    )
+                    .count()
+                )
+
+                if (
+                    active_reservations
+                    >= locked_lesson.reservation_limit
+                ):
+                    raise ValueError(
+                        "このレッスンは満員です。"
+                    )
+
+            reservation = Reservation.objects.create(
+                lesson=locked_lesson,
+                club=club,
+                member=None,
+                user=user,
+                payment_method="stripe",
+                reservation_type=(
+                    Reservation.ReservationType.TRIAL
+                ),
+                status=(
+                    Reservation.Status.PAID
+                    if is_free
+                    else Reservation.Status.UNPAID
+                ),
+                full_name=full_name,
+                email=email,
+                phone_number=phone_number,
+                age=age,
+                gender=gender or "",
+                amount=reservation_price,
+                currency="jpy",
+                reservation_date=reservation_date,
+                reservation_key=reservation_key,
+                paid_at=now if is_free else None,
+            )
+
+        if is_free:
+            send_visitor_reservation_confirmation_email.delay(
+                reservation.id
+            )
+
+            return {
+                "reservation_id": reservation.id,
+                "success": True,
+                "paid": True,
+                "requires_checkout": False,
+            }
+
+        # -------------------------
+        # Stripe Checkout
+        # -------------------------
+
+        try:
+
+            session = stripe.checkout.Session.create(
+                mode="payment",
+                payment_method_types=["card"],
+                customer_email=email,
+                expires_at=int(
+                    (timezone.now() + timezone.timedelta(minutes=STRIPE_CHECKOUT_MINUTES))
+                    .timestamp()
+                ),
+                line_items=[
+                    {
+                        "price_data": {
+                            "currency":
+                                reservation.currency,
+                            "product_data": {
+                                "name":
+                                    locked_lesson.title,
+                            },
+                            "unit_amount":
+                                reservation.amount,
+                        },
+                        "quantity": 1,
+                    }
+                ],
+                metadata={
+                    "reservation_id":
+                        str(reservation.id),
+                    "club_id":
+                        str(club.id),
+                    "lesson_id":
+                        str(locked_lesson.id),
+                    "reservation_type":
+                        "trial",
+                },
+                success_url=(
+                    f"https://{club.subdomain}.kaibaru.jp/"
+                    f"?reservation=success"
+                    f"&reservation_id={reservation.id}"
+                ),
+                cancel_url=(
+                    f"https://{club.subdomain}.kaibaru.jp/"
+                    f"?reservation=cancel"
+                    f"&reservation_id={reservation.id}"
+                ),
+                stripe_account=club.stripe_account_id,
+                idempotency_key=(
+                    f"trial_reservation_"
+                    f"{reservation.id}"
+                ),
+            )
+
+        except Exception:
+            reservation.delete()
+            raise
+
+        reservation.stripe_checkout_session_id = (
+            session.id
+        )
+
+        reservation.save(
+            update_fields=[
+                "stripe_checkout_session_id"
+            ]
+        )
+
+        return {
+            "reservation_id": reservation.id,
+            "checkout_session_id": session.id,
+            "checkout_url": session.url,
+        }
