@@ -2561,7 +2561,8 @@ class StripeToCashInvoiceReconciler:
 
 class MemberReservationPaymentReconciler:
     """
-    Reconciles old unpaid member reservations against Stripe.
+    Reconciles old unpaid member, visitor, and trial reservations
+    against Stripe.
 
     There are two Stripe payment paths:
 
@@ -2639,13 +2640,48 @@ class MemberReservationPaymentReconciler:
 
     CHECKOUT_EXPIRED_STATUS = "expired"
 
+    @staticmethod
+    def _checkout_matches_reservation(metadata, reservation_id):
+        if str(metadata.get("reservation_id")) == str(reservation_id):
+            return True
+
+        raw_ids = metadata.get("reservation_ids") or ""
+        return str(reservation_id) in {
+            part.strip()
+            for part in str(raw_ids).split(",")
+            if part.strip()
+        }
+
+    @staticmethod
+    def _queue_customer_paid_email(reservation):
+        if reservation.reservation_type not in (
+            Reservation.ReservationType.VISITOR,
+            Reservation.ReservationType.TRIAL,
+        ):
+            return
+
+        reservation_id = reservation.id
+
+        def send(reservation_id=reservation_id):
+            from .tasks_emails import (
+                send_visitor_reservation_confirmation_email,
+            )
+
+            send_visitor_reservation_confirmation_email.delay(
+                reservation_id
+            )
+
+        transaction.on_commit(send)
+
     @classmethod
     def reconcile_old_unpaid_reservations(cls):
         """
-        Find old unpaid member reservations and reconcile them
-        against the Stripe object associated with the reservation.
+        Find old unpaid reservations and reconcile them against
+        the Stripe object associated with the reservation.
 
         Only reservations older than HOLD_MINUTES are considered.
+        Visitor and trial holds start when checkout starts, not
+        when the email request was created.
 
         Stripe/API failures never cause destructive cleanup.
         """
@@ -2657,16 +2693,23 @@ class MemberReservationPaymentReconciler:
             - timedelta(minutes=cls.HOLD_MINUTES)
         )
 
+        hold_expired = Q(checkout_started_at__lt=cutoff) | Q(
+            checkout_started_at__isnull=True,
+            created_at__lt=cutoff,
+        )
+
         reservations = (
             Reservation.objects
             .filter(
                 status=Reservation.Status.UNPAID,
-                created_at__lt=cutoff,
                 payment_method="stripe",
-                reservation_type=(
-                    Reservation.ReservationType.MEMBER
-                ),
+                reservation_type__in=[
+                    Reservation.ReservationType.MEMBER,
+                    Reservation.ReservationType.VISITOR,
+                    Reservation.ReservationType.TRIAL,
+                ],
             )
+            .filter(hold_expired)
             .select_related("club")
             .order_by(
                 "created_at",
@@ -2811,21 +2854,26 @@ class MemberReservationPaymentReconciler:
                 return "skipped"
 
             # -------------------------------------------------
-            # Only member Stripe reservations belong here.
+            # Member, visitor, and trial Stripe reservations.
             # -------------------------------------------------
 
             if (
                 reservation.payment_method
                 != "stripe"
                 or reservation.reservation_type
-                != Reservation.ReservationType.MEMBER
+                not in (
+                    Reservation.ReservationType.MEMBER,
+                    Reservation.ReservationType.VISITOR,
+                    Reservation.ReservationType.TRIAL,
+                )
             ):
 
                 logger.info(
                     "[MEMBER RESERVATION RECONCILE] "
-                    "Reservation=%s is not a member Stripe "
-                    "reservation. Skipping.",
+                    "Reservation=%s type=%s is not reconciled "
+                    "here. Skipping.",
                     reservation.id,
+                    reservation.reservation_type,
                 )
 
                 return "skipped"
@@ -2857,7 +2905,12 @@ class MemberReservationPaymentReconciler:
                 )
             )
 
-            if reservation.created_at >= cutoff:
+            started_at = (
+                reservation.checkout_started_at
+                or reservation.created_at
+            )
+
+            if started_at >= cutoff:
 
                 logger.info(
                     "[MEMBER RESERVATION RECONCILE] "
@@ -2871,7 +2924,14 @@ class MemberReservationPaymentReconciler:
             # CHECKOUT PATH
             # =================================================
 
-            if reservation.stripe_checkout_session_id:
+            if (
+                reservation.reservation_type
+                in (
+                    Reservation.ReservationType.VISITOR,
+                    Reservation.ReservationType.TRIAL,
+                )
+                or reservation.stripe_checkout_session_id
+            ):
 
                 return cls._reconcile_checkout(
                     reservation=reservation,
@@ -3078,6 +3138,8 @@ class MemberReservationPaymentReconciler:
                 payment_intent.id,
             )
 
+            cls._queue_customer_paid_email(reservation)
+
             return "paid"
 
         # -----------------------------------------------------
@@ -3257,9 +3319,9 @@ class MemberReservationPaymentReconciler:
                     session.get("metadata", {})
                 )
 
-                if (
-                    str(metadata.get("reservation_id"))
-                    == str(reservation.id)
+                if cls._checkout_matches_reservation(
+                    metadata,
+                    reservation.id,
                 ):
 
                     matching_sessions.append(
@@ -3388,6 +3450,8 @@ class MemberReservationPaymentReconciler:
                 session_id,
                 payment_intent_id,
             )
+
+            cls._queue_customer_paid_email(reservation)
 
             return "paid"
 

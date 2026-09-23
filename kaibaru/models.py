@@ -1083,6 +1083,10 @@ class Reservation(models.Model):
         default=False,
     )
 
+    trial_staff_email_sent = models.BooleanField(
+        default=False,
+    )
+
     status = models.CharField(
         max_length=20,
         choices=Status.choices,

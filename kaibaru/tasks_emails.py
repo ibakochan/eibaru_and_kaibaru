@@ -1167,6 +1167,8 @@ def send_visitor_reservation_confirmation_email(
         )
         return
 
+    _queue_trial_staff_email(reservation)
+
     if not reservation.email:
         logger.warning(
             "[EMAIL] Visitor reservation=%s "
@@ -1462,5 +1464,218 @@ def send_reservation_start_email(self, start_token):
         [person.id for person in reservations],
         reservation.email,
         club_name,
+    )
+
+
+def _queue_trial_staff_email(reservation):
+    from .models import Reservation
+
+    if reservation.reservation_type != Reservation.ReservationType.TRIAL:
+        return
+
+    if reservation.trial_staff_email_sent:
+        return
+
+    send_trial_staff_email.delay(reservation.id)
+
+
+def _member_account_email(member):
+    if member is None:
+        return None
+
+    user = getattr(member, "user", None)
+    if user is not None and user.email:
+        return user.email.strip()
+
+    owner = getattr(member, "owner", None)
+    if owner is not None and owner.email:
+        return owner.email.strip()
+
+    return None
+
+
+@shared_task(
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=30,
+    retry_kwargs={"max_retries": 5},
+)
+def send_trial_staff_email(self, reservation_id):
+    from .models import Reservation
+
+    seed = (
+        Reservation.objects
+        .select_related(
+            "club",
+            "club__owner",
+            "lesson",
+            "lesson__instructor",
+            "lesson__instructor__user",
+            "lesson__instructor__owner",
+        )
+        .filter(id=reservation_id)
+        .first()
+    )
+
+    if not seed:
+        return
+
+    if (
+        seed.reservation_type != Reservation.ReservationType.TRIAL
+        or seed.status != Reservation.Status.PAID
+        or seed.trial_staff_email_sent
+    ):
+        return
+
+    if seed.start_token:
+        group = list(
+            Reservation.objects
+            .select_related(
+                "club",
+                "club__owner",
+                "lesson",
+                "lesson__instructor",
+                "lesson__instructor__user",
+                "lesson__instructor__owner",
+            )
+            .filter(
+                start_token=seed.start_token,
+                lesson_id=seed.lesson_id,
+                reservation_date=seed.reservation_date,
+                reservation_type=Reservation.ReservationType.TRIAL,
+                status=Reservation.Status.PAID,
+                trial_staff_email_sent=False,
+            )
+            .order_by("id")
+        )
+    else:
+        group = [seed]
+
+    if not group:
+        return
+
+    with transaction.atomic():
+        claimed_ids = list(
+            Reservation.objects
+            .select_for_update()
+            .filter(
+                id__in=[reservation.id for reservation in group],
+                status=Reservation.Status.PAID,
+                trial_staff_email_sent=False,
+            )
+            .values_list("id", flat=True)
+        )
+
+        if not claimed_ids:
+            return
+
+        Reservation.objects.filter(id__in=claimed_ids).update(
+            trial_staff_email_sent=True
+        )
+
+    group = [
+        reservation
+        for reservation in group
+        if reservation.id in claimed_ids
+    ]
+    reservation = group[0]
+    club = reservation.club
+    lesson = reservation.lesson
+    club_name = club.title or club.subdomain or "クラブ"
+
+    recipients = []
+    owner_email = (
+        club.owner.email.strip()
+        if club.owner and club.owner.email
+        else ""
+    )
+    if owner_email:
+        recipients.append(owner_email)
+
+    instructor_email = _member_account_email(lesson.instructor)
+    if instructor_email:
+        recipients.append(instructor_email)
+
+    unique_recipients = []
+    seen = set()
+    for email in recipients:
+        key = email.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_recipients.append(email)
+
+    if not unique_recipients:
+        logger.warning(
+            "[EMAIL] Trial staff notice has no recipients "
+            "reservations=%s",
+            claimed_ids,
+        )
+        return
+
+    weekday_names = [
+        "月曜日",
+        "火曜日",
+        "水曜日",
+        "木曜日",
+        "金曜日",
+        "土曜日",
+        "日曜日",
+    ]
+    weekday = weekday_names[reservation.reservation_date.weekday()]
+    date_text = reservation.reservation_date.strftime("%Y年%m月%d日")
+    start_time = lesson.start_time.strftime("%H:%M")
+    end_time = lesson.end_time.strftime("%H:%M")
+    gender_labels = {
+        "male": "男性",
+        "female": "女性",
+    }
+
+    people = []
+    for person in group:
+        age_text = (
+            f"{person.age}歳"
+            if person.age is not None
+            else "未入力"
+        )
+        gender_text = gender_labels.get(person.gender, "未入力")
+        phone_text = person.phone_number or "未入力"
+        amount_text = (
+            "無料" if person.amount == 0 else f"¥{person.amount:,}"
+        )
+        people.append(
+            f"・{person.full_name}\n"
+            f"  年齢：{age_text}\n"
+            f"  性別：{gender_text}\n"
+            f"  電話番号：{phone_text}\n"
+            f"  メール：{person.email}\n"
+            f"  料金：{amount_text}\n"
+            f"  予約番号：{person.id}"
+        )
+
+    people_text = "\n".join(people)
+    subject = f"【{club_name}】体験予約が確定しました"
+    message = (
+        f"{club_name}の体験予約が確定しました。\n\n"
+        f"■ レッスン\n"
+        f"{lesson.title}\n"
+        f"日時：{date_text}（{weekday}）\n"
+        f"時間：{start_time}〜{end_time}\n\n"
+        f"■ 予約者\n"
+        f"{people_text}\n\n"
+        f"{club_name}"
+    )
+
+    EmailMessage(
+        subject=subject,
+        body=message,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        to=unique_recipients,
+    ).send()
+
+    logger.info(
+        "[EMAIL] Trial staff notice sent reservations=%s recipients=%s",
+        [person.id for person in group],
+        unique_recipients,
     )
 

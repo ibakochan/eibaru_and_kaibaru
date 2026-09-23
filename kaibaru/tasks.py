@@ -719,8 +719,8 @@ def reconcile_expired_canceling_subscriptions():
 @shared_task
 def reconcile_member_reservation_payments():
     """
-    Periodic safety-net for member reservations paid through
-    an existing Stripe customer/payment method.
+    Periodic safety-net for member, visitor, and trial
+    reservations paid through Stripe.
 
     Handles the failure window where:
 
