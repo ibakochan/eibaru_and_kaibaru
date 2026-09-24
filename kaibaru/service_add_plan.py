@@ -597,12 +597,20 @@ class SubscriptionAddPlanService:
         # =========================================================
         # DB UPDATE (UNCHANGED)
         # =========================================================
+        payload = mutation.payload
         frozen_price = payload.get("price_at_subscription")
+        frozen_stripe_price_id = payload.get("stripe_price_id")
 
         if frozen_price is None:
             raise ValueError(
                 f"ADD_PLAN mutation {mutation.id} is missing "
                 "frozen price_at_subscription"
+            )
+
+        if not frozen_stripe_price_id:
+            raise ValueError(
+                f"ADD_PLAN mutation {mutation.id} is missing "
+                "frozen stripe_price_id"
             )
 
         with transaction.atomic():
