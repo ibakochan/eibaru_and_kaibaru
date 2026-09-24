@@ -51,7 +51,11 @@ def price_for(event, kind):
 def audience_allows(event, kind):
     if event.audience == Event.Audience.BOTH:
         return True
-    return event.audience == kind
+    if kind == "member":
+        return event.audience == Event.Audience.MEMBERS
+    if kind == "visitor":
+        return event.audience == Event.Audience.VISITORS
+    return False
 
 
 def hold_cutoff_at(now=None):

@@ -2019,6 +2019,7 @@ class EventSerializer(serializers.ModelSerializer):
     spots_taken = serializers.SerializerMethodField()
     spots_left = serializers.SerializerMethodField()
     my_reservation = serializers.SerializerMethodField()
+    my_reservations = serializers.SerializerMethodField()
     guests = serializers.SerializerMethodField()
 
     class Meta:
@@ -2042,6 +2043,7 @@ class EventSerializer(serializers.ModelSerializer):
             "spots_taken",
             "spots_left",
             "my_reservation",
+            "my_reservations",
             "guests",
         ]
 
@@ -2062,13 +2064,18 @@ class EventSerializer(serializers.ModelSerializer):
             return None
         return max(event.reservation_limit - self._held_count(event), 0)
 
-    def get_my_reservation(self, event):
+    def _my_reservations(self, event):
+        cached = getattr(event, "_my_reservations", None)
+        if cached is not None:
+            return cached
+
         request = self.context.get("request")
         user = getattr(request, "user", None)
         if user is None or not user.is_authenticated:
-            return None
+            event._my_reservations = []
+            return []
 
-        reservation = (
+        rows = (
             EventReservation.objects
             .filter(event=event)
             .filter(
@@ -2077,17 +2084,26 @@ class EventSerializer(serializers.ModelSerializer):
                 | Q(member__owner=user)
             )
             .order_by("-id")
-            .first()
         )
-        if reservation is None:
-            return None
+        cached = [
+            {
+                "id": row.id,
+                "member": row.member_id,
+                "status": row.status,
+                "reservation_type": row.reservation_type,
+                "amount": row.amount,
+            }
+            for row in rows
+        ]
+        event._my_reservations = cached
+        return cached
 
-        return {
-            "id": reservation.id,
-            "status": reservation.status,
-            "reservation_type": reservation.reservation_type,
-            "amount": reservation.amount,
-        }
+    def get_my_reservations(self, event):
+        return self._my_reservations(event)
+
+    def get_my_reservation(self, event):
+        rows = self._my_reservations(event)
+        return rows[0] if rows else None
 
     def _viewer_can_manage(self, event):
         if hasattr(self, "_can_manage_events"):
