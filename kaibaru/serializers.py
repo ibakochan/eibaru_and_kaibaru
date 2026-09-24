@@ -2015,6 +2015,21 @@ class LessonSerializer(serializers.ModelSerializer):
 
 
 
+def _event_reservation_detail(row):
+    return {
+        "id": row.id,
+        "member": row.member_id,
+        "member_name": row.member.full_name if row.member_id else "",
+        "full_name": row.full_name,
+        "email": row.email,
+        "phone_number": row.phone_number,
+        "status": row.status,
+        "reservation_type": row.reservation_type,
+        "amount": row.amount,
+        "created_at": row.created_at,
+    }
+
+
 class EventSerializer(serializers.ModelSerializer):
     spots_taken = serializers.SerializerMethodField()
     spots_left = serializers.SerializerMethodField()
@@ -2075,25 +2090,24 @@ class EventSerializer(serializers.ModelSerializer):
             event._my_reservations = []
             return []
 
-        rows = (
-            EventReservation.objects
-            .filter(event=event)
-            .filter(
-                Q(user=user)
-                | Q(member__user=user)
-                | Q(member__owner=user)
-            )
-            .order_by("-id")
+        owned_member_ids = list(
+            event.club.members
+            .filter(owner=user)
+            .values_list("id", flat=True)
         )
+        rows = EventReservation.objects.filter(event=event).select_related("member")
+        if owned_member_ids:
+            rows = rows.filter(member_id__in=owned_member_ids)
+        else:
+            email = (user.email or "").strip()
+            if not email:
+                event._my_reservations = []
+                return []
+            rows = rows.filter(email__iexact=email)
+
         cached = [
-            {
-                "id": row.id,
-                "member": row.member_id,
-                "status": row.status,
-                "reservation_type": row.reservation_type,
-                "amount": row.amount,
-            }
-            for row in rows
+            _event_reservation_detail(row)
+            for row in rows.order_by("-created_at", "-id")
         ]
         event._my_reservations = cached
         return cached
@@ -2113,13 +2127,7 @@ class EventSerializer(serializers.ModelSerializer):
         user = getattr(request, "user", None)
         allowed = False
         if user is not None and user.is_authenticated:
-            if event.club.owner_id == user.id:
-                allowed = True
-            else:
-                allowed = event.club.members.filter(
-                    Q(user=user) | Q(owner=user),
-                    is_manager=True,
-                ).exists()
+            allowed = event.club.owner_id == user.id
 
         self._can_manage_events = allowed
         return allowed
@@ -2128,22 +2136,13 @@ class EventSerializer(serializers.ModelSerializer):
         if not self._viewer_can_manage(event):
             return None
 
-        from .service_event import held_reservations, hold_cutoff_at
-
         rows = (
-            held_reservations(event, hold_cutoff_at())
-            .order_by("created_at", "id")
+            EventReservation.objects
+            .filter(event=event)
+            .select_related("member")
+            .order_by("-created_at", "-id")
         )
-        return [
-            {
-                "id": row.id,
-                "full_name": row.full_name,
-                "status": row.status,
-                "reservation_type": row.reservation_type,
-                "amount": row.amount,
-            }
-            for row in rows
-        ]
+        return [_event_reservation_detail(row) for row in rows]
 
 
 class ClubSerializer(serializers.ModelSerializer):
