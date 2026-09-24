@@ -12,6 +12,7 @@ from .models import (
     Lesson,
     Reservation,
     StripeCustomer,
+    Subscription,
     TicketGrant,
     TicketUsage,
 )
@@ -648,20 +649,21 @@ class MemberReservationService:
 
         # --------------------------------------------------
         # Only use the saved Stripe payment method when
-        # the member has an active Stripe-billed subscription.
+        # the member's account owner has an active Stripe
+        # subscription for this club.
         #
         # A stale StripeCustomer from a previous Stripe
         # subscription must not be enough by itself.
+        # The member themselves does not need a plan item.
         # --------------------------------------------------
 
         stripe_subscription = (
-            member.subscription_items
+            Subscription.objects
             .filter(
-                subscription__billing_method="stripe",
-                subscription__status="active",
-            )
-            .select_related(
-                "subscription",
+                owner=member.owner,
+                club=club,
+                billing_method="stripe",
+                status="active",
             )
             .first()
         )

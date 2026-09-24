@@ -11,7 +11,7 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from .models import Event, EventReservation, StripeCustomer
+from .models import Event, EventReservation, StripeCustomer, Subscription
 
 
 logger = logging.getLogger(__name__)
@@ -522,12 +522,13 @@ def _charge_member_off_session(*, reservation, club, member, event):
         .first()
     )
     stripe_subscription = (
-        member.subscription_items
+        Subscription.objects
         .filter(
-            subscription__billing_method="stripe",
-            subscription__status="active",
+            owner=member.owner,
+            club=club,
+            billing_method="stripe",
+            status="active",
         )
-        .select_related("subscription")
         .first()
     )
 
