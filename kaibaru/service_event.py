@@ -187,6 +187,11 @@ class EventReservationService:
         if club.is_deleted:
             raise ValueError("このクラブは利用できません。")
 
+        if member.user_id == club.owner_id:
+            raise ValueError(
+                "オーナーご自身がこのイベントを予約する必要はありません。"
+            )
+
         if not audience_allows(event, "member"):
             raise ValueError("このイベントは会員予約を受け付けていません。")
 
@@ -316,6 +321,11 @@ class EventReservationService:
 
         if club.is_deleted:
             raise ValueError("このクラブは利用できません。")
+
+        if user is not None and user.id == club.owner_id:
+            raise ValueError(
+                "オーナーご自身がこのイベントを予約する必要はありません。"
+            )
 
         if not audience_allows(event, "visitor"):
             raise ValueError("このイベントは一般予約を受け付けていません。")

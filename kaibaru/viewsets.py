@@ -1980,14 +1980,26 @@ class ReservationViewSet(viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        owned_member_ids = list(
+            Member.objects
+            .filter(club=club, owner=request.user)
+            .values_list("id", flat=True)
+        )
         qs = (
             self.get_base_queryset()
             .filter(
                 club=club,
-                user=request.user,
                 reservation_date__gte=timezone.localdate(),
             )
         )
+        if owned_member_ids:
+            qs = qs.filter(member_id__in=owned_member_ids)
+        else:
+            email = (request.user.email or "").strip()
+            if not email:
+                qs = qs.none()
+            else:
+                qs = qs.filter(email__iexact=email)
 
         serializer = self.get_serializer(
             qs,
@@ -2138,8 +2150,10 @@ class ReservationViewSet(viewsets.ReadOnlyModelViewSet):
             Member.objects
             .filter(
                 club=club,
-                user=request.user,
                 is_instructor=True,
+            )
+            .filter(
+                Q(user=request.user) | Q(owner=request.user)
             )
             .first()
         )

@@ -2105,10 +2105,13 @@ class EventSerializer(serializers.ModelSerializer):
                 return []
             rows = rows.filter(email__iexact=email)
 
-        cached = [
-            _event_reservation_detail(row)
-            for row in rows.order_by("-created_at", "-id")
-        ]
+        from .reservation_cancel import cancel_url
+
+        cached = []
+        for row in rows.order_by("-created_at", "-id"):
+            detail = _event_reservation_detail(row)
+            detail["cancel_url"] = cancel_url(row.club, "event", row.id)
+            cached.append(detail)
         event._my_reservations = cached
         return cached
 
@@ -2737,6 +2740,7 @@ class ReservationSerializer(serializers.ModelSerializer):
     )
 
     instructor = serializers.SerializerMethodField()
+    cancel_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Reservation
@@ -2775,9 +2779,38 @@ class ReservationSerializer(serializers.ModelSerializer):
 
             # Metadata
             "created_at",
+            "cancel_url",
         ]
 
         read_only_fields = fields
+
+    def get_cancel_url(self, obj):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if user is None or not user.is_authenticated:
+            return None
+
+        owned_ids = getattr(self, "_owned_member_ids", None)
+        if owned_ids is None:
+            owned_ids = list(
+                obj.club.members
+                .filter(owner=user)
+                .values_list("id", flat=True)
+            )
+            self._owned_member_ids = owned_ids
+
+        if owned_ids:
+            is_own = obj.member_id in owned_ids
+        else:
+            email = (user.email or "").strip().lower()
+            is_own = bool(email) and (obj.email or "").strip().lower() == email
+
+        if not is_own:
+            return None
+
+        from .reservation_cancel import cancel_url
+
+        return cancel_url(obj.club, "lesson", obj.id)
 
     def get_instructor(self, obj):
         instructor = obj.lesson.instructor

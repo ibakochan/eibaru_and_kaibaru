@@ -1309,6 +1309,10 @@ def send_visitor_reservation_confirmation_email(
         f"■ ご予約番号\n"
         f"{reservation.id}\n\n"
 
+        f"予約のキャンセル：\n"
+        f"{_cancel_link(club, 'lesson', reservation.id)}\n"
+        f"料金が発生している予約をこちらからキャンセルしても、返金は行われません。\n\n"
+
         f"当日はお気をつけてお越しください。\n"
         f"ご予約内容についてご不明な点がございましたら、"
         f"{club_name}までお問い合わせください。\n\n"
@@ -1680,6 +1684,12 @@ def send_trial_staff_email(self, reservation_id):
     )
 
 
+def _cancel_link(club, kind, reservation_id):
+    from .reservation_cancel import cancel_url
+
+    return cancel_url(club, kind, reservation_id)
+
+
 def _event_reply_to(club, recipient):
     if (
         club.owner
@@ -1826,6 +1836,9 @@ def send_event_reservation_confirmation_email(self, reservation_id):
         f"{payment_section}"
         f"■ ご予約番号\n"
         f"{reservation.id}\n\n"
+        f"予約のキャンセル：\n"
+        f"{_cancel_link(club, 'event', reservation.id)}\n"
+        f"料金が発生している予約をこちらからキャンセルしても、返金は行われません。\n\n"
         f"当日はお気をつけてお越しください。\n"
         f"{club_name}"
     )

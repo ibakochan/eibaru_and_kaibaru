@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>予約のキャンセル</title>
+  <style>
+    body {
+      margin: 0;
+      background: #efeae2;
+      color: #1c1917;
+      font-family: "Hiragino Sans", "Noto Sans JP", sans-serif;
+    }
+    main {
+      max-width: 480px;
+      margin: 40px auto;
+      padding: 32px 28px;
+      background: #fffdf8;
+      border-radius: 22px;
+      box-shadow: 0 24px 50px rgba(28, 25, 23, 0.12);
+    }
+    h1 {
+      margin: 0 0 16px;
+      font-size: 24px;
+      text-align: center;
+      font-weight: 500;
+    }
+    p { line-height: 1.7; }
+    dl { margin: 0 0 18px; }
+    dt { font-size: 12px; color: #a8a29e; }
+    dd { margin: 0 0 12px; font-size: 16px; }
+    .message, .success {
+      margin: 0 0 16px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      line-height: 1.7;
+    }
+    .message {
+      background: #fff4f2;
+      border: 1px solid #f5c2c7;
+      color: #9b1c1c;
+    }
+    .success {
+      background: #eefbf3;
+      border: 1px solid #b7ebc6;
+      color: #17663a;
+    }
+    button, .home {
+      display: block;
+      width: 100%;
+      box-sizing: border-box;
+      margin-top: 8px;
+      padding: 14px 16px;
+      border-radius: 999px;
+      font-size: 16px;
+      text-align: center;
+      text-decoration: none;
+    }
+    button {
+      border: 0;
+      background: #9b1c1c;
+      color: #fff;
+      cursor: pointer;
+    }
+    .home {
+      background: #f5f0e8;
+      color: #1c1917;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    {% if mode == "invalid" or mode == "closed" %}
+      <h1>キャンセルできません</h1>
+      <p class="message">{{ message }}</p>
+      {% if home_url %}
+        <a class="home" href="{{ home_url }}">ホームページに戻る</a>
+      {% endif %}
+    {% elif mode == "done" %}
+      <h1>キャンセルしました</h1>
+      <p class="success">予約をキャンセルしました。返金は行われていません。</p>
+      <a class="home" href="{{ home_url }}">ホームページに戻る</a>
+    {% else %}
+      <h1>{{ club_name }}</h1>
+      <dl>
+        <dt>予約</dt>
+        <dd>{{ title }}</dd>
+        <dt>日時</dt>
+        <dd>{{ when_text }}</dd>
+        <dt>予約者</dt>
+        <dd>{{ person_name }}</dd>
+      </dl>
+      {% if is_paid_amount %}
+        <p>
+          この予約をキャンセルしても返金は行われません。
+          返金を希望する場合は、クラブのオーナーに返金付きのキャンセルを依頼してください。
+          キャンセルを続けますか？それともホームページに戻りますか？
+        </p>
+      {% else %}
+        <p>
+          この予約をキャンセルします。
+          キャンセルを続けるか、ホームページに戻ってください。
+        </p>
+      {% endif %}
+      <form method="post">
+        {% csrf_token %}
+        <button type="submit">キャンセルする</button>
+      </form>
+      <a class="home" href="{{ home_url }}">ホームページに戻る</a>
+    {% endif %}
+  </main>
+</body>
+</html>
