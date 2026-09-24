@@ -130,6 +130,13 @@ class SubscriptionAddPlanService:
                 }
         
         
+        expires_at = None
+        if plan.plan_type == "ticket_plan":
+            expires_at = calculate_ticket_expiration(
+                plan=plan,
+                granted_at=timezone.now(),
+            )
+
         mutation, created = get_or_create_mutation_strict(
             subscription=subscription,
             item=None,
@@ -144,13 +151,10 @@ class SubscriptionAddPlanService:
                 "stripe_price_id": plan.stripe_price_id,
                 "expected_invoice_items": expected_invoice_items,
                 "ticket_grant": {
-                    "quantity": pricing["ticket_quantity"],
+                    "quantity": pricing.get("ticket_quantity", 0),
                     "ticket_type_id": plan.ticket_type_id,
                     "expires_at": (
-                        calculate_ticket_expiration(
-                            plan=plan,
-                            granted_at=timezone.now(),
-                        ).isoformat()
+                        expires_at.isoformat() if expires_at else None
                     ),
                 },
             },
