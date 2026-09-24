@@ -524,8 +524,6 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
 
-    def validate_allowed_gender(self, value):
-        return validate_allowed_gender_value(value)
 
     def validate(self, attrs):
         club = self.context.get("club")
@@ -1834,8 +1832,6 @@ class LessonSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id"]
 
-    def validate_allowed_gender(self, value):
-        return validate_allowed_gender_value(value)
 
     def validate(self, attrs):
         club = (
