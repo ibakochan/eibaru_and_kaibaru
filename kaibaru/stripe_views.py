@@ -3053,8 +3053,7 @@ def create_member_event_reservation(request, event_id):
     member = get_object_or_404(Member, id=member_id, club=club)
 
     if (
-        member.user_id != request.user.id
-        and member.owner_id != request.user.id
+        member.owner_id != request.user.id
     ):
         return JsonResponse(
             {"error": "この会員の予約を作成する権限がありません。"},
