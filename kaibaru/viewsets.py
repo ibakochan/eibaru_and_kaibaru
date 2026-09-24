@@ -2061,18 +2061,11 @@ class ReservationViewSet(viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        history_start = (
-            timezone.localdate()
-            - timezone.timedelta(
-                days=183
-            )
-        )
-
         qs = (
             self.get_base_queryset()
             .filter(
                 club=club,
-                reservation_date__gte=history_start,
+                reservation_date__gte=timezone.localdate(),
             )
         )
 

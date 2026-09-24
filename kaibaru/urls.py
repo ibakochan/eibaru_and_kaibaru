@@ -94,6 +94,11 @@ urlpatterns = [
         views_reservation_cancel.cancel_reservation,
         name='cancel_reservation',
     ),
+    path(
+        'restore_reservation/<str:token>/',
+        views_reservation_cancel.restore_reservation,
+        name='restore_reservation',
+    ),
     path('change_stripe_payment_method/<int:club_id>/', stripe_views.change_stripe_payment_method, name='change_stripe_payment_method'),
 
     path(

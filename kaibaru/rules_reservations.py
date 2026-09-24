@@ -22,14 +22,14 @@ def unpaid_hold_q(hold_cutoff):
         created_at__gte=hold_cutoff,
     )
 
-    return Q(status=Reservation.Status.UNPAID) & started_recently
+    return Q(status=Reservation.Status.UNPAID, canceled=False) & started_recently
 
 
 def active_held_reservations_q(hold_cutoff, today=None):
     today = today or timezone.localdate()
 
     return Q(reservation_date__gte=today) & (
-        Q(status=Reservation.Status.PAID)
+        Q(status=Reservation.Status.PAID, canceled=False)
         | unpaid_hold_q(hold_cutoff)
     )
 
@@ -105,7 +105,7 @@ def assert_lesson_has_spots(
             reservation_date=reservation_date,
         )
         .filter(
-            Q(status=Reservation.Status.PAID)
+            Q(status=Reservation.Status.PAID, canceled=False)
             | unpaid_hold_q(hold_cutoff)
         )
     )

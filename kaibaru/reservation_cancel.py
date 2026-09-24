@@ -19,6 +19,21 @@ def cancel_url(club, kind, reservation_id):
     )
 
 
+def restore_url(club, kind, reservation_id):
+    token = make_cancel_token(kind, reservation_id)
+    return (
+        f"https://{club.subdomain}.kaibaru.jp/"
+        f"restore_reservation/{token}/"
+    )
+
+
+def canceled_rebook_message():
+    return (
+        "この予約はキャンセル済みです。"
+        "キャンセルの取り消しから、もう一度有効にしてください。"
+    )
+
+
 def read_cancel_token(token):
     try:
         raw = _signer.unsign(token)

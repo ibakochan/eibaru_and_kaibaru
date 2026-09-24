@@ -215,6 +215,11 @@ def _save_visitor_reservation(
 
     if existing:
         if existing.status == Reservation.Status.PAID:
+            if existing.canceled:
+                from .reservation_cancel import canceled_rebook_message
+
+                raise ValueError(canceled_rebook_message())
+
             raise ValueError("このレッスンはすでに予約済みです。")
 
         if (

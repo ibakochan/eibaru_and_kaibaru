@@ -1161,6 +1161,7 @@ class Reservation(models.Model):
 
     reservation_date = models.DateField()
     reservation_key = models.CharField(max_length=255, unique=True)
+    canceled = models.BooleanField(default=False)
 
     class Meta:
         indexes = [
@@ -1785,6 +1786,7 @@ class EventReservation(models.Model):
     paid_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     reservation_key = models.CharField(max_length=255, unique=True)
+    canceled = models.BooleanField(default=False)
 
     class Meta:
         indexes = [

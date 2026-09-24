@@ -68,7 +68,7 @@ def unpaid_hold_q(hold_cutoff):
         checkout_started_at__isnull=True,
         created_at__gte=hold_cutoff,
     )
-    return Q(status=EventReservation.Status.UNPAID) & started_recently
+    return Q(status=EventReservation.Status.UNPAID, canceled=False) & started_recently
 
 
 def hold_is_active(reservation, hold_cutoff):
@@ -89,7 +89,7 @@ def held_reservations(event, hold_cutoff):
         EventReservation.objects
         .filter(event=event)
         .filter(
-            Q(status=EventReservation.Status.PAID)
+            Q(status=EventReservation.Status.PAID, canceled=False)
             | unpaid_hold_q(hold_cutoff)
         )
     )
@@ -238,6 +238,11 @@ class EventReservationService:
 
             if existing:
                 if existing.status == EventReservation.Status.PAID:
+                    if existing.canceled:
+                        from .reservation_cancel import canceled_rebook_message
+
+                        raise ValueError(canceled_rebook_message())
+
                     raise ValueError("このイベントはすでに予約済みです。")
 
                 raise ValueError(
@@ -416,6 +421,11 @@ def _save_visitor_reservation(
 
     if existing:
         if existing.status == EventReservation.Status.PAID:
+            if existing.canceled:
+                from .reservation_cancel import canceled_rebook_message
+
+                raise ValueError(canceled_rebook_message())
+
             raise ValueError("このイベントはすでに予約済みです。")
 
         if (

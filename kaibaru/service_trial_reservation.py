@@ -411,7 +411,7 @@ def _save_trial_reservations(
         )
 
     for person, rows, row, kind in grouped:
-        if kind in ("paid", "unpaid"):
+        if kind in ("paid", "unpaid", "canceled"):
             raise ValueError(
                 _trial_blocker_message(
                     person["full_name"],
@@ -485,6 +485,8 @@ def _save_trial_reservations(
 def _classify_trial_rows(rows, *, now, hold_cutoff):
     for row in rows:
         if row.status == Reservation.Status.PAID:
+            if row.canceled:
+                return row, "canceled"
             return row, "paid"
 
     for row in rows:
@@ -556,6 +558,12 @@ def _replaceable_trial_rows(rows, *, hold_cutoff):
 
 
 def _trial_blocker_message(name, kind):
+    if kind == "canceled":
+        return (
+            f"{name}さんの予約はキャンセル済みです。"
+            "キャンセルの取り消しから、もう一度有効にしてください。"
+        )
+
     if kind == "paid":
         return (
             f"{name}さんは、このクラブで体験予約を"

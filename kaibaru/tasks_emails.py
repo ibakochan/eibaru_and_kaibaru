@@ -1280,6 +1280,16 @@ def send_visitor_reservation_confirmation_email(
             "■ 料金\n"
             "無料\n\n"
         )
+    elif reservation.payment_method == "ticket":
+        subject = f"【{club_name}】ご予約確定のお知らせ"
+        intro = (
+            f"{club_name}へのご予約ありがとうございます。\n"
+            f"チケットを使用して、ご予約が確定しました。\n\n"
+        )
+        payment_section = (
+            "■ お支払い\n"
+            "チケットを1枚使用\n\n"
+        )
     else:
         subject = (
             f"【{club_name}】ご予約・お支払い完了のお知らせ"
@@ -1311,7 +1321,7 @@ def send_visitor_reservation_confirmation_email(
 
         f"予約のキャンセル：\n"
         f"{_cancel_link(club, 'lesson', reservation.id)}\n"
-        f"料金が発生している予約をこちらからキャンセルしても、返金は行われません。\n\n"
+        f"{_cancel_notice(reservation)}\n\n"
 
         f"当日はお気をつけてお越しください。\n"
         f"ご予約内容についてご不明な点がございましたら、"
@@ -1690,6 +1700,25 @@ def _cancel_link(club, kind, reservation_id):
     return cancel_url(club, kind, reservation_id)
 
 
+def _restore_link(club, kind, reservation_id):
+    from .reservation_cancel import restore_url
+
+    return restore_url(club, kind, reservation_id)
+
+
+def _cancel_notice(reservation):
+    if getattr(reservation, "payment_method", "") == "ticket":
+        return (
+            "こちらからキャンセルしても、使用したチケットは戻りません。"
+        )
+    if reservation.amount > 0:
+        return (
+            "料金が発生している予約をこちらからキャンセルしても、"
+            "返金は行われません。"
+        )
+    return "無料の予約も、こちらからキャンセルできます。"
+
+
 def _event_reply_to(club, recipient):
     if (
         club.owner
@@ -1838,7 +1867,7 @@ def send_event_reservation_confirmation_email(self, reservation_id):
         f"{reservation.id}\n\n"
         f"予約のキャンセル：\n"
         f"{_cancel_link(club, 'event', reservation.id)}\n"
-        f"料金が発生している予約をこちらからキャンセルしても、返金は行われません。\n\n"
+        f"{_cancel_notice(reservation)}\n\n"
         f"当日はお気をつけてお越しください。\n"
         f"{club_name}"
     )
@@ -1852,5 +1881,78 @@ def send_event_reservation_confirmation_email(self, reservation_id):
         "[EMAIL] Event confirmation sent reservation=%s recipient=%s",
         reservation.id,
         reservation.email,
+    )
+
+
+@shared_task(
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=30,
+    retry_kwargs={"max_retries": 5},
+)
+def send_reservation_canceled_email(self, kind, reservation_id):
+    from .models import EventReservation, Reservation
+    from .service_event import format_event_when
+
+    if kind == "lesson":
+        reservation = (
+            Reservation.objects
+            .select_related("club", "club__owner", "lesson")
+            .filter(id=reservation_id, canceled=True)
+            .first()
+        )
+    else:
+        reservation = (
+            EventReservation.objects
+            .select_related("club", "club__owner", "event")
+            .filter(id=reservation_id, canceled=True)
+            .first()
+        )
+
+    if not reservation or not reservation.email:
+        return
+
+    club = reservation.club
+    club_name = club.title or club.subdomain or "クラブ"
+    if kind == "lesson":
+        title = reservation.lesson.title
+        when_text = reservation.reservation_date.strftime("%Y年%m月%d日")
+        label = "レッスン"
+    else:
+        title = reservation.event.title
+        when_text = format_event_when(reservation.event)
+        label = "イベント"
+
+    if reservation.payment_method == "ticket":
+        kept = "使用したチケットは戻りません。"
+    elif reservation.amount > 0:
+        kept = "お支払いに対する返金は行われません。"
+    else:
+        kept = "この予約に料金は発生していません。"
+
+    link = _restore_link(club, kind, reservation.id)
+    subject = f"【{club_name}】予約をキャンセルしました"
+    message = (
+        f"{reservation.full_name} 様\n\n"
+        f"{club_name}の予約をキャンセルしました。\n"
+        f"{kept}\n\n"
+        f"■ キャンセルした予約\n"
+        f"{label}：{title}\n"
+        f"日時：{when_text}\n\n"
+        f"まだ日時が過ぎておらず、定員に空きがある場合は、"
+        f"次のリンクからキャンセルを取り消せます。\n"
+        f"{link}\n\n"
+        f"{club_name}"
+    )
+    _send_event_email(
+        club=club,
+        recipient=reservation.email,
+        subject=subject,
+        message=message,
+    )
+    logger.info(
+        "[EMAIL] Cancellation email sent kind=%s reservation=%s",
+        kind,
+        reservation.id,
     )
 

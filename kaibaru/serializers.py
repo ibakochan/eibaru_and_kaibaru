@@ -2015,6 +2015,13 @@ class LessonSerializer(serializers.ModelSerializer):
 
 
 
+def _event_is_past(event):
+    from django.utils import timezone
+
+    starts_on = timezone.localtime(event.starts_at).date()
+    return starts_on < timezone.localdate()
+
+
 def _event_reservation_detail(row):
     return {
         "id": row.id,
@@ -2026,8 +2033,32 @@ def _event_reservation_detail(row):
         "status": row.status,
         "reservation_type": row.reservation_type,
         "amount": row.amount,
+        "canceled": row.canceled,
         "created_at": row.created_at,
     }
+
+
+def _event_reservation_urls(row, user):
+    if user is None or not getattr(user, "is_authenticated", False):
+        return None, None
+
+    owned_member_ids = list(
+        row.club.members.filter(owner=user).values_list("id", flat=True)
+    )
+    if owned_member_ids:
+        is_own = row.member_id in owned_member_ids
+    else:
+        email = (user.email or "").strip().lower()
+        is_own = bool(email) and (row.email or "").strip().lower() == email
+
+    if not is_own:
+        return None, None
+
+    from .reservation_cancel import cancel_url, restore_url
+
+    if row.canceled:
+        return None, restore_url(row.club, "event", row.id)
+    return cancel_url(row.club, "event", row.id), None
 
 
 class EventSerializer(serializers.ModelSerializer):
@@ -2086,7 +2117,7 @@ class EventSerializer(serializers.ModelSerializer):
 
         request = self.context.get("request")
         user = getattr(request, "user", None)
-        if user is None or not user.is_authenticated:
+        if user is None or not user.is_authenticated or _event_is_past(event):
             event._my_reservations = []
             return []
 
@@ -2095,7 +2126,7 @@ class EventSerializer(serializers.ModelSerializer):
             .filter(owner=user)
             .values_list("id", flat=True)
         )
-        rows = EventReservation.objects.filter(event=event).select_related("member")
+        rows = EventReservation.objects.filter(event=event).select_related("member", "club")
         if owned_member_ids:
             rows = rows.filter(member_id__in=owned_member_ids)
         else:
@@ -2105,12 +2136,12 @@ class EventSerializer(serializers.ModelSerializer):
                 return []
             rows = rows.filter(email__iexact=email)
 
-        from .reservation_cancel import cancel_url
-
         cached = []
         for row in rows.order_by("-created_at", "-id"):
             detail = _event_reservation_detail(row)
-            detail["cancel_url"] = cancel_url(row.club, "event", row.id)
+            cancel, restore = _event_reservation_urls(row, user)
+            detail["cancel_url"] = cancel
+            detail["restore_url"] = restore
             cached.append(detail)
         event._my_reservations = cached
         return cached
@@ -2136,16 +2167,25 @@ class EventSerializer(serializers.ModelSerializer):
         return allowed
 
     def get_guests(self, event):
-        if not self._viewer_can_manage(event):
-            return None
+        if not self._viewer_can_manage(event) or _event_is_past(event):
+            return None if not self._viewer_can_manage(event) else []
 
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
         rows = (
             EventReservation.objects
             .filter(event=event)
-            .select_related("member")
+            .select_related("member", "club")
             .order_by("-created_at", "-id")
         )
-        return [_event_reservation_detail(row) for row in rows]
+        details = []
+        for row in rows:
+            detail = _event_reservation_detail(row)
+            cancel, restore = _event_reservation_urls(row, user)
+            detail["cancel_url"] = cancel
+            detail["restore_url"] = restore
+            details.append(detail)
+        return details
 
 
 class ClubSerializer(serializers.ModelSerializer):
@@ -2741,6 +2781,7 @@ class ReservationSerializer(serializers.ModelSerializer):
 
     instructor = serializers.SerializerMethodField()
     cancel_url = serializers.SerializerMethodField()
+    restore_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Reservation
@@ -2763,6 +2804,7 @@ class ReservationSerializer(serializers.ModelSerializer):
             # Reservation
             "reservation_type",
             "status",
+            "canceled",
             "reservation_date",
 
             # Customer information
@@ -2780,15 +2822,16 @@ class ReservationSerializer(serializers.ModelSerializer):
             # Metadata
             "created_at",
             "cancel_url",
+            "restore_url",
         ]
 
         read_only_fields = fields
 
-    def get_cancel_url(self, obj):
+    def _is_own_reservation(self, obj):
         request = self.context.get("request")
         user = getattr(request, "user", None)
         if user is None or not user.is_authenticated:
-            return None
+            return False
 
         owned_ids = getattr(self, "_owned_member_ids", None)
         if owned_ids is None:
@@ -2800,17 +2843,26 @@ class ReservationSerializer(serializers.ModelSerializer):
             self._owned_member_ids = owned_ids
 
         if owned_ids:
-            is_own = obj.member_id in owned_ids
-        else:
-            email = (user.email or "").strip().lower()
-            is_own = bool(email) and (obj.email or "").strip().lower() == email
+            return obj.member_id in owned_ids
 
-        if not is_own:
+        email = (user.email or "").strip().lower()
+        return bool(email) and (obj.email or "").strip().lower() == email
+
+    def get_cancel_url(self, obj):
+        if obj.canceled or not self._is_own_reservation(obj):
             return None
 
         from .reservation_cancel import cancel_url
 
         return cancel_url(obj.club, "lesson", obj.id)
+
+    def get_restore_url(self, obj):
+        if not obj.canceled or not self._is_own_reservation(obj):
+            return None
+
+        from .reservation_cancel import restore_url
+
+        return restore_url(obj.club, "lesson", obj.id)
 
     def get_instructor(self, obj):
         instructor = obj.lesson.instructor

@@ -63,6 +63,9 @@
       color: #fff;
       cursor: pointer;
     }
+    button.restore {
+      background: #17663a;
+    }
     .home {
       background: #f5f0e8;
       color: #1c1917;
@@ -72,14 +75,46 @@
 <body>
   <main>
     {% if mode == "invalid" or mode == "closed" %}
-      <h1>キャンセルできません</h1>
+      <h1>手続きできません</h1>
       <p class="message">{{ message }}</p>
       {% if home_url %}
         <a class="home" href="{{ home_url }}">ホームページに戻る</a>
       {% endif %}
+    {% elif mode == "already" %}
+      <h1>キャンセル済みです</h1>
+      <p class="message">{{ message }}</p>
+      <a class="home" href="{{ restore_url }}">キャンセルを取り消す</a>
+      <a class="home" href="{{ home_url }}">ホームページに戻る</a>
     {% elif mode == "done" %}
       <h1>キャンセルしました</h1>
-      <p class="success">予約をキャンセルしました。返金は行われていません。</p>
+      {% if uses_ticket %}
+        <p class="success">予約をキャンセルしました。使用したチケットは戻りません。</p>
+      {% elif is_paid_amount %}
+        <p class="success">予約をキャンセルしました。返金は行われていません。</p>
+      {% else %}
+        <p class="success">予約をキャンセルしました。</p>
+      {% endif %}
+      <p>キャンセルを取り消すリンクを、予約時のメールアドレスへ送りました。</p>
+      <a class="home" href="{{ home_url }}">ホームページに戻る</a>
+    {% elif mode == "restored" %}
+      <h1>キャンセルを取り消しました</h1>
+      <p class="success">予約を元に戻しました。</p>
+      <a class="home" href="{{ home_url }}">ホームページに戻る</a>
+    {% elif mode == "restore_confirm" %}
+      <h1>{{ club_name }}</h1>
+      <dl>
+        <dt>予約</dt>
+        <dd>{{ title }}</dd>
+        <dt>日時</dt>
+        <dd>{{ when_text }}</dd>
+        <dt>予約者</dt>
+        <dd>{{ person_name }}</dd>
+      </dl>
+      <p>この予約のキャンセルを取り消して、もう一度有効にしますか？</p>
+      <form method="post">
+        {% csrf_token %}
+        <button class="restore" type="submit">キャンセルを取り消す</button>
+      </form>
       <a class="home" href="{{ home_url }}">ホームページに戻る</a>
     {% else %}
       <h1>{{ club_name }}</h1>
@@ -91,7 +126,13 @@
         <dt>予約者</dt>
         <dd>{{ person_name }}</dd>
       </dl>
-      {% if is_paid_amount %}
+      {% if uses_ticket %}
+        <p>
+          この予約はチケットで行われています。
+          キャンセルしても、使用したチケットは戻りません。
+          キャンセルを続けますか？それともホームページに戻りますか？
+        </p>
+      {% elif is_paid_amount %}
         <p>
           この予約をキャンセルしても返金は行われません。
           返金を希望する場合は、クラブのオーナーに返金付きのキャンセルを依頼してください。

@@ -418,6 +418,11 @@ class MemberReservationService:
                     existing.status
                     == Reservation.Status.PAID
                 ):
+                    if existing.canceled:
+                        from .reservation_cancel import canceled_rebook_message
+
+                        raise ValueError(canceled_rebook_message())
+
                     raise ValueError(
                         "このレッスンはすでに予約済みです。"
                     )
@@ -443,7 +448,7 @@ class MemberReservationService:
                         reservation_date=reservation_date,
                     )
                     .filter(
-                        Q(status=Reservation.Status.PAID)
+                        Q(status=Reservation.Status.PAID, canceled=False)
                         |
                         unpaid_hold_q(hold_cutoff)
                     )
