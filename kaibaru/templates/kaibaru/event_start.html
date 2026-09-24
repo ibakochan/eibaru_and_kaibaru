@@ -1,0 +1,149 @@
+{% load humanize %}
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>{% if club_name %}{{ club_name }}のイベント予約{% else %}イベント予約{% endif %}</title>
+  <style>
+    body {
+      margin: 0;
+      background: #efeae2;
+      color: #1c1917;
+      font-family: "Hiragino Mincho ProN", "Yu Mincho", "Hiragino Sans", sans-serif;
+    }
+    main {
+      max-width: 460px;
+      margin: 40px auto;
+      padding: 32px 28px;
+      background: #fffdf8;
+      border-radius: 22px;
+      box-shadow: 0 24px 50px rgba(28, 25, 23, 0.12);
+    }
+    .eyebrow {
+      margin: 0 0 8px;
+      letter-spacing: 0.22em;
+      font-size: 11px;
+      text-align: center;
+      color: #a8a29e;
+      font-family: "Hiragino Sans", sans-serif;
+    }
+    h1 {
+      margin: 0 0 6px;
+      font-size: 26px;
+      text-align: center;
+      font-weight: 500;
+    }
+    .kind {
+      margin: 0 0 24px;
+      text-align: center;
+      color: #78716c;
+      font-family: "Hiragino Sans", sans-serif;
+    }
+    dl { margin: 0 0 18px; }
+    dt {
+      font-size: 12px;
+      color: #a8a29e;
+      font-family: "Hiragino Sans", sans-serif;
+    }
+    dd {
+      margin: 0 0 14px;
+      font-size: 17px;
+    }
+    .message, .success {
+      margin: 0 0 16px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      line-height: 1.6;
+      font-family: "Hiragino Sans", sans-serif;
+    }
+    .message {
+      background: #fff4f2;
+      border: 1px solid #f5c2c7;
+      color: #9b1c1c;
+    }
+    .success {
+      background: #eefbf3;
+      border: 1px solid #b7ebc6;
+      color: #17663a;
+    }
+    button, .home {
+      display: block;
+      width: 100%;
+      box-sizing: border-box;
+      margin-top: 8px;
+      padding: 14px 16px;
+      border-radius: 999px;
+      font-size: 16px;
+      text-align: center;
+      text-decoration: none;
+      font-family: "Hiragino Sans", sans-serif;
+    }
+    button {
+      border: 0;
+      background: #1c1917;
+      color: #faf6f1;
+      cursor: pointer;
+    }
+    .home {
+      background: #f5f0e8;
+      color: #1c1917;
+    }
+    .note {
+      margin: 14px 0 0;
+      color: #78716c;
+      font-size: 13px;
+      line-height: 1.6;
+      font-family: "Hiragino Sans", sans-serif;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    {% if mode == "invalid" %}
+      <h1>リンクを確認できません</h1>
+      <p class="message">{{ message|default:"このリンクは無効です。" }}</p>
+    {% else %}
+      <p class="eyebrow">EVENT</p>
+      <h1>{{ club_name }}</h1>
+      <p class="kind">イベント予約</p>
+      <dl>
+        <dt>イベント</dt>
+        <dd>{{ event_title }}</dd>
+        <dt>日時</dt>
+        <dd>{{ when_text }}</dd>
+        <dt>予約者</dt>
+        <dd>{{ person_name }}</dd>
+        <dt>料金</dt>
+        <dd>
+          {% if is_free %}
+            無料
+          {% else %}
+            ¥{{ total_amount|intcomma }}
+          {% endif %}
+        </dd>
+      </dl>
+      {% if message %}
+        <p class="message">{{ message }}</p>
+      {% endif %}
+      {% if mode == "done" %}
+        <p class="success">予約が確定しました。確認メールをお送りしました。</p>
+      {% elif mode == "ready" %}
+        <form method="post">
+          {% csrf_token %}
+          <button type="submit">{{ continue_label }}</button>
+        </form>
+        <p class="note">
+          {% if is_free %}
+            ボタンを押すと予約が確定し、イベントの枠が確保されます。
+          {% else %}
+            ボタンを押すとお支払いが始まり、その間イベントの枠が確保されます。
+          {% endif %}
+        </p>
+      {% endif %}
+      <a class="home" href="{{ home_url }}">クラブのページへ</a>
+    {% endif %}
+  </main>
+</body>
+</html>

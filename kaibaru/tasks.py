@@ -751,13 +751,24 @@ def reconcile_member_reservation_payments():
             .reconcile_old_unpaid_reservations()
         )
 
-        logger.info(
-            "[MEMBER RESERVATION TASK] "
-            "Finished payment reconciliation result=%s",
-            result,
+        from .service_event import EventReservationPaymentReconciler
+
+        event_result = (
+            EventReservationPaymentReconciler
+            .reconcile_old_unpaid_reservations()
         )
 
-        return result
+        logger.info(
+            "[MEMBER RESERVATION TASK] "
+            "Finished payment reconciliation result=%s event_result=%s",
+            result,
+            event_result,
+        )
+
+        return {
+            "reservations": result,
+            "events": event_result,
+        }
 
     except Exception:
 

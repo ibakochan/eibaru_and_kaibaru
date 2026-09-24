@@ -8,6 +8,7 @@ from django.views.decorators.csrf import csrf_exempt
 from .models import TicketPurchase, TicketGrant, Reservation, Club, Member, Subscription, SubscriptionItem, MembershipPlan, StripeWebhookEvent, StripeCustomer, Invoice, InvoiceItem, Payment, SubscriptionMutation
 from .tasks_emails import send_stripe_payment_failure_warning_email, send_subscription_activated_emails, send_invoice_paid_email
 from .service_reservation_start import complete_paid_checkout
+from .service_event import complete_paid_event_checkout
 from django.db import transaction
 
 from datetime import datetime, timezone as dt_timezone
@@ -146,6 +147,41 @@ def stripe_connected_webhook(request):
         session = event["data"]["object"]
 
         metadata = session.get("metadata", {})
+
+        # =========================================================
+        # EVENT RESERVATION CHECKOUT
+        # =========================================================
+
+        event_reservation_id = metadata.get("event_reservation_id")
+
+        if event_reservation_id:
+            if session.get("payment_status") != "paid":
+                logger.warning(
+                    "[EVENT CHECKOUT] Checkout completed but payment "
+                    "is not paid yet. reservation=%s payment_status=%s",
+                    event_reservation_id,
+                    session.get("payment_status"),
+                )
+                return webhook_ok(event_record)
+
+            try:
+                event_reservation_id = int(event_reservation_id)
+            except (TypeError, ValueError):
+                logger.error(
+                    "[EVENT CHECKOUT] Invalid event reservation id raw=%s "
+                    "session=%s",
+                    metadata.get("event_reservation_id"),
+                    session["id"],
+                )
+                return webhook_ok(event_record)
+
+            complete_paid_event_checkout(
+                reservation_id=event_reservation_id,
+                session_id=session["id"],
+                payment_intent_id=session.get("payment_intent"),
+                account_id=account_id,
+            )
+            return webhook_ok(event_record)
 
         # =========================================================
         # VISITOR RESERVATION CHECKOUT

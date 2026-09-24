@@ -50,6 +50,8 @@ import urllib.parse
 
 from .service_visitor_reservation import VisitorReservationService
 from .service_trial_reservation import TrialReservationService
+from .service_event import EventReservationService
+from .models import Event
 
 from .billing import (
     get_next_month_start,
@@ -3023,6 +3025,86 @@ def create_member_reservation(
                     "予約処理中にエラーが発生しました。"
                 )
             },
+            status=500,
+        )
+
+    return JsonResponse(result)
+
+
+@require_POST
+@json_validation_errors
+def create_member_event_reservation(request, event_id):
+    if not request.user.is_authenticated:
+        return JsonResponse(
+            {"error": "会員予約にはログインが必要です。"},
+            status=401,
+        )
+
+    event = get_object_or_404(Event, id=event_id)
+    club = event.club
+    member_id = request.POST.get("member_id")
+
+    if not member_id:
+        return JsonResponse(
+            {"error": "会員を指定してください。"},
+            status=400,
+        )
+
+    member = get_object_or_404(Member, id=member_id, club=club)
+
+    if (
+        member.user_id != request.user.id
+        and member.owner_id != request.user.id
+    ):
+        return JsonResponse(
+            {"error": "この会員の予約を作成する権限がありません。"},
+            status=403,
+        )
+
+    try:
+        result = EventReservationService.create_member_reservation(
+            event=event,
+            member=member,
+        )
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    except Exception:
+        logger.exception("Member event reservation creation failed")
+        return JsonResponse(
+            {"error": "予約処理中にエラーが発生しました。"},
+            status=500,
+        )
+
+    return JsonResponse(result)
+
+
+@require_POST
+@json_validation_errors
+def create_visitor_event_reservation(request, event_id):
+    event = get_object_or_404(Event, id=event_id)
+
+    if event.club.is_deleted:
+        return JsonResponse(
+            {"error": "このクラブは利用できません。"},
+            status=400,
+        )
+
+    user = request.user if request.user.is_authenticated else None
+
+    try:
+        result = EventReservationService.create_visitor_reservation(
+            event=event,
+            full_name=request.POST.get("full_name", ""),
+            email=request.POST.get("email", ""),
+            phone_number=request.POST.get("phone_number", ""),
+            user=user,
+        )
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    except Exception:
+        logger.exception("Visitor event reservation creation failed")
+        return JsonResponse(
+            {"error": "予約処理中にエラーが発生しました。"},
             status=500,
         )
 

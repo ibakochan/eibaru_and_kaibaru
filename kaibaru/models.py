@@ -1623,3 +1623,176 @@ class StripeCustomer(models.Model):
                 name="unique_stripe_customer_per_user_club"
             )
         ]
+
+
+_hex_color = RegexValidator(
+    regex=r"^#[0-9A-Fa-f]{6}$",
+    message="カラーは #FFFFFF の形式で指定してください。",
+)
+
+
+class Event(models.Model):
+    class Audience(models.TextChoices):
+        MEMBERS = "members", "Members"
+        VISITORS = "visitors", "Visitors"
+        BOTH = "both", "Members and visitors"
+
+    club = models.ForeignKey(
+        Club,
+        on_delete=models.CASCADE,
+        related_name="events",
+    )
+    section_id = models.IntegerField(db_index=True)
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True, default="")
+    picture = models.CharField(max_length=1000, blank=True, default="")
+    starts_at = models.DateTimeField()
+
+    member_price = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Member price in yen. Empty means free.",
+    )
+    visitor_price = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Visitor price in yen. Empty means free.",
+    )
+    reservation_limit = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Maximum reservations. Empty means unlimited.",
+    )
+    audience = models.CharField(
+        max_length=20,
+        choices=Audience.choices,
+        default=Audience.BOTH,
+    )
+
+    title_color = models.CharField(
+        max_length=7,
+        default="#1c1917",
+        validators=[_hex_color],
+    )
+    description_color = models.CharField(
+        max_length=7,
+        default="#57534e",
+        validators=[_hex_color],
+    )
+    detail_color = models.CharField(
+        max_length=7,
+        default="#44403c",
+        validators=[_hex_color],
+    )
+    button_color = models.CharField(
+        max_length=7,
+        default="#1c1917",
+        validators=[_hex_color],
+    )
+    button_text_color = models.CharField(
+        max_length=7,
+        default="#faf6f1",
+        validators=[_hex_color],
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["club", "section_id"],
+                name="unique_event_per_section",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.club.subdomain} - {self.title}"
+
+
+class EventReservation(models.Model):
+    class ReservationType(models.TextChoices):
+        VISITOR = "visitor", "Visitor"
+        MEMBER = "member", "Member"
+
+    class Status(models.TextChoices):
+        UNPAID = "unpaid", "Unpaid"
+        PAID = "paid", "Paid"
+        NOT_STARTED = "not_started", "Not started"
+
+    event = models.ForeignKey(
+        Event,
+        on_delete=models.CASCADE,
+        related_name="reservations",
+    )
+    club = models.ForeignKey(
+        Club,
+        on_delete=models.CASCADE,
+        related_name="event_reservations",
+    )
+    member = models.ForeignKey(
+        "Member",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="event_reservations",
+    )
+    user = models.ForeignKey(
+        CustomUser,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="event_reservations",
+    )
+    reservation_type = models.CharField(
+        max_length=20,
+        choices=ReservationType.choices,
+    )
+    payment_method = models.CharField(
+        max_length=20,
+        blank=True,
+        default="",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.UNPAID,
+    )
+    full_name = models.CharField(max_length=200)
+    email = models.EmailField()
+    phone_number = models.CharField(max_length=30, blank=True, default="")
+    amount = models.PositiveIntegerField(default=0)
+    currency = models.CharField(max_length=10, default="jpy")
+
+    stripe_checkout_session_id = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+    )
+    stripe_payment_intent_id = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+    )
+    start_token = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        db_index=True,
+    )
+    requested_at = models.DateTimeField(null=True, blank=True)
+    checkout_started_at = models.DateTimeField(null=True, blank=True)
+    confirmation_email_sent = models.BooleanField(default=False)
+    paid_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    reservation_key = models.CharField(max_length=255, unique=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["event", "status"]),
+            models.Index(fields=["club", "created_at"]),
+        ]
+
+    def __str__(self):
+        return (
+            f"{self.full_name} - {self.event.title} - {self.reservation_type}"
+        )

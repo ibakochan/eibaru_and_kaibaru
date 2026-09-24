@@ -3,7 +3,7 @@ from rest_framework import viewsets, serializers, status
 from rest_framework.decorators import action
 from rest_framework.viewsets import ViewSet
 from rest_framework.response import Response
-from .models import TicketGrant, TicketType, TicketPackage, Reservation, Invoice, MemberPricingAdjustment, Discount, DiscountCondition, SubscriptionItem, Member, Club, Lesson, Participation, SlateImage, JoinRequest, MembershipPlan, Subscription
+from .models import TicketGrant, TicketType, TicketPackage, Reservation, Event, Invoice, MemberPricingAdjustment, Discount, DiscountCondition, SubscriptionItem, Member, Club, Lesson, Participation, SlateImage, JoinRequest, MembershipPlan, Subscription
 from accounts.models import CustomUser
 from django.contrib.auth import login
 import re
@@ -37,6 +37,7 @@ from .pricing import (
 )
 
 from .serializers import TicketTypeSerializer, TicketPackageSerializer, ReservationSerializer, PaymentHistoryInvoiceSerializer, MemberPricingAdjustmentSerializer, DiscountConditionSerializer, DiscountSerializer, MembershipPlanSerializer, MemberSerializer, ClubSerializer, LessonSerializer, ParticipationSerializer, SlateImageSerializer, JoinRequestSerializer
+from .service_event import save_section_event
 from django.conf import settings
 from datetime import timedelta
 import hashlib
@@ -2575,7 +2576,7 @@ class ClubViewSet(viewsets.ModelViewSet):
         section_type = request.data.get("type", "custom")
         icon = request.data.get("icon")
 
-        ALLOWED_TYPES = {"custom", "schedule", "join", "member", "teacher", "slideshow", "header", "memberplans"}
+        ALLOWED_TYPES = {"custom", "schedule", "join", "member", "teacher", "slideshow", "header", "memberplans", "event"}
 
         if action_type not in {"add", "remove", "edit", "add_slide", "remove_slide", "update_slide"}:
             return Response(
@@ -2708,6 +2709,21 @@ class ClubViewSet(viewsets.ModelViewSet):
                             "textAlign": "center"
                         }
                     ]
+
+            if section_type == "event":
+                try:
+                    save_section_event(
+                        club=club,
+                        section_id=new_id,
+                        title=title,
+                        payload=request.data.get("event") or {},
+                    )
+                except ValueError as exc:
+                    transaction.set_rollback(True)
+                    return Response(
+                        {"detail": str(exc)},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
             
             section_list.append(new_section)
 
@@ -2755,6 +2771,21 @@ class ClubViewSet(viewsets.ModelViewSet):
             # ---- title update ----
             if title:
                 section["title"] = title
+
+            if section.get("type") == "event" and "event" in request.data:
+                try:
+                    save_section_event(
+                        club=club,
+                        section_id=section["id"],
+                        title=section.get("title") or title,
+                        payload=request.data.get("event") or {},
+                    )
+                except ValueError as exc:
+                    transaction.set_rollback(True)
+                    return Response(
+                        {"detail": str(exc)},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
             
             if style is not None:
                 section["style"] = style
@@ -2943,6 +2974,12 @@ class ClubViewSet(viewsets.ModelViewSet):
 
             removed_section = sections[str(section_id)]
             removed_order = removed_section["order"]
+
+            if removed_section.get("type") == "event":
+                Event.objects.filter(
+                    club=club,
+                    section_id=removed_section["id"],
+                ).delete()
 
             # Prevent removing join if dependent sections exist
             if removed_section.get("type") == "join":

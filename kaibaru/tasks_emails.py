@@ -1679,3 +1679,165 @@ def send_trial_staff_email(self, reservation_id):
         unique_recipients,
     )
 
+
+def _event_reply_to(club, recipient):
+    if (
+        club.owner
+        and club.owner.email
+        and club.owner.email != recipient
+    ):
+        return [club.owner.email]
+    return None
+
+
+def _send_event_email(*, club, recipient, subject, message):
+    email = EmailMessage(
+        subject=subject,
+        body=message,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        to=[recipient],
+        reply_to=_event_reply_to(club, recipient),
+    )
+    email.send()
+
+
+@shared_task(
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=30,
+    retry_kwargs={"max_retries": 5},
+)
+def send_event_reservation_start_email(self, start_token):
+    from .models import EventReservation
+    from .service_event import START_LINK_HOURS, format_event_when
+
+    reservation = (
+        EventReservation.objects
+        .select_related("club", "club__owner", "event")
+        .filter(start_token=start_token)
+        .exclude(status=EventReservation.Status.PAID)
+        .first()
+    )
+
+    if not reservation:
+        logger.warning("[EMAIL] No pending event reservation for start token.")
+        return
+
+    club = reservation.club
+    event = reservation.event
+    club_name = club.title or club.subdomain or "クラブ"
+    price_text = "無料" if reservation.amount == 0 else f"¥{reservation.amount:,}"
+    link = (
+        f"https://{club.subdomain}.kaibaru.jp/"
+        f"start_event_reservation/{start_token}/"
+    )
+    subject = f"【{club_name}】イベント予約手続きのご案内"
+    message = (
+        f"{reservation.full_name} 様\n\n"
+        f"{club_name}のイベントにお申し込みいただきありがとうございます。\n"
+        f"まだ予約は確定していません。\n"
+        f"以下のリンクを開き、手続きを完了してください。\n\n"
+        f"■ お申し込み内容\n"
+        f"イベント：{event.title}\n"
+        f"日時：{format_event_when(event)}\n"
+        f"料金：{price_text}\n\n"
+        f"手続きを続ける：\n"
+        f"{link}\n\n"
+        f"このリンクの有効期限は{START_LINK_HOURS}時間です。\n"
+        f"リンクを開いて手続きを始めるまで、イベントの枠は確保されません。\n\n"
+        f"{club_name}"
+    )
+    _send_event_email(
+        club=club,
+        recipient=reservation.email,
+        subject=subject,
+        message=message,
+    )
+    logger.info(
+        "[EMAIL] Event start email sent reservation=%s recipient=%s",
+        reservation.id,
+        reservation.email,
+    )
+
+
+@shared_task(
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=30,
+    retry_kwargs={"max_retries": 5},
+)
+def send_event_reservation_confirmation_email(self, reservation_id):
+    from .models import EventReservation
+    from .service_event import format_event_when
+
+    reservation = (
+        EventReservation.objects
+        .select_related("club", "club__owner", "event")
+        .filter(id=reservation_id)
+        .first()
+    )
+
+    if not reservation or reservation.status != EventReservation.Status.PAID:
+        return
+
+    if not reservation.email:
+        return
+
+    with transaction.atomic():
+        locked = (
+            EventReservation.objects
+            .select_for_update()
+            .get(id=reservation.id)
+        )
+        if locked.confirmation_email_sent:
+            return
+        locked.confirmation_email_sent = True
+        locked.save(update_fields=["confirmation_email_sent"])
+
+    club = reservation.club
+    event = reservation.event
+    club_name = club.title or club.subdomain or "クラブ"
+    is_free = reservation.amount == 0
+    if is_free:
+        subject = f"【{club_name}】イベント予約確定のお知らせ"
+        intro = (
+            f"{club_name}のイベント予約ありがとうございます。\n"
+            f"ご予約が確定しました。\n\n"
+        )
+        payment_section = "■ 料金\n無料\n\n"
+    else:
+        subject = f"【{club_name}】イベント予約・お支払い完了のお知らせ"
+        intro = (
+            f"{club_name}のイベント予約ありがとうございます。\n"
+            f"お支払いが完了し、ご予約が確定しました。\n\n"
+        )
+        payment_section = (
+            f"■ お支払い\n"
+            f"金額：¥{reservation.amount:,}\n"
+            f"お支払い方法：クレジットカード\n\n"
+        )
+
+    message = (
+        f"{reservation.full_name} 様\n\n"
+        f"{intro}"
+        f"■ ご予約内容\n"
+        f"イベント：{event.title}\n"
+        f"日時：{format_event_when(event)}\n\n"
+        f"{payment_section}"
+        f"■ ご予約番号\n"
+        f"{reservation.id}\n\n"
+        f"当日はお気をつけてお越しください。\n"
+        f"{club_name}"
+    )
+    _send_event_email(
+        club=club,
+        recipient=reservation.email,
+        subject=subject,
+        message=message,
+    )
+    logger.info(
+        "[EMAIL] Event confirmation sent reservation=%s recipient=%s",
+        reservation.id,
+        reservation.email,
+    )
+

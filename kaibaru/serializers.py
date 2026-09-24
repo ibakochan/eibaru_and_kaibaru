@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import TicketType, TicketPackage, Reservation, MembershipPlanGroup, MemberPricingAdjustment, Discount, DiscountCondition, Member, Club, Lesson, Participation, SlateImage, JoinRequest, InvoiceItem, Invoice, Subscription, SubscriptionItem
+from .models import TicketType, TicketPackage, Reservation, Event, EventReservation, MembershipPlanGroup, MemberPricingAdjustment, Discount, DiscountCondition, Member, Club, Lesson, Participation, SlateImage, JoinRequest, InvoiceItem, Invoice, Subscription, SubscriptionItem
 from types import SimpleNamespace
 from django.core.exceptions import ValidationError as DjangoValidationError
 
@@ -2015,9 +2015,125 @@ class LessonSerializer(serializers.ModelSerializer):
 
 
 
+class EventSerializer(serializers.ModelSerializer):
+    spots_taken = serializers.SerializerMethodField()
+    spots_left = serializers.SerializerMethodField()
+    my_reservation = serializers.SerializerMethodField()
+    guests = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Event
+        fields = [
+            "id",
+            "section_id",
+            "title",
+            "description",
+            "picture",
+            "starts_at",
+            "member_price",
+            "visitor_price",
+            "reservation_limit",
+            "audience",
+            "title_color",
+            "description_color",
+            "detail_color",
+            "button_color",
+            "button_text_color",
+            "spots_taken",
+            "spots_left",
+            "my_reservation",
+            "guests",
+        ]
+
+    def _held_count(self, event):
+        from .service_event import held_reservations, hold_cutoff_at
+
+        cached = getattr(event, "_held_count", None)
+        if cached is None:
+            cached = held_reservations(event, hold_cutoff_at()).count()
+            event._held_count = cached
+        return cached
+
+    def get_spots_taken(self, event):
+        return self._held_count(event)
+
+    def get_spots_left(self, event):
+        if event.reservation_limit is None:
+            return None
+        return max(event.reservation_limit - self._held_count(event), 0)
+
+    def get_my_reservation(self, event):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if user is None or not user.is_authenticated:
+            return None
+
+        reservation = (
+            EventReservation.objects
+            .filter(event=event)
+            .filter(
+                Q(user=user)
+                | Q(member__user=user)
+                | Q(member__owner=user)
+            )
+            .order_by("-id")
+            .first()
+        )
+        if reservation is None:
+            return None
+
+        return {
+            "id": reservation.id,
+            "status": reservation.status,
+            "reservation_type": reservation.reservation_type,
+            "amount": reservation.amount,
+        }
+
+    def _viewer_can_manage(self, event):
+        if hasattr(self, "_can_manage_events"):
+            return self._can_manage_events
+
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        allowed = False
+        if user is not None and user.is_authenticated:
+            if event.club.owner_id == user.id:
+                allowed = True
+            else:
+                allowed = event.club.members.filter(
+                    Q(user=user) | Q(owner=user),
+                    is_manager=True,
+                ).exists()
+
+        self._can_manage_events = allowed
+        return allowed
+
+    def get_guests(self, event):
+        if not self._viewer_can_manage(event):
+            return None
+
+        from .service_event import held_reservations, hold_cutoff_at
+
+        rows = (
+            held_reservations(event, hold_cutoff_at())
+            .order_by("created_at", "id")
+        )
+        return [
+            {
+                "id": row.id,
+                "full_name": row.full_name,
+                "status": row.status,
+                "reservation_type": row.reservation_type,
+                "amount": row.amount,
+            }
+            for row in rows
+        ]
+
+
 class ClubSerializer(serializers.ModelSerializer):
     members = MemberSerializer(many=True, read_only=True)
     lessons = LessonSerializer(many=True, read_only=True)
+    events = EventSerializer(many=True, read_only=True)
     current_user = serializers.SerializerMethodField()
     today = serializers.SerializerMethodField()
     home_images = SlateImageSerializer(many=True, read_only=True)
@@ -2047,6 +2163,7 @@ class ClubSerializer(serializers.ModelSerializer):
             "join_requests",
             "my_join_requests",
             "lessons",
+            "events",
             "home",
             "system",
             "trial",
