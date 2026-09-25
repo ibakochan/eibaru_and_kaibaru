@@ -39,6 +39,24 @@ from .models import TicketType, TicketPackage, Club, Member, MembershipPlan, Sub
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
+OWNER_CLUB_SIGNUP_ERROR = (
+    "オーナーご自身が、ご自身のクラブに申し込む必要はありません。"
+)
+
+
+def reject_owner_club_signup(request, club):
+    user = getattr(request, "user", None)
+    if (
+        user is not None
+        and getattr(user, "is_authenticated", False)
+        and user.id == club.owner_id
+    ):
+        return JsonResponse(
+            {"error": OWNER_CLUB_SIGNUP_ERROR},
+            status=400,
+        )
+    return None
+
 from .stripe_service import get_or_create_stripe_customer
 from .service_add_plan import SubscriptionAddPlanService
 
@@ -1210,6 +1228,9 @@ def create_member_checkout_session(request, club_id, plan_id):
     
 
     club = get_object_or_404(Club, id=club_id, is_deleted=False)
+    owner_block = reject_owner_club_signup(request, club)
+    if owner_block:
+        return owner_block
     if club.subscription_mode not in ["regular", "monthly"]:
         return JsonResponse({"error": "課金設定が正しくありません。月謝または定期課金を設定してください。"}, status=400)
 
@@ -1362,6 +1383,9 @@ def create_member_cash_subscription(
         is_deleted=False,
     )
 
+    owner_block = reject_owner_club_signup(request, club)
+    if owner_block:
+        return owner_block
 
     if club.subscription_mode not in [
         "regular",
@@ -1561,6 +1585,10 @@ def add_plan_to_subscription_view(request, club_id, plan_id):
 
     club = get_object_or_404(Club, id=club_id, is_deleted=False)
 
+    owner_block = reject_owner_club_signup(request, club)
+    if owner_block:
+        return owner_block
+
     if club.subscription_mode not in ["regular", "monthly"]:
         return JsonResponse({"error": "課金設定が正しくありません。月謝または定期課金を設定してください。"}, status=400)
 
@@ -1715,6 +1743,9 @@ def add_plan_to_cash_subscription_view(
         is_deleted=False,
     )
 
+    owner_block = reject_owner_club_signup(request, club)
+    if owner_block:
+        return owner_block
 
     if club.subscription_mode not in [
         "regular",
@@ -1891,7 +1922,9 @@ def migrate_cash_subscription_to_stripe(request, club_id):
         is_deleted=False,
     )
 
-
+    owner_block = reject_owner_club_signup(request, club)
+    if owner_block:
+        return owner_block
 
     # ---------------------------------------------------------
     # BASIC STRIPE CONFIGURATION
@@ -2563,6 +2596,10 @@ def create_visitor_reservation(
 
     club = lesson.club
 
+    owner_block = reject_owner_club_signup(request, club)
+    if owner_block:
+        return owner_block
+
     user = (
         request.user
         if request.user.is_authenticated
@@ -2748,6 +2785,10 @@ def create_trial_reservation(
 
     club = lesson.club
 
+    owner_block = reject_owner_club_signup(request, club)
+    if owner_block:
+        return owner_block
+
     user = (
         request.user
         if request.user.is_authenticated
@@ -2907,6 +2948,10 @@ def create_member_reservation(
     )
 
     club = lesson.club
+
+    owner_block = reject_owner_club_signup(request, club)
+    if owner_block:
+        return owner_block
 
     member_id = request.POST.get(
         "member_id"
@@ -3068,6 +3113,11 @@ def create_member_event_reservation(request, event_id):
 
     event = get_object_or_404(Event, id=event_id)
     club = event.club
+
+    owner_block = reject_owner_club_signup(request, club)
+    if owner_block:
+        return owner_block
+
     member_id = request.POST.get("member_id")
 
     if not member_id:
@@ -3107,6 +3157,10 @@ def create_member_event_reservation(request, event_id):
 @json_validation_errors
 def create_visitor_event_reservation(request, event_id):
     event = get_object_or_404(Event, id=event_id)
+
+    owner_block = reject_owner_club_signup(request, event.club)
+    if owner_block:
+        return owner_block
 
     if event.club.is_deleted:
         return JsonResponse(
@@ -3156,6 +3210,10 @@ def create_ticket_purchase(
     )
 
     club = package.club
+
+    owner_block = reject_owner_club_signup(request, club)
+    if owner_block:
+        return owner_block
 
     if club.is_deleted:
         return JsonResponse(
