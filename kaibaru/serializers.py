@@ -1573,6 +1573,7 @@ class MemberSerializer(serializers.ModelSerializer):
             result.append({
                 "id": grant.id,
                 "ticket_type_id": grant.ticket_type_id,
+                "ticket_type_name": grant.ticket_type.name,
                 "eligible_plan_ids": list(
                     grant.ticket_type.eligible_plans.values_list(
                         "id",

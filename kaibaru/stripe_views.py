@@ -2939,6 +2939,31 @@ def create_member_reservation(
             status=400,
         )
 
+    ticket_grant_id = None
+
+    if payment_method == "ticket":
+        raw_ticket_grant_id = (
+            request.POST.get("ticket_grant_id") or ""
+        ).strip()
+
+        if not raw_ticket_grant_id:
+            return JsonResponse(
+                {
+                    "error": "使用するチケットを選択してください。"
+                },
+                status=400,
+            )
+
+        try:
+            ticket_grant_id = int(raw_ticket_grant_id)
+        except ValueError:
+            return JsonResponse(
+                {
+                    "error": "使用するチケットを選択してください。"
+                },
+                status=400,
+            )
+
     # The logged-in user must either be the
     # member or the owner managing that member.
     if (
@@ -3003,6 +3028,7 @@ def create_member_reservation(
                 member=member,
                 reservation_date=reservation_date,
                 payment_method=payment_method,
+                ticket_grant_id=ticket_grant_id,
             )
         )
 

@@ -9,6 +9,7 @@ from .models import (
     TicketPurchase,
     TicketGrant,
     StripeCustomer,
+    Subscription,
 )
 
 
@@ -161,21 +162,22 @@ class TicketPurchaseService:
         )
 
         # --------------------------------------------------
-        # Only automatically charge a saved payment method
-        # when this member currently has an active Stripe
-        # subscription.
+        # Only use the saved Stripe payment method when
+        # the member's account owner has an active Stripe
+        # subscription for this club.
         #
-        # This mirrors your existing reservation behavior.
+        # A stale StripeCustomer from a previous Stripe
+        # subscription must not be enough by itself.
+        # The member themselves does not need a plan item.
         # --------------------------------------------------
 
         stripe_subscription = (
-            member.subscription_items
+            Subscription.objects
             .filter(
-                subscription__billing_method="stripe",
-                subscription__status="active",
-            )
-            .select_related(
-                "subscription",
+                owner=member.owner,
+                club=club,
+                billing_method="stripe",
+                status="active",
             )
             .first()
         )

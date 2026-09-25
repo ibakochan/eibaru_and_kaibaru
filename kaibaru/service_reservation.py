@@ -143,6 +143,7 @@ class MemberReservationService:
         member,
         reservation_date,
         payment_method,
+        ticket_grant_id=None,
     ):
         # --------------------------------------------------
         # Basic ownership validation
@@ -510,10 +511,10 @@ class MemberReservationService:
                     )
                 )
             
-                grant = None
-            
+                usable_grants = []
+
                 for candidate in grants:
-            
+
                     used_quantity = (
                         TicketUsage.objects
                         .filter(
@@ -524,15 +525,42 @@ class MemberReservationService:
                             total=Sum("quantity")
                         )["total"] or 0
                     )
-            
+
                     if candidate.quantity - used_quantity >= 1:
-                        grant = candidate
-                        break
-            
-                if grant is None:
+                        usable_grants.append(candidate)
+
+                if not usable_grants:
                     raise ValueError(
                         "このレッスンに利用できるチケットがありません。"
                     )
+
+                if ticket_grant_id is None:
+                    if len(usable_grants) != 1:
+                        raise ValueError(
+                            "使用するチケットを選択してください。"
+                        )
+                    grant = usable_grants[0]
+                else:
+                    try:
+                        selected_grant_id = int(ticket_grant_id)
+                    except (TypeError, ValueError):
+                        raise ValueError(
+                            "使用するチケットを選択してください。"
+                        )
+
+                    grant = next(
+                        (
+                            candidate
+                            for candidate in usable_grants
+                            if candidate.id == selected_grant_id
+                        ),
+                        None,
+                    )
+
+                    if grant is None:
+                        raise ValueError(
+                            "選択されたチケットは利用できません。"
+                        )
             
                         
                 reservation = Reservation.objects.create(
