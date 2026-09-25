@@ -2617,6 +2617,26 @@ class TicketTypeSerializer(serializers.ModelSerializer):
                 )
             })
 
+        disallowed_plans = [
+            plan
+            for plan in eligible_plans
+            if (
+                plan.plan_type in (
+                    MembershipPlan.PlanType.TICKET_PLAN,
+                    MembershipPlan.PlanType.BUNDLE,
+                )
+                or plan.bundled_plans.exists()
+            )
+        ]
+
+        if disallowed_plans:
+            raise serializers.ValidationError({
+                "eligible_plans": (
+                    "対象プランには通常の会員プランのみ指定できます。"
+                    "回数券プランとセットプランは選べません。"
+                )
+            })
+
         return attrs
 
 class TicketPackageSerializer(serializers.ModelSerializer):
