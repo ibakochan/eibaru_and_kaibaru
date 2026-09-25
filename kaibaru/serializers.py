@@ -2637,6 +2637,8 @@ class TicketPackageSerializer(serializers.ModelSerializer):
             "quantity",
             "price",
             "currency",
+            "ticket_expiration_mode",
+            "ticket_expiration_days",
             "stripe_price_id",
             "active",
             "created_at",
@@ -2752,6 +2754,37 @@ class TicketPackageSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({
                 "currency": "現在はJPYのみ対応しています。"
             })
+
+        expiration_mode = attrs.get(
+            "ticket_expiration_mode",
+            (
+                self.instance.ticket_expiration_mode
+                if self.instance
+                else MembershipPlan.TicketExpirationMode.ONE_MONTH
+            ),
+        )
+
+        expiration_days = attrs.get(
+            "ticket_expiration_days",
+            (
+                self.instance.ticket_expiration_days
+                if self.instance
+                else None
+            ),
+        )
+
+        if (
+            expiration_mode
+            == MembershipPlan.TicketExpirationMode.DAYS_AFTER_GRANT
+        ):
+            if not expiration_days or expiration_days <= 0:
+                raise serializers.ValidationError({
+                    "ticket_expiration_days": (
+                        "チケットの有効期限日数は1以上にしてください。"
+                    )
+                })
+        else:
+            attrs["ticket_expiration_days"] = None
 
         return attrs
 

@@ -1232,6 +1232,17 @@ class TicketPackage(models.Model):
         default="jpy",
     )
 
+    ticket_expiration_mode = models.CharField(
+        max_length=30,
+        choices=MembershipPlan.TicketExpirationMode.choices,
+        default=MembershipPlan.TicketExpirationMode.ONE_MONTH,
+    )
+
+    ticket_expiration_days = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+    )
+
     stripe_price_id = models.CharField(
         max_length=255,
         blank=True,

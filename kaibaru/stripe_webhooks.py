@@ -380,6 +380,10 @@ def stripe_connected_webhook(request):
                         ),
                         package=purchase.package,
                         quantity=purchase.quantity,
+                        expires_at=calculate_ticket_expiration(
+                            package=purchase.package,
+                            granted_at=purchase.paid_at,
+                        ),
                         stripe_event_id=event_id,
                     )
 

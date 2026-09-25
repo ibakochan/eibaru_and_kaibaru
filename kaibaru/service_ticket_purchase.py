@@ -3,6 +3,8 @@ import stripe
 from django.db import transaction
 from django.utils import timezone
 
+from .pricing import calculate_ticket_expiration
+
 from .models import (
     Member,
     TicketPackage,
@@ -272,9 +274,9 @@ class TicketPurchaseService:
                                 TicketPurchase.Status.PAID
                             )
 
-                            locked_purchase.paid_at = (
-                                timezone.now()
-                            )
+                            paid_at = timezone.now()
+
+                            locked_purchase.paid_at = paid_at
 
                             locked_purchase.stripe_payment_intent_id = (
                                 payment_intent.id
@@ -296,6 +298,10 @@ class TicketPurchaseService:
                                 ),
                                 package=package,
                                 quantity=package.quantity,
+                                expires_at=calculate_ticket_expiration(
+                                    package=package,
+                                    granted_at=paid_at,
+                                ),
                             )
 
                         return {

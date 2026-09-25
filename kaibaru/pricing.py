@@ -377,16 +377,23 @@ def add_one_month(local_dt):
     return local_dt.replace(year=year, month=month, day=day)
 
 
-def calculate_ticket_expiration(*, plan, granted_at):
+def calculate_ticket_expiration(*, granted_at, plan=None, package=None):
     """
-    Return when a ticket grant from this plan expires.
+    Return when a ticket grant expires.
+
+    The source is a membership plan or a ticket package. Both store
+    ticket_expiration_mode and ticket_expiration_days.
 
     never            -> None
     one_month        -> last second of the same day, one month later
                          (e.g. granted Sep 19 -> expires end of Oct 19)
     days_after_grant -> granted_at + ticket_expiration_days
     """
-    mode = plan.ticket_expiration_mode
+    source = package if package is not None else plan
+    if source is None:
+        raise TypeError("plan or package is required")
+
+    mode = source.ticket_expiration_mode
 
     if mode == "never":
         return None
@@ -407,7 +414,7 @@ def calculate_ticket_expiration(*, plan, granted_at):
         )
 
     if mode == "days_after_grant":
-        days = plan.ticket_expiration_days or 0
+        days = source.ticket_expiration_days or 0
         if days <= 0:
             return None
         return granted_at + timedelta(days=days)
