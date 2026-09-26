@@ -1163,6 +1163,14 @@ class Reservation(models.Model):
     reservation_key = models.CharField(max_length=255, unique=True)
     canceled = models.BooleanField(default=False)
 
+    refunded_at = models.DateTimeField(null=True, blank=True)
+
+    stripe_refund_id = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+    )
+
     class Meta:
         indexes = [
             models.Index(

@@ -1910,6 +1910,9 @@ class ReservationViewSet(viewsets.ReadOnlyModelViewSet):
                 "lesson__instructor__user",
                 "member",
                 "user",
+                "ticket_usage",
+                "ticket_usage__grant",
+                "ticket_usage__grant__ticket_type",
             )
             .filter(
                 status=Reservation.Status.PAID,
@@ -2177,6 +2180,45 @@ class ReservationViewSet(viewsets.ReadOnlyModelViewSet):
             serializer.data,
             status=status.HTTP_200_OK,
         )
+
+    @action(
+        detail=False,
+        methods=["get", "post"],
+        url_path=r"refund/(?P<reservation_id>\d+)",
+    )
+    def refund(self, request, reservation_id=None):
+        from .service_reservation_refund import (
+            RefundError,
+            refund_preview,
+            refund_reservation,
+        )
+
+        try:
+            reservation_id = int(reservation_id)
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "予約が見つかりません。"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            if request.method == "GET":
+                payload = refund_preview(
+                    reservation_id=reservation_id,
+                    user=request.user,
+                )
+            else:
+                payload = refund_reservation(
+                    reservation_id=reservation_id,
+                    user=request.user,
+                )
+        except RefundError as exc:
+            return Response(
+                {"detail": exc.message},
+                status=exc.status_code,
+            )
+
+        return Response(payload, status=status.HTTP_200_OK)
 
 class LessonViewSet(viewsets.ModelViewSet):
     queryset = Lesson.objects.all()

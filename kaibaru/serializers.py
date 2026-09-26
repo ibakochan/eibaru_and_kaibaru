@@ -2832,6 +2832,7 @@ class ReservationSerializer(serializers.ModelSerializer):
     instructor = serializers.SerializerMethodField()
     cancel_url = serializers.SerializerMethodField()
     restore_url = serializers.SerializerMethodField()
+    can_refund = serializers.SerializerMethodField()
 
     class Meta:
         model = Reservation
@@ -2868,11 +2869,14 @@ class ReservationSerializer(serializers.ModelSerializer):
             "amount",
             "currency",
             "paid_at",
+            "payment_method",
+            "refunded_at",
 
             # Metadata
             "created_at",
             "cancel_url",
             "restore_url",
+            "can_refund",
         ]
 
         read_only_fields = fields
@@ -2913,6 +2917,13 @@ class ReservationSerializer(serializers.ModelSerializer):
         from .reservation_cancel import restore_url
 
         return restore_url(obj.club, "lesson", obj.id)
+
+    def get_can_refund(self, obj):
+        from .service_reservation_refund import reservation_is_refundable
+
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        return reservation_is_refundable(obj, user)
 
     def get_instructor(self, obj):
         instructor = obj.lesson.instructor
