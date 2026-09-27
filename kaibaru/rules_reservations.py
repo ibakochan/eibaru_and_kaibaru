@@ -22,14 +22,18 @@ def unpaid_hold_q(hold_cutoff):
         created_at__gte=hold_cutoff,
     )
 
-    return Q(status=Reservation.Status.UNPAID, canceled=False) & started_recently
+    return Q(
+        status=Reservation.Status.UNPAID,
+        canceled=False,
+        is_deleted=False,
+    ) & started_recently
 
 
 def active_held_reservations_q(hold_cutoff, today=None):
     today = today or timezone.localdate()
 
     return Q(reservation_date__gte=today) & (
-        Q(status=Reservation.Status.PAID, canceled=False)
+        Q(status=Reservation.Status.PAID, canceled=False, is_deleted=False)
         | unpaid_hold_q(hold_cutoff)
     )
 
@@ -105,7 +109,7 @@ def assert_lesson_has_spots(
             reservation_date=reservation_date,
         )
         .filter(
-            Q(status=Reservation.Status.PAID, canceled=False)
+            Q(status=Reservation.Status.PAID, canceled=False, is_deleted=False)
             | unpaid_hold_q(hold_cutoff)
         )
     )
@@ -157,7 +161,14 @@ def count_active_reservations(*, hold_cutoff, **filters):
     )
 
 
-def assert_member_reservation_caps(*, club, lesson, member, hold_cutoff):
+def assert_member_reservation_caps(
+    *,
+    club,
+    lesson,
+    member,
+    hold_cutoff,
+    exclude_ids=None,
+):
     max_count = resolve_lesson_or_club(
         lesson.member_reservation_max_count,
         club.member_reservation_max_count,
@@ -166,12 +177,16 @@ def assert_member_reservation_caps(*, club, lesson, member, hold_cutoff):
     if max_count is None:
         return
 
-    count = count_active_reservations(
-        hold_cutoff=hold_cutoff,
+    counted = Reservation.objects.filter(
         lesson=lesson,
         member=member,
         reservation_type=Reservation.ReservationType.MEMBER,
-    )
+    ).filter(active_held_reservations_q(hold_cutoff))
+
+    if exclude_ids:
+        counted = counted.exclude(id__in=list(exclude_ids))
+
+    count = counted.count()
 
     if count >= max_count:
         raise ValueError(

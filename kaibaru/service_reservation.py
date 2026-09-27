@@ -18,6 +18,10 @@ from .models import (
 )
 from .discounts import calculate_age
 from .rules_eligibility import assert_member_eligible_for_lesson
+from .reservation_checkout_recovery import (
+    read_stripe_payment,
+    record_stripe_payment,
+)
 from .rules_reservations import (
     assert_member_reservation_caps,
     assert_reservation_horizon,
@@ -131,6 +135,59 @@ def member_has_lesson_access(
             return True
 
     return False
+
+
+def _member_stripe_key(reservation):
+    key = f"member_reservation_{reservation.id}"
+    if getattr(reservation, "_renew_stripe_key", False):
+        started = reservation.checkout_started_at or timezone.now()
+        key = f"{key}_{int(started.timestamp())}"
+    return key
+
+
+def _reuse_member_reservation(
+    existing,
+    *,
+    lesson,
+    club,
+    member,
+    payment_method,
+    full_name,
+    email,
+    phone_number,
+    age,
+    gender,
+    amount,
+    reservation_date,
+    status,
+    paid_at,
+    now,
+):
+    existing.is_deleted = False
+    existing.lesson = lesson
+    existing.club = club
+    existing.user = member.owner
+    existing.member = member
+    existing.payment_method = payment_method
+    existing.reservation_type = Reservation.ReservationType.MEMBER
+    existing.status = status
+    existing.full_name = full_name
+    existing.email = email
+    existing.phone_number = phone_number
+    existing.age = age
+    existing.gender = gender
+    existing.amount = amount
+    existing.currency = "jpy"
+    existing.reservation_date = reservation_date
+    existing.paid_at = paid_at
+    existing.canceled = False
+    existing.checkout_started_at = (
+        now if status == Reservation.Status.UNPAID else None
+    )
+    existing.stripe_checkout_session_id = None
+    existing.stripe_payment_intent_id = None
+    existing.save()
+    return existing
 
 
 class MemberReservationService:
@@ -408,11 +465,14 @@ class MemberReservationService:
 
             existing = (
                 Reservation.objects
+                .select_for_update()
                 .filter(
                     reservation_key=reservation_key
                 )
                 .first()
             )
+
+            reservation = None
 
             if existing:
 
@@ -420,6 +480,12 @@ class MemberReservationService:
                     existing.status
                     == Reservation.Status.PAID
                 ):
+                    if existing.is_deleted:
+                        existing.is_deleted = False
+                        existing.save(
+                            update_fields=["is_deleted"]
+                        )
+
                     if existing.canceled:
                         from .reservation_cancel import canceled_rebook_message
 
@@ -429,10 +495,35 @@ class MemberReservationService:
                         "このレッスンはすでに予約済みです。"
                     )
 
-                raise ValueError(
-                    "このレッスンの予約処理が"
-                    "すでに開始されています。"
+                payment_view = read_stripe_payment(
+                    existing,
+                    club.stripe_account_id,
+                    metadata_key="reservation_id",
                 )
+
+                if payment_view.paid:
+                    record_stripe_payment(
+                        existing,
+                        payment_view,
+                    )
+                    send_visitor_reservation_confirmation_email.delay(
+                        existing.id
+                    )
+                    return {
+                        "reservation_id": existing.id,
+                        "success": True,
+                        "paid": True,
+                        "requires_checkout": False,
+                    }
+
+                if (
+                    not payment_view.open_url
+                    and not payment_view.confirmed_unpaid
+                ):
+                    raise ValueError(
+                        "決済の確認ができませんでした。"
+                        "しばらくしてからもう一度お試しください。"
+                    )
 
             # --------------------------------------------------
             # Reservation limit
@@ -450,12 +541,22 @@ class MemberReservationService:
                         reservation_date=reservation_date,
                     )
                     .filter(
-                        Q(status=Reservation.Status.PAID, canceled=False)
+                        Q(
+                            status=Reservation.Status.PAID,
+                            canceled=False,
+                            is_deleted=False,
+                        )
                         |
                         unpaid_hold_q(hold_cutoff)
                     )
-                    .count()
                 )
+
+                if existing is not None:
+                    active_reservations = (
+                        active_reservations.exclude(id=existing.id)
+                    )
+
+                active_reservations = active_reservations.count()
 
                 if (
                     active_reservations
@@ -470,7 +571,55 @@ class MemberReservationService:
                 lesson=locked_lesson,
                 member=member,
                 hold_cutoff=hold_cutoff,
+                exclude_ids=(
+                    [existing.id] if existing is not None else None
+                ),
             )
+
+            if existing is not None:
+                payment_view = read_stripe_payment(
+                    existing,
+                    club.stripe_account_id,
+                    metadata_key="reservation_id",
+                )
+
+                if payment_view.paid:
+                    record_stripe_payment(
+                        existing,
+                        payment_view,
+                    )
+                    send_visitor_reservation_confirmation_email.delay(
+                        existing.id
+                    )
+                    return {
+                        "reservation_id": existing.id,
+                        "success": True,
+                        "paid": True,
+                        "requires_checkout": False,
+                    }
+
+                if payment_view.open_url:
+                    if existing.is_deleted:
+                        existing.is_deleted = False
+                        existing.save(
+                            update_fields=["is_deleted"]
+                        )
+                    return {
+                        "reservation_id": existing.id,
+                        "checkout_session_id": (
+                            payment_view.session_id
+                        ),
+                        "checkout_url": payment_view.open_url,
+                        "requires_checkout": True,
+                        "paid": False,
+                        "success": True,
+                    }
+
+                if not payment_view.confirmed_unpaid:
+                    raise ValueError(
+                        "決済の確認ができませんでした。"
+                        "しばらくしてからもう一度お試しください。"
+                    )
 
             # --------------------------------------------------
             # Create local reservation
@@ -561,58 +710,100 @@ class MemberReservationService:
                         raise ValueError(
                             "選択されたチケットは利用できません。"
                         )
-            
-                        
-                reservation = Reservation.objects.create(
-                    lesson=locked_lesson,
-                    club=club,
-                    user=member.owner,
-                    member=member,
-                    payment_method=payment_method,
-                    reservation_type=(
-                        Reservation.ReservationType.MEMBER
-                    ),
-                    status=Reservation.Status.PAID,
-                    full_name=full_name,
-                    email=email,
-                    phone_number=phone_number,
-                    age=reservation_age,
-                    gender=reservation_gender,
-                    amount=reservation_price,
-                    currency="jpy",
-                    reservation_date=reservation_date,
-                    reservation_key=reservation_key,
-                    paid_at=timezone.now(),
-                )
-            
-                TicketUsage.objects.create(
-                    grant=grant,
+
+                if existing is None:
+                    reservation = Reservation.objects.create(
+                        lesson=locked_lesson,
+                        club=club,
+                        user=member.owner,
+                        member=member,
+                        payment_method=payment_method,
+                        reservation_type=(
+                            Reservation.ReservationType.MEMBER
+                        ),
+                        status=Reservation.Status.PAID,
+                        full_name=full_name,
+                        email=email,
+                        phone_number=phone_number,
+                        age=reservation_age,
+                        gender=reservation_gender,
+                        amount=reservation_price,
+                        currency="jpy",
+                        reservation_date=reservation_date,
+                        reservation_key=reservation_key,
+                        paid_at=timezone.now(),
+                    )
+                else:
+                    reservation = _reuse_member_reservation(
+                        existing,
+                        lesson=locked_lesson,
+                        club=club,
+                        member=member,
+                        payment_method=payment_method,
+                        full_name=full_name,
+                        email=email,
+                        phone_number=phone_number,
+                        age=reservation_age,
+                        gender=reservation_gender,
+                        amount=reservation_price,
+                        reservation_date=reservation_date,
+                        status=Reservation.Status.PAID,
+                        paid_at=timezone.now(),
+                        now=now,
+                    )
+
+                if not TicketUsage.objects.filter(
                     reservation=reservation,
-                    quantity=1,
-                )
+                    refunded_at__isnull=True,
+                ).exists():
+                    TicketUsage.objects.create(
+                        grant=grant,
+                        reservation=reservation,
+                        quantity=1,
+                    )
                     
                         
             else:
-                reservation = Reservation.objects.create(
-                    lesson=locked_lesson,
-                    club=club,
-                    user=member.owner,
-                    member=member,
-                    payment_method=payment_method,
-                    reservation_type=(
-                        Reservation.ReservationType.MEMBER
-                    ),
-                    status=Reservation.Status.UNPAID,
-                    full_name=full_name,
-                    email=email,
-                    phone_number=phone_number,
-                    age=reservation_age,
-                    gender=reservation_gender,
-                    amount=reservation_price,
-                    currency="jpy",
-                    reservation_date=reservation_date,
-                    reservation_key=reservation_key,
-                )
+                if existing is None:
+                    reservation = Reservation.objects.create(
+                        lesson=locked_lesson,
+                        club=club,
+                        user=member.owner,
+                        member=member,
+                        payment_method=payment_method,
+                        reservation_type=(
+                            Reservation.ReservationType.MEMBER
+                        ),
+                        status=Reservation.Status.UNPAID,
+                        full_name=full_name,
+                        email=email,
+                        phone_number=phone_number,
+                        age=reservation_age,
+                        gender=reservation_gender,
+                        amount=reservation_price,
+                        currency="jpy",
+                        reservation_date=reservation_date,
+                        reservation_key=reservation_key,
+                    )
+                else:
+                    reservation = _reuse_member_reservation(
+                        existing,
+                        lesson=locked_lesson,
+                        club=club,
+                        member=member,
+                        payment_method=payment_method,
+                        full_name=full_name,
+                        email=email,
+                        phone_number=phone_number,
+                        age=reservation_age,
+                        gender=reservation_gender,
+                        amount=reservation_price,
+                        reservation_date=reservation_date,
+                        status=Reservation.Status.UNPAID,
+                        paid_at=None,
+                        now=now,
+                    )
+                    reservation._renew_stripe_key = True
 
         if payment_method == "ticket":
             send_visitor_reservation_confirmation_email.delay(
@@ -644,10 +835,13 @@ class MemberReservationService:
                 timezone.now()
             )
 
+            reservation.is_deleted = False
+
             reservation.save(
                 update_fields=[
                     "status",
                     "paid_at",
+                    "is_deleted",
                 ]
             )
 
@@ -762,8 +956,7 @@ class MemberReservationService:
                                 club.stripe_account_id
                             ),
                             idempotency_key=(
-                                f"member_reservation_"
-                                f"{reservation.id}"
+                                _member_stripe_key(reservation)
                             ),
                         )
                     )
@@ -785,11 +978,14 @@ class MemberReservationService:
                             payment_intent.id
                         )
 
+                        reservation.is_deleted = False
+
                         reservation.save(
                             update_fields=[
                                 "status",
                                 "paid_at",
                                 "stripe_payment_intent_id",
+                                "is_deleted",
                             ]
                         )
 
@@ -880,8 +1076,7 @@ class MemberReservationService:
                 "stripe_account":
                     club.stripe_account_id,
                 "idempotency_key": (
-                    f"member_reservation_"
-                    f"{reservation.id}"
+                    _member_stripe_key(reservation)
                 ),
             }
 
@@ -905,7 +1100,8 @@ class MemberReservationService:
             )
 
         except Exception:
-            reservation.delete()
+            if not getattr(reservation, "_renew_stripe_key", False):
+                reservation.delete()
             raise
 
         # --------------------------------------------------

@@ -4,8 +4,14 @@ import secrets
 from django.db import IntegrityError, transaction
 
 from .models import Club, Lesson, Reservation
+from .reservation_checkout_recovery import (
+    read_stripe_payment,
+    record_stripe_payment,
+)
+from .tasks_emails import send_visitor_reservation_confirmation_email
 from .rules_eligibility import assert_visitor_eligible_for_lesson
 from .rules_reservations import (
+    assert_lesson_has_spots,
     assert_reservation_horizon,
     display_reservation_name,
     hold_cutoff_at,
@@ -430,7 +436,7 @@ def _save_trial_reservations(
             rows,
             hold_cutoff=hold_cutoff,
         ):
-            if existing.id in deleted_ids:
+            if existing.id in deleted_ids or existing.is_deleted:
                 continue
 
             deleted_ids.add(existing.id)
@@ -447,16 +453,97 @@ def _save_trial_reservations(
         )
 
         for existing in leftover:
-            if existing.id in deleted_ids:
+            if existing.id in deleted_ids or existing.is_deleted:
                 continue
 
             deleted_ids.add(existing.id)
             existing.delete()
 
+    assert_lesson_has_spots(
+        lesson=locked_lesson,
+        reservation_date=reservation_date,
+        hold_cutoff=hold_cutoff,
+        needed=len(people),
+    )
+
     token = secrets.token_urlsafe(32)
     created_ids = []
 
     for person, key in zip(people, keys):
+        existing = (
+            Reservation.objects
+            .select_for_update()
+            .filter(reservation_key=key)
+            .first()
+        )
+        if existing is not None:
+            if (
+                existing.status == Reservation.Status.PAID
+                and not existing.canceled
+            ):
+                if existing.is_deleted:
+                    existing.is_deleted = False
+                    existing.save(update_fields=["is_deleted"])
+                raise ValueError(
+                    f"{person['full_name']}さんは、このクラブで"
+                    "体験予約をすでにご利用済みです。"
+                )
+
+            payment_view = read_stripe_payment(
+                existing,
+                club.stripe_account_id,
+                metadata_key="reservation_id",
+            )
+            if payment_view.paid:
+                record_stripe_payment(existing, payment_view)
+                send_visitor_reservation_confirmation_email.delay(
+                    existing.id
+                )
+                raise ValueError(
+                    f"{person['full_name']}さんは、このクラブで"
+                    "体験予約をすでにご利用済みです。"
+                )
+            if payment_view.open_url:
+                existing.is_deleted = False
+                existing.save(update_fields=["is_deleted"])
+                raise ValueError(
+                    f"{person['full_name']}さんの体験予約は"
+                    "お支払い手続き中です。"
+                    "メールのリンクからお支払いを続けてください。"
+                )
+            if not payment_view.confirmed_unpaid:
+                raise ValueError(
+                    "決済の確認ができませんでした。"
+                    "しばらくしてからもう一度お試しください。"
+                )
+
+            existing.is_deleted = False
+            existing.lesson = locked_lesson
+            existing.club = club
+            existing.user = user
+            existing.payment_method = "stripe"
+            existing.reservation_type = Reservation.ReservationType.TRIAL
+            existing.status = Reservation.Status.NOT_STARTED
+            existing.full_name = person["full_name"]
+            existing.email = email
+            existing.phone_number = phone_number
+            existing.age = person["age"]
+            existing.gender = person["gender"]
+            existing.amount = reservation_price
+            existing.currency = "jpy"
+            existing.reservation_date = reservation_date
+            existing.start_token = token
+            existing.requested_at = now
+            existing.checkout_started_at = None
+            existing.stripe_checkout_session_id = None
+            existing.stripe_payment_intent_id = None
+            existing.paid_at = None
+            existing.canceled = False
+            existing.confirmation_email_sent = False
+            existing.save()
+            created_ids.append(existing.id)
+            continue
+
         reservation = Reservation.objects.create(
             lesson=locked_lesson,
             club=club,
@@ -484,12 +571,23 @@ def _save_trial_reservations(
 
 def _classify_trial_rows(rows, *, now, hold_cutoff):
     for row in rows:
-        if row.status == Reservation.Status.PAID:
-            if row.canceled:
-                return row, "canceled"
+        if row.status == Reservation.Status.PAID and not row.canceled:
+            if row.is_deleted:
+                row.is_deleted = False
+                row.save(update_fields=["is_deleted"])
             return row, "paid"
 
     for row in rows:
+        if row.is_deleted:
+            continue
+
+        if row.status == Reservation.Status.PAID and row.canceled:
+            return row, "canceled"
+
+    for row in rows:
+        if row.is_deleted:
+            continue
+
         if (
             row.status == Reservation.Status.UNPAID
             and hold_is_active(row, hold_cutoff)
@@ -497,6 +595,9 @@ def _classify_trial_rows(rows, *, now, hold_cutoff):
             return row, "unpaid"
 
     for row in rows:
+        if row.is_deleted:
+            continue
+
         if (
             row.status == Reservation.Status.NOT_STARTED
             and request_is_fresh(row, now)

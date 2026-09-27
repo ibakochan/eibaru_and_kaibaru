@@ -10,6 +10,11 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from .models import TicketGrant, Reservation, SubscriptionMutation, SubscriptionItem, Subscription, Club, Member, MembershipPlan, Invoice, InvoiceItem, Payment
+from .reservation_checkout_recovery import (
+    read_stripe_payment,
+    record_stripe_payment,
+    soft_delete_reservation,
+)
 from datetime import datetime, timedelta
 
 from .tasks_emails import send_stripe_cash_transition_email, send_plan_deletion_emails
@@ -2702,6 +2707,7 @@ class MemberReservationPaymentReconciler:
             Reservation.objects
             .filter(
                 status=Reservation.Status.UNPAID,
+                is_deleted=False,
                 payment_method="stripe",
                 reservation_type__in=[
                     Reservation.ReservationType.MEMBER,
@@ -2947,6 +2953,20 @@ class MemberReservationPaymentReconciler:
                 club=club,
             )
 
+    @classmethod
+    def _abandon(cls, reservation, club):
+        soft_delete_reservation(reservation)
+        view = read_stripe_payment(
+            reservation,
+            club.stripe_account_id,
+            metadata_key="reservation_id",
+        )
+        if view.paid:
+            record_stripe_payment(reservation, view)
+            cls._queue_customer_paid_email(reservation)
+            return "paid"
+        return "deleted"
+
     # =========================================================
     # PAYMENT INTENT RECONCILIATION
     # =========================================================
@@ -3092,9 +3112,7 @@ class MemberReservationPaymentReconciler:
                 reservation.id,
             )
 
-            reservation.delete()
-
-            return "deleted"
+            return cls._abandon(reservation, club)
 
         logger.info(
             "[MEMBER RESERVATION RECONCILE] "
@@ -3122,11 +3140,14 @@ class MemberReservationPaymentReconciler:
                 payment_intent.id
             )
 
+            reservation.is_deleted = False
+
             reservation.save(
                 update_fields=[
                     "status",
                     "paid_at",
                     "stripe_payment_intent_id",
+                    "is_deleted",
                 ]
             )
 
@@ -3160,9 +3181,7 @@ class MemberReservationPaymentReconciler:
                 reservation.id,
             )
 
-            reservation.delete()
-
-            return "deleted"
+            return cls._abandon(reservation, club)
 
         # -----------------------------------------------------
         # STILL PROCESSING / REQUIRES ACTION
@@ -3433,12 +3452,15 @@ class MemberReservationPaymentReconciler:
                 session_id
             )
 
+            reservation.is_deleted = False
+
             reservation.save(
                 update_fields=[
                     "status",
                     "paid_at",
                     "stripe_payment_intent_id",
                     "stripe_checkout_session_id",
+                    "is_deleted",
                 ]
             )
 
@@ -3475,9 +3497,7 @@ class MemberReservationPaymentReconciler:
                 reservation.id,
             )
 
-            reservation.delete()
-
-            return "deleted"
+            return cls._abandon(reservation, club)
 
         # -----------------------------------------------------
         # CHECKOUT STILL OPEN / PAYMENT NOT COMPLETE

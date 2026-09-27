@@ -175,6 +175,8 @@ def stripe_connected_webhook(request):
                 )
                 return webhook_ok(event_record)
 
+            # Marks the event reservation paid and clears is_deleted
+            # when the reconciler soft-deleted it before this payment.
             complete_paid_event_checkout(
                 reservation_id=event_reservation_id,
                 session_id=session["id"],
@@ -220,6 +222,8 @@ def stripe_connected_webhook(request):
                 )
                 return webhook_ok(event_record)
 
+            # Marks the lesson reservations paid and clears is_deleted
+            # when the reconciler soft-deleted them before this payment.
             complete_paid_checkout(
                 reservation_ids=reservation_ids,
                 session_id=session["id"],

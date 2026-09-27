@@ -781,6 +781,39 @@ def reconcile_member_reservation_payments():
 
 
 @shared_task
+def reconcile_reservation_refunds():
+    """
+    Periodic safety-net for Stripe reservation refunds.
+
+    Picks up rows whose refund_started_at is older than five minutes
+    and which are not both canceled and refunded. If Stripe has the
+    refund, the local row is completed. If it does not, refund_started_at
+    is cleared only when it is still that same old timestamp.
+    """
+
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+
+    logger.info("[RESERVATION REFUND TASK] Starting reconciliation")
+
+    try:
+        from .service_reservation_refund import ReservationRefundReconciler
+
+        result = ReservationRefundReconciler.reconcile_started_refunds()
+
+        logger.info(
+            "[RESERVATION REFUND TASK] Finished reconciliation result=%s",
+            result,
+        )
+        return result
+
+    except Exception:
+        logger.exception(
+            "[RESERVATION REFUND TASK] Reconciliation failed"
+        )
+        raise
+
+
+@shared_task
 def delete_membership_plan_task(plan_id):
     """
     Fired once when an owner schedules a MembershipPlan for deletion

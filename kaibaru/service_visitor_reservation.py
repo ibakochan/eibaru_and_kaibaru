@@ -4,9 +4,16 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from .models import Reservation
+from .reservation_checkout_recovery import (
+    read_stripe_payment,
+    record_stripe_payment,
+)
+from .tasks_emails import send_visitor_reservation_confirmation_email
 from .rules_eligibility import assert_visitor_eligible_for_lesson
 from .rules_reservations import (
+    assert_lesson_has_spots,
     assert_reservation_horizon,
+    assert_visitor_reservation_caps,
     display_reservation_name,
     hold_cutoff_at,
     hold_is_active,
@@ -73,6 +80,32 @@ class VisitorReservationService:
             )
 
         return _email_sent_result(reservation_ids)
+
+
+def _assert_visitor_room(
+    *,
+    lesson,
+    club,
+    reservation_date,
+    email,
+    hold_cutoff,
+    exclude_ids=None,
+):
+    assert_lesson_has_spots(
+        lesson=lesson,
+        reservation_date=reservation_date,
+        hold_cutoff=hold_cutoff,
+        needed=1,
+        exclude_ids=exclude_ids,
+    )
+    assert_visitor_reservation_caps(
+        club=club,
+        lesson=lesson,
+        email=email,
+        hold_cutoff=hold_cutoff,
+        exclude_ids=exclude_ids,
+        additional=1,
+    )
 
 
 def _email_sent_result(reservation_ids):
@@ -215,6 +248,10 @@ def _save_visitor_reservation(
 
     if existing:
         if existing.status == Reservation.Status.PAID:
+            if existing.is_deleted:
+                existing.is_deleted = False
+                existing.save(update_fields=["is_deleted"])
+
             if existing.canceled:
                 from .reservation_cancel import canceled_rebook_message
 
@@ -222,7 +259,40 @@ def _save_visitor_reservation(
 
             raise ValueError("このレッスンはすでに予約済みです。")
 
-        if (
+        revived = existing.is_deleted
+        if revived:
+            payment_view = read_stripe_payment(
+                existing,
+                club.stripe_account_id,
+                metadata_key="reservation_id",
+            )
+            if payment_view.paid:
+                record_stripe_payment(existing, payment_view)
+                send_visitor_reservation_confirmation_email.delay(
+                    existing.id
+                )
+                raise ValueError("このレッスンはすでに予約済みです。")
+            _assert_visitor_room(
+                lesson=lesson,
+                club=club,
+                reservation_date=reservation_date,
+                email=email,
+                hold_cutoff=hold_cutoff,
+            )
+            if payment_view.open_url:
+                existing.is_deleted = False
+                existing.save(update_fields=["is_deleted"])
+                raise ValueError(
+                    "このレッスンの予約はお支払い手続き中です。"
+                    "メールのリンクからお支払いを続けてください。"
+                )
+            if not payment_view.confirmed_unpaid:
+                raise ValueError(
+                    "決済の確認ができませんでした。"
+                    "しばらくしてからもう一度お試しください。"
+                )
+            existing.is_deleted = False
+        elif (
             existing.status == Reservation.Status.UNPAID
             and hold_is_active(existing, hold_cutoff)
         ):
@@ -232,7 +302,8 @@ def _save_visitor_reservation(
             )
 
         if (
-            existing.status == Reservation.Status.NOT_STARTED
+            not revived
+            and existing.status == Reservation.Status.NOT_STARTED
             and request_is_fresh(existing, now)
             and existing.start_token
         ):
@@ -256,6 +327,14 @@ def _save_visitor_reservation(
             )
 
             return existing.start_token, [existing.id]
+
+        _assert_visitor_room(
+            lesson=lesson,
+            club=club,
+            reservation_date=reservation_date,
+            email=email,
+            hold_cutoff=hold_cutoff,
+        )
 
         token = secrets.token_urlsafe(32)
         existing.lesson = lesson
@@ -282,6 +361,14 @@ def _save_visitor_reservation(
         existing.save()
 
         return token, [existing.id]
+
+    _assert_visitor_room(
+        lesson=lesson,
+        club=club,
+        reservation_date=reservation_date,
+        email=email,
+        hold_cutoff=hold_cutoff,
+    )
 
     token = secrets.token_urlsafe(32)
 

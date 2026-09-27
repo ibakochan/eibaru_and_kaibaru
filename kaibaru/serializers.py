@@ -2123,7 +2123,10 @@ class EventSerializer(serializers.ModelSerializer):
             .filter(owner=user)
             .values_list("id", flat=True)
         )
-        rows = EventReservation.objects.filter(event=event).select_related("member", "club")
+        rows = EventReservation.objects.filter(
+            event=event,
+            is_deleted=False,
+        ).select_related("member", "club")
         if owned_member_ids:
             rows = rows.filter(member_id__in=owned_member_ids)
         else:
@@ -2171,7 +2174,7 @@ class EventSerializer(serializers.ModelSerializer):
         user = getattr(request, "user", None)
         rows = (
             EventReservation.objects
-            .filter(event=event)
+            .filter(event=event, is_deleted=False)
             .select_related("member", "club")
             .order_by("-created_at", "-id")
         )

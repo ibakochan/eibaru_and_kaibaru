@@ -1162,8 +1162,11 @@ class Reservation(models.Model):
     reservation_date = models.DateField()
     reservation_key = models.CharField(max_length=255, unique=True)
     canceled = models.BooleanField(default=False)
+    is_deleted = models.BooleanField(default=False)
 
     refunded_at = models.DateTimeField(null=True, blank=True)
+
+    refund_started_at = models.DateTimeField(null=True, blank=True)
 
     stripe_refund_id = models.CharField(
         max_length=255,
@@ -1806,6 +1809,7 @@ class EventReservation(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     reservation_key = models.CharField(max_length=255, unique=True)
     canceled = models.BooleanField(default=False)
+    is_deleted = models.BooleanField(default=False)
 
     class Meta:
         indexes = [

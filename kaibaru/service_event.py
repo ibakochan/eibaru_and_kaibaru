@@ -12,6 +12,11 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from .models import Event, EventReservation, StripeCustomer, Subscription
+from .reservation_checkout_recovery import (
+    read_stripe_payment,
+    record_stripe_payment,
+    soft_delete_reservation,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -68,7 +73,11 @@ def unpaid_hold_q(hold_cutoff):
         checkout_started_at__isnull=True,
         created_at__gte=hold_cutoff,
     )
-    return Q(status=EventReservation.Status.UNPAID, canceled=False) & started_recently
+    return Q(
+        status=EventReservation.Status.UNPAID,
+        canceled=False,
+        is_deleted=False,
+    ) & started_recently
 
 
 def hold_is_active(reservation, hold_cutoff):
@@ -89,7 +98,7 @@ def held_reservations(event, hold_cutoff):
         EventReservation.objects
         .filter(event=event)
         .filter(
-            Q(status=EventReservation.Status.PAID, canceled=False)
+            Q(status=EventReservation.Status.PAID, canceled=False, is_deleted=False)
             | unpaid_hold_q(hold_cutoff)
         )
     )
@@ -239,8 +248,15 @@ class EventReservationService:
                 .first()
             )
 
+            reused = False
+            open_checkout = None
+
             if existing:
                 if existing.status == EventReservation.Status.PAID:
+                    if existing.is_deleted:
+                        existing.is_deleted = False
+                        existing.save(update_fields=["is_deleted"])
+
                     if existing.canceled:
                         from .reservation_cancel import canceled_rebook_message
 
@@ -248,36 +264,123 @@ class EventReservationService:
 
                     raise ValueError("このイベントはすでに予約済みです。")
 
-                raise ValueError(
-                    "このイベントの予約処理がすでに開始されています。"
+                payment_view = read_stripe_payment(
+                    existing,
+                    club.stripe_account_id,
+                    metadata_key="event_reservation_id",
                 )
+                if payment_view.paid:
+                    record_stripe_payment(existing, payment_view)
+                    _queue_confirmation(existing.id)
+                    return _paid_result(existing)
+
+                if payment_view.open_url:
+                    open_checkout = payment_view
+                elif not payment_view.confirmed_unpaid:
+                    raise ValueError(
+                        "決済の確認ができませんでした。"
+                        "しばらくしてからもう一度お試しください。"
+                    )
+                else:
+                    reused = True
 
             assert_event_has_spots(
                 event=locked_event,
                 hold_cutoff=hold_cutoff,
+                exclude_ids=[existing.id] if existing is not None else None,
             )
 
-            reservation = EventReservation.objects.create(
-                event=locked_event,
-                club=club,
-                member=member,
-                user=member.owner,
-                reservation_type=EventReservation.ReservationType.MEMBER,
-                payment_method="stripe" if amount > 0 else "",
-                status=(
+            if open_checkout is not None:
+                if existing.is_deleted:
+                    existing.is_deleted = False
+                    existing.save(update_fields=["is_deleted"])
+                return {
+                    "reservation_id": existing.id,
+                    "checkout_session_id": open_checkout.session_id,
+                    "checkout_url": open_checkout.open_url,
+                    "requires_checkout": True,
+                    "paid": False,
+                    "success": True,
+                }
+
+            if reused:
+                payment_view = read_stripe_payment(
+                    existing,
+                    club.stripe_account_id,
+                    metadata_key="event_reservation_id",
+                )
+                if payment_view.paid:
+                    record_stripe_payment(existing, payment_view)
+                    _queue_confirmation(existing.id)
+                    return _paid_result(existing)
+
+                if payment_view.open_url:
+                    if existing.is_deleted:
+                        existing.is_deleted = False
+                        existing.save(update_fields=["is_deleted"])
+                    return {
+                        "reservation_id": existing.id,
+                        "checkout_session_id": payment_view.session_id,
+                        "checkout_url": payment_view.open_url,
+                        "requires_checkout": True,
+                        "paid": False,
+                        "success": True,
+                    }
+
+                if not payment_view.confirmed_unpaid:
+                    raise ValueError(
+                        "決済の確認ができませんでした。"
+                        "しばらくしてからもう一度お試しください。"
+                    )
+
+                existing.is_deleted = False
+                existing.event = locked_event
+                existing.club = club
+                existing.member = member
+                existing.user = member.owner
+                existing.reservation_type = EventReservation.ReservationType.MEMBER
+                existing.payment_method = "stripe" if amount > 0 else ""
+                existing.status = (
                     EventReservation.Status.PAID
                     if amount == 0
                     else EventReservation.Status.UNPAID
-                ),
-                full_name=full_name,
-                email=email,
-                phone_number=phone_number,
-                amount=amount,
-                currency="jpy",
-                reservation_key=reservation_key,
-                paid_at=now if amount == 0 else None,
-                checkout_started_at=now if amount > 0 else None,
-            )
+                )
+                existing.full_name = full_name
+                existing.email = email
+                existing.phone_number = phone_number
+                existing.amount = amount
+                existing.currency = "jpy"
+                existing.canceled = False
+                existing.paid_at = now if amount == 0 else None
+                existing.checkout_started_at = now if amount > 0 else None
+                existing.stripe_checkout_session_id = None
+                existing.stripe_payment_intent_id = None
+                existing.confirmation_email_sent = False
+                existing.save()
+                existing._renew_stripe_key = True
+                reservation = existing
+            else:
+                reservation = EventReservation.objects.create(
+                    event=locked_event,
+                    club=club,
+                    member=member,
+                    user=member.owner,
+                    reservation_type=EventReservation.ReservationType.MEMBER,
+                    payment_method="stripe" if amount > 0 else "",
+                    status=(
+                        EventReservation.Status.PAID
+                        if amount == 0
+                        else EventReservation.Status.UNPAID
+                    ),
+                    full_name=full_name,
+                    email=email,
+                    phone_number=phone_number,
+                    amount=amount,
+                    currency="jpy",
+                    reservation_key=reservation_key,
+                    paid_at=now if amount == 0 else None,
+                    checkout_started_at=now if amount > 0 else None,
+                )
 
         if amount == 0:
             _queue_confirmation(reservation.id)
@@ -289,19 +392,33 @@ class EventReservationService:
                 club=club,
                 member=member,
                 event=locked_event,
+                idempotency_key=(
+                    f"event_member_{reservation.id}"
+                    + (
+                        f"_{int((reservation.checkout_started_at or timezone.now()).timestamp())}"
+                        if getattr(reservation, "_renew_stripe_key", False)
+                        else ""
+                    )
+                ),
             )
             if charged:
                 return charged
+
+            stripe_key = f"event_member_{reservation.id}"
+            if getattr(reservation, "_renew_stripe_key", False):
+                started = reservation.checkout_started_at or timezone.now()
+                stripe_key = f"{stripe_key}_{int(started.timestamp())}"
 
             session = _create_checkout_session(
                 reservation=reservation,
                 club=club,
                 event=locked_event,
                 customer_email=email,
-                idempotency_key=f"event_member_{reservation.id}",
+                idempotency_key=stripe_key,
             )
         except Exception:
-            reservation.delete()
+            if not getattr(reservation, "_renew_stripe_key", False):
+                reservation.delete()
             raise
 
         reservation.stripe_checkout_session_id = session.id
@@ -424,6 +541,10 @@ def _save_visitor_reservation(
 
     if existing:
         if existing.status == EventReservation.Status.PAID:
+            if existing.is_deleted:
+                existing.is_deleted = False
+                existing.save(update_fields=["is_deleted"])
+
             if existing.canceled:
                 from .reservation_cancel import canceled_rebook_message
 
@@ -431,7 +552,35 @@ def _save_visitor_reservation(
 
             raise ValueError("このイベントはすでに予約済みです。")
 
-        if (
+        revived = existing.is_deleted
+        if revived:
+            payment_view = read_stripe_payment(
+                existing,
+                club.stripe_account_id,
+                metadata_key="event_reservation_id",
+            )
+            if payment_view.paid:
+                record_stripe_payment(existing, payment_view)
+                _queue_confirmation(existing.id)
+                raise ValueError("このイベントはすでに予約済みです。")
+            assert_event_has_spots(
+                event=locked_event,
+                hold_cutoff=hold_cutoff,
+            )
+            if payment_view.open_url:
+                existing.is_deleted = False
+                existing.save(update_fields=["is_deleted"])
+                raise ValueError(
+                    "このイベントの予約はお支払い手続き中です。"
+                    "メールのリンクからお支払いを続けてください。"
+                )
+            if not payment_view.confirmed_unpaid:
+                raise ValueError(
+                    "決済の確認ができませんでした。"
+                    "しばらくしてからもう一度お試しください。"
+                )
+            existing.is_deleted = False
+        elif (
             existing.status == EventReservation.Status.UNPAID
             and hold_is_active(existing, hold_cutoff)
         ):
@@ -441,7 +590,8 @@ def _save_visitor_reservation(
             )
 
         if (
-            existing.status == EventReservation.Status.NOT_STARTED
+            not revived
+            and existing.status == EventReservation.Status.NOT_STARTED
             and existing.start_token
             and request_is_fresh(existing, now)
         ):
@@ -518,7 +668,14 @@ def _save_visitor_reservation(
     return token, reservation
 
 
-def _charge_member_off_session(*, reservation, club, member, event):
+def _charge_member_off_session(
+    *,
+    reservation,
+    club,
+    member,
+    event,
+    idempotency_key,
+):
     stripe_customer = (
         StripeCustomer.objects
         .filter(user=member.owner, club=club)
@@ -573,7 +730,7 @@ def _charge_member_off_session(*, reservation, club, member, event):
                 "kind": "event",
             },
             stripe_account=club.stripe_account_id,
-            idempotency_key=f"event_member_{reservation.id}",
+            idempotency_key=idempotency_key,
         )
     except (stripe.error.CardError, stripe.error.InvalidRequestError):
         return None
@@ -584,8 +741,14 @@ def _charge_member_off_session(*, reservation, club, member, event):
     reservation.status = EventReservation.Status.PAID
     reservation.paid_at = timezone.now()
     reservation.stripe_payment_intent_id = payment_intent.id
+    reservation.is_deleted = False
     reservation.save(
-        update_fields=["status", "paid_at", "stripe_payment_intent_id"]
+        update_fields=[
+            "status",
+            "paid_at",
+            "stripe_payment_intent_id",
+            "is_deleted",
+        ]
     )
     _queue_confirmation(reservation.id)
     result = _paid_result(reservation)
@@ -696,6 +859,7 @@ def complete_paid_event_checkout(
         if (
             reservation.stripe_checkout_session_id
             and reservation.stripe_checkout_session_id != session_id
+            and not reservation.is_deleted
         ):
             logger.error(
                 "[EVENT CHECKOUT] Session mismatch reservation=%s "
@@ -707,14 +871,27 @@ def complete_paid_event_checkout(
             return
 
         if reservation.status == EventReservation.Status.PAID:
+            if reservation.is_deleted:
+                reservation.is_deleted = False
+                reservation.stripe_checkout_session_id = session_id
+                update_fields = [
+                    "is_deleted",
+                    "stripe_checkout_session_id",
+                ]
+                if payment_intent_id:
+                    reservation.stripe_payment_intent_id = payment_intent_id
+                    update_fields.append("stripe_payment_intent_id")
+                reservation.save(update_fields=update_fields)
             return
 
         reservation.status = EventReservation.Status.PAID
         reservation.paid_at = timezone.now()
+        reservation.is_deleted = False
         reservation.stripe_checkout_session_id = session_id
         update_fields = [
             "status",
             "paid_at",
+            "is_deleted",
             "stripe_checkout_session_id",
         ]
         if payment_intent_id:
@@ -723,6 +900,36 @@ def complete_paid_event_checkout(
         reservation.save(update_fields=update_fields)
 
     _queue_confirmation(reservation.id)
+
+
+def _revive_deleted_event_reservation(reservation, club):
+    if not reservation.is_deleted:
+        return
+
+    if reservation.status == EventReservation.Status.PAID:
+        reservation.is_deleted = False
+        reservation.save(update_fields=["is_deleted"])
+        return
+
+    view = read_stripe_payment(
+        reservation,
+        club.stripe_account_id,
+        metadata_key="event_reservation_id",
+    )
+    if view.paid:
+        record_stripe_payment(reservation, view)
+        _queue_confirmation(reservation.id)
+        return
+
+    if not view.confirmed_unpaid and not view.open_url:
+        raise EventStartError(
+            "決済の確認ができませんでした。"
+            "しばらくしてからもう一度お試しください。",
+            retryable=True,
+        )
+
+    reservation.is_deleted = False
+    reservation.save(update_fields=["is_deleted"])
 
 
 class EventStartService:
@@ -853,6 +1060,7 @@ def _prepare_start(token, force_new=False):
         club = reservation.club
         reservation.event = event
         page = _start_page(reservation)
+        _revive_deleted_event_reservation(reservation, club)
 
         if reservation.status == EventReservation.Status.PAID:
             return {"action": "done", **page}
@@ -876,7 +1084,10 @@ def _prepare_start(token, force_new=False):
         if reservation.amount == 0:
             reservation.status = EventReservation.Status.PAID
             reservation.paid_at = now
-            reservation.save(update_fields=["status", "paid_at"])
+            reservation.is_deleted = False
+            reservation.save(
+                update_fields=["status", "paid_at", "is_deleted"]
+            )
             _queue_confirmation(reservation.id)
             return {"action": "done", **page}
 
@@ -1030,6 +1241,7 @@ class EventReservationPaymentReconciler:
             EventReservation.objects
             .filter(
                 status=EventReservation.Status.UNPAID,
+                is_deleted=False,
                 payment_method="stripe",
                 reservation_type__in=[
                     EventReservation.ReservationType.MEMBER,
@@ -1132,10 +1344,28 @@ class EventReservationPaymentReconciler:
             )
 
     @classmethod
+    def _abandon(cls, reservation, club):
+        soft_delete_reservation(reservation)
+        view = read_stripe_payment(
+            reservation,
+            club.stripe_account_id,
+            metadata_key="event_reservation_id",
+        )
+        if view.paid:
+            cls._mark_paid(
+                reservation,
+                session_id=view.session_id,
+                payment_intent_id=view.payment_intent_id,
+            )
+            return "paid"
+        return "deleted"
+
+    @classmethod
     def _mark_paid(cls, reservation, *, session_id=None, payment_intent_id=None):
         reservation.status = EventReservation.Status.PAID
         reservation.paid_at = timezone.now()
-        update_fields = ["status", "paid_at"]
+        reservation.is_deleted = False
+        update_fields = ["status", "paid_at", "is_deleted"]
         if session_id:
             reservation.stripe_checkout_session_id = session_id
             update_fields.append("stripe_checkout_session_id")
@@ -1205,8 +1435,7 @@ class EventReservationPaymentReconciler:
             return "paid"
 
         if payment_intent.status in cls.TERMINAL_PAYMENT_INTENT_FAILURE_STATUSES:
-            reservation.delete()
-            return "deleted"
+            return cls._abandon(reservation, club)
 
         if payment_intent.status in cls.NON_TERMINAL_PAYMENT_INTENT_STATUSES:
             if reservation.stripe_payment_intent_id != payment_intent.id:
@@ -1296,8 +1525,7 @@ class EventReservationPaymentReconciler:
             return "paid"
 
         if session_status == cls.CHECKOUT_EXPIRED_STATUS:
-            reservation.delete()
-            return "deleted"
+            return cls._abandon(reservation, club)
 
         if reservation.stripe_checkout_session_id != session_id:
             reservation.stripe_checkout_session_id = session_id

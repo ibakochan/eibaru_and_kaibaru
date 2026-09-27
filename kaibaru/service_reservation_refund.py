@@ -1,9 +1,18 @@
+import logging
+from datetime import timedelta
+
 import stripe
 from django.conf import settings
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from .models import Reservation, TicketUsage
+
+
+logger = logging.getLogger(__name__)
+
+REFUND_RECONCILE_AFTER = timedelta(minutes=5)
 
 
 class RefundError(Exception):
@@ -60,26 +69,27 @@ def refund_reservation(*, reservation_id, user):
         reservation = _lock(reservation_id)
         _assert_owner(reservation, user)
 
-        if reservation.refunded_at:
+        if reservation.refunded_at and reservation.canceled:
             return _payload(reservation, already_refunded=True)
 
         _assert_refundable(reservation)
 
         if reservation.payment_method == Reservation.PaymentMethod.TICKET:
             _refund_ticket(reservation)
-        else:
-            _refund_stripe(reservation)
+            _mark_refunded(reservation)
+            reservation.refresh_from_db()
+            return _payload(reservation, already_refunded=False)
 
-        now = timezone.now()
-        reservation.refunded_at = now
-        reservation.canceled = True
-        reservation.save(
-            update_fields=[
-                "refunded_at",
-                "canceled",
-                "stripe_refund_id",
-            ]
-        )
+        reservation.refund_started_at = timezone.now()
+        reservation.save(update_fields=["refund_started_at"])
+
+    stripe_refund_id = _refund_stripe(reservation)
+
+    with transaction.atomic():
+        reservation = _lock(reservation_id)
+        if reservation.refunded_at and reservation.canceled:
+            return _payload(reservation, already_refunded=True)
+        _mark_refunded(reservation, stripe_refund_id=stripe_refund_id)
 
     reservation.refresh_from_db()
     return _payload(reservation, already_refunded=False)
@@ -169,13 +179,23 @@ def _refund_ticket(reservation):
         usage.save(update_fields=["refunded_at"])
 
 
+def _mark_refunded(reservation, stripe_refund_id=None):
+    if reservation.refunded_at is None:
+        reservation.refunded_at = timezone.now()
+    reservation.canceled = True
+    update_fields = ["refunded_at", "canceled"]
+    if stripe_refund_id:
+        reservation.stripe_refund_id = stripe_refund_id
+        update_fields.append("stripe_refund_id")
+    reservation.save(update_fields=update_fields)
+
+
 def _refund_stripe(reservation):
     stripe.api_key = settings.STRIPE_SECRET_KEY
     existing = _find_stripe_refund(reservation)
 
     if existing is not None:
-        reservation.stripe_refund_id = existing.id
-        return
+        return _refund_id(existing)
 
     try:
         refund = stripe.Refund.create(
@@ -190,8 +210,7 @@ def _refund_stripe(reservation):
     except stripe.error.InvalidRequestError as exc:
         existing = _find_stripe_refund(reservation)
         if existing is not None:
-            reservation.stripe_refund_id = existing.id
-            return
+            return _refund_id(existing)
         if getattr(exc, "code", None) in (
             "charge_already_refunded",
             "amount_too_large",
@@ -207,7 +226,13 @@ def _refund_stripe(reservation):
     if status in ("failed", "canceled"):
         raise RefundError("Stripeでの返金に失敗しました。")
 
-    reservation.stripe_refund_id = refund.id if hasattr(refund, "id") else refund["id"]
+    return _refund_id(refund)
+
+
+def _refund_id(refund):
+    if hasattr(refund, "id"):
+        return refund.id
+    return refund["id"]
 
 
 def _find_stripe_refund(reservation):
@@ -297,3 +322,144 @@ def _explanation(reservation, already_refunded):
     )
 
     return "\n".join(lines)
+
+
+class ReservationRefundReconciler:
+    """
+    Finish Stripe refunds whose local row was left incomplete.
+
+    A row is left alone until refund_started_at is five minutes old,
+    so an owner click that is still talking to Stripe is not cleared.
+    Clearing the timestamp uses that same stored value. A newer click
+    replaces it, and the clear no longer matches.
+    """
+
+    @classmethod
+    def reconcile_started_refunds(cls):
+        cutoff = timezone.now() - REFUND_RECONCILE_AFTER
+        reservations = (
+            Reservation.objects
+            .filter(
+                payment_method=Reservation.PaymentMethod.STRIPE,
+                refund_started_at__isnull=False,
+                refund_started_at__lt=cutoff,
+            )
+            .filter(Q(refunded_at__isnull=True) | Q(canceled=False))
+            .select_related("club")
+            .order_by("refund_started_at", "id")
+        )
+
+        checked = completed = cleared = skipped = failed = 0
+        logger.info(
+            "[RESERVATION REFUND RECONCILE] Starting scan cutoff=%s",
+            cutoff,
+        )
+
+        for reservation in reservations:
+            checked += 1
+            try:
+                result = cls.reconcile_reservation(reservation.id)
+            except Exception:
+                failed += 1
+                logger.exception(
+                    "[RESERVATION REFUND RECONCILE] Unexpected error "
+                    "reservation=%s",
+                    reservation.id,
+                )
+                continue
+
+            if result == "completed":
+                completed += 1
+            elif result == "cleared":
+                cleared += 1
+            elif result == "skipped":
+                skipped += 1
+            else:
+                failed += 1
+
+        logger.info(
+            "[RESERVATION REFUND RECONCILE] Finished checked=%s "
+            "completed=%s cleared=%s skipped=%s failed=%s",
+            checked,
+            completed,
+            cleared,
+            skipped,
+            failed,
+        )
+        return {
+            "checked": checked,
+            "completed": completed,
+            "cleared": cleared,
+            "skipped": skipped,
+            "failed": failed,
+        }
+
+    @classmethod
+    def reconcile_reservation(cls, reservation_id):
+        cutoff = timezone.now() - REFUND_RECONCILE_AFTER
+
+        with transaction.atomic():
+            reservation = (
+                Reservation.objects
+                .select_for_update()
+                .select_related("club")
+                .filter(id=reservation_id)
+                .first()
+            )
+            if reservation is None:
+                return "skipped"
+            if not _refund_is_due(reservation, cutoff):
+                return "skipped"
+            if reservation.refunded_at and not reservation.canceled:
+                reservation.canceled = True
+                reservation.save(update_fields=["canceled"])
+                return "completed"
+
+            observed_started_at = reservation.refund_started_at
+
+        try:
+            stripe.api_key = settings.STRIPE_SECRET_KEY
+            refund = _find_stripe_refund(reservation)
+        except stripe.error.StripeError:
+            logger.exception(
+                "[RESERVATION REFUND RECONCILE] Stripe error "
+                "reservation=%s",
+                reservation_id,
+            )
+            return "failed"
+
+        if refund is not None:
+            with transaction.atomic():
+                reservation = (
+                    Reservation.objects
+                    .select_for_update()
+                    .filter(id=reservation_id)
+                    .first()
+                )
+                if reservation is None or not _refund_is_due(
+                    reservation,
+                    cutoff,
+                ):
+                    return "skipped"
+                _mark_refunded(reservation, stripe_refund_id=_refund_id(refund))
+            return "completed"
+
+        cleared = Reservation.objects.filter(
+            id=reservation_id,
+            refund_started_at=observed_started_at,
+            refund_started_at__lt=cutoff,
+            refunded_at__isnull=True,
+        ).update(refund_started_at=None)
+        return "cleared" if cleared else "skipped"
+
+
+def _refund_is_due(reservation, cutoff):
+    if reservation.payment_method != Reservation.PaymentMethod.STRIPE:
+        return False
+    if reservation.refund_started_at is None:
+        return False
+    if reservation.refund_started_at >= cutoff:
+        return False
+    if reservation.refunded_at and reservation.canceled:
+        return False
+    return True

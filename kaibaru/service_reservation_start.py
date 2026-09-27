@@ -7,6 +7,10 @@ from django.db import transaction
 from django.utils import timezone
 
 from .models import Club, Lesson, Reservation
+from .reservation_checkout_recovery import (
+    read_stripe_payment,
+    record_stripe_payment,
+)
 from .rules_eligibility import assert_visitor_eligible_for_lesson
 from .rules_reservations import (
     assert_lesson_has_spots,
@@ -190,6 +194,7 @@ def complete_paid_checkout(
             if (
                 reservation.stripe_checkout_session_id
                 and reservation.stripe_checkout_session_id != session_id
+                and not reservation.is_deleted
             ):
                 logger.error(
                     "[RESERVATION CHECKOUT] Session mismatch "
@@ -204,11 +209,31 @@ def complete_paid_checkout(
 
         for reservation in reservations:
             if reservation.status == Reservation.Status.PAID:
+                if reservation.is_deleted:
+                    reservation.is_deleted = False
+                    reservation.stripe_checkout_session_id = session_id
+                    update_fields = [
+                        "is_deleted",
+                        "stripe_checkout_session_id",
+                    ]
+                    if payment_intent_id:
+                        reservation.stripe_payment_intent_id = (
+                            payment_intent_id
+                        )
+                        update_fields.append("stripe_payment_intent_id")
+                    reservation.save(update_fields=update_fields)
                 continue
 
             reservation.status = Reservation.Status.PAID
             reservation.paid_at = now
-            update_fields = ["status", "paid_at"]
+            reservation.is_deleted = False
+            reservation.stripe_checkout_session_id = session_id
+            update_fields = [
+                "status",
+                "paid_at",
+                "is_deleted",
+                "stripe_checkout_session_id",
+            ]
 
             if payment_intent_id:
                 reservation.stripe_payment_intent_id = payment_intent_id
@@ -270,6 +295,7 @@ def _prepare(token, force_new=False):
             reservation.club = club
 
         page = _page_context(reservations, lesson, club)
+        _revive_deleted_reservations(reservations, club)
 
         if all(
             reservation.status == Reservation.Status.PAID
@@ -642,6 +668,9 @@ def _assert_trials_available(reservations):
             ):
                 continue
 
+            if other.is_deleted and other.status != Reservation.Status.PAID:
+                continue
+
             if other.status == Reservation.Status.PAID:
                 raise ReservationStartError(
                     f"{reservation.full_name}さんは、このクラブで"
@@ -659,13 +688,49 @@ def _assert_trials_available(reservations):
                 )
 
 
+def _revive_deleted_reservations(reservations, club):
+    for reservation in reservations:
+        if not reservation.is_deleted:
+            continue
+
+        if reservation.status == Reservation.Status.PAID:
+            reservation.is_deleted = False
+            reservation.save(update_fields=["is_deleted"])
+            continue
+
+        view = read_stripe_payment(
+            reservation,
+            club.stripe_account_id,
+            metadata_key="reservation_id",
+        )
+        if view.paid:
+            record_stripe_payment(reservation, view)
+            send_visitor_reservation_confirmation_email.delay(
+                reservation.id
+            )
+            continue
+
+        if not view.confirmed_unpaid and not view.open_url:
+            raise ReservationStartError(
+                "決済の確認ができませんでした。"
+                "しばらくしてからもう一度お試しください。",
+                retryable=True,
+            )
+
+        reservation.is_deleted = False
+        reservation.save(update_fields=["is_deleted"])
+
+
 def _mark_paid(reservations, now):
     reservation_ids = []
 
     for reservation in reservations:
         reservation.status = Reservation.Status.PAID
         reservation.paid_at = now
-        reservation.save(update_fields=["status", "paid_at"])
+        reservation.is_deleted = False
+        reservation.save(
+            update_fields=["status", "paid_at", "is_deleted"]
+        )
         reservation_ids.append(reservation.id)
 
     def send_confirmations(ids=tuple(reservation_ids)):
@@ -682,11 +747,13 @@ def _mark_unpaid(reservations, now):
         reservation.status = Reservation.Status.UNPAID
         reservation.checkout_started_at = now
         reservation.stripe_checkout_session_id = None
+        reservation.is_deleted = False
         reservation.save(
             update_fields=[
                 "status",
                 "checkout_started_at",
                 "stripe_checkout_session_id",
+                "is_deleted",
             ]
         )
 

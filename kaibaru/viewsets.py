@@ -1916,6 +1916,7 @@ class ReservationViewSet(viewsets.ReadOnlyModelViewSet):
             )
             .filter(
                 status=Reservation.Status.PAID,
+                is_deleted=False,
             )
             .order_by(
                 "reservation_date",
