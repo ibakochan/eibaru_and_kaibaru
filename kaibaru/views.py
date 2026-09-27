@@ -3,7 +3,7 @@ from django.views import View
 from allauth.socialaccount.models import SocialAccount
 from django.http import HttpResponseForbidden  
 from django.shortcuts import get_object_or_404
-from .models import Club, Participation, Member
+from .models import Club, Participation, Member, Subscription
 from django.shortcuts import redirect
 from urllib.parse import urlencode
 from urllib.parse import quote
@@ -63,6 +63,7 @@ def update_club_billing_settings(request, club_id):
         return JsonResponse({"error": "無効なリクエスト"}, status=400)
 
     updated_fields = []
+    billing_locked = Subscription.objects.filter(club=club).exists()
 
     # -------------------------
     # Update subscription_mode
@@ -70,6 +71,16 @@ def update_club_billing_settings(request, club_id):
     if "subscription_mode" in data:
         subscription_mode = data["subscription_mode"]
         if subscription_mode in ["regular", "monthly"]:
+            if billing_locked and subscription_mode != club.subscription_mode:
+                return JsonResponse(
+                    {
+                        "error": (
+                            "会員のサブスクリプションがあるため、"
+                            "課金モードと請求日は変更できません。"
+                        )
+                    },
+                    status=400,
+                )
             club.subscription_mode = subscription_mode
             updated_fields.append("subscription_mode")
             # Ensure monthly mode always has an anchor
@@ -85,6 +96,16 @@ def update_club_billing_settings(request, club_id):
     if "stripe_anchor_date" in data:
         anchor_date = data["stripe_anchor_date"]
         if anchor_date in [None, "", "null"]:
+            if billing_locked and club.stripe_anchor_date is not None:
+                return JsonResponse(
+                    {
+                        "error": (
+                            "会員のサブスクリプションがあるため、"
+                            "課金モードと請求日は変更できません。"
+                        )
+                    },
+                    status=400,
+                )
             # Prevent clearing anchor if monthly mode
             if club.subscription_mode == "monthly":
                 return JsonResponse(
@@ -97,6 +118,19 @@ def update_club_billing_settings(request, club_id):
             try:
                 anchor_day = int(anchor_date)
                 if 1 <= anchor_day <= 28:
+                    if (
+                        billing_locked
+                        and anchor_day != club.stripe_anchor_date
+                    ):
+                        return JsonResponse(
+                            {
+                                "error": (
+                                    "会員のサブスクリプションがあるため、"
+                                    "課金モードと請求日は変更できません。"
+                                )
+                            },
+                            status=400,
+                        )
                     club.stripe_anchor_date = anchor_day
                     updated_fields.append("stripe_anchor_date")
                 else:

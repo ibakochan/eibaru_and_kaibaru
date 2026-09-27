@@ -2206,6 +2206,7 @@ class ClubSerializer(serializers.ModelSerializer):
     ticket_packages = serializers.SerializerMethodField()
     membership_plan_groups = MembershipPlanGroupSerializer(many=True, read_only=True, source="membershipplangroup_set")
     invoices = serializers.SerializerMethodField()
+    has_member_subscription = serializers.SerializerMethodField()
 
 
 
@@ -2248,6 +2249,7 @@ class ClubSerializer(serializers.ModelSerializer):
 
             "subscription_mode",
             "stripe_anchor_date",
+            "has_member_subscription",
             "joining_fee",
 
             #member to gym stripe
@@ -2339,6 +2341,9 @@ class ClubSerializer(serializers.ModelSerializer):
             context=self.context,
         ).data
     
+
+    def get_has_member_subscription(self, club):
+        return Subscription.objects.filter(club=club).exists()
 
     def get_frozen(self, club):  
         if not club.expiration_date:
