@@ -1533,6 +1533,33 @@ class MemberSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "user", "is_manager", "is_instructor",]
 
+    def _apply_role_flags(self, instance):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        club = getattr(instance, "club", None)
+        if not user or not user.is_authenticated or not club:
+            return
+
+        is_owner = club.owner_id == user.id
+        is_manager = club.members.filter(user=user, is_manager=True).exists()
+        data = getattr(self, "initial_data", {}) or {}
+
+        if (is_owner or is_manager) and "is_instructor" in data:
+            instance.is_instructor = str(data.get("is_instructor")).lower() in ("true", "1", "yes")
+
+        if is_owner and "is_manager" in data:
+            instance.is_manager = str(data.get("is_manager")).lower() in ("true", "1", "yes")
+
+    def create(self, validated_data):
+        instance = super().create(validated_data)
+        self._apply_role_flags(instance)
+        instance.save(update_fields=["is_instructor", "is_manager"])
+        return instance
+
+    def update(self, instance, validated_data):
+        self._apply_role_flags(instance)
+        return super().update(instance, validated_data)
+
     def get_tickets(self, obj):
         grants = getattr(
             obj,
