@@ -2308,6 +2308,7 @@ class ClubSerializer(serializers.ModelSerializer):
 
             "ticket_types",
             "ticket_packages",
+            "layout",
         ]
         read_only_fields = [
             "id",

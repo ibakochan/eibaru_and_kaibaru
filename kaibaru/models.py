@@ -127,6 +127,17 @@ class Club(models.Model):
 
     page_content = models.JSONField(null=True, blank=True)
 
+    LAYOUT_CHOICES = [
+        ("default", "Default"),
+        ("yoga", "Yoga"),
+    ]
+    layout = models.CharField(
+        max_length=20,
+        choices=LAYOUT_CHOICES,
+        default="default",
+        help_text="Public page look. Default uses the standard layout.",
+    )
+
 
 
     picture = models.ImageField(upload_to=club_picture_upload_to, null=True, blank=True)
