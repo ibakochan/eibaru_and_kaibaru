@@ -130,6 +130,7 @@ class Club(models.Model):
     LAYOUT_CHOICES = [
         ("default", "Default"),
         ("yoga", "Yoga"),
+        ("striking", "Striking"),
     ]
     layout = models.CharField(
         max_length=20,
