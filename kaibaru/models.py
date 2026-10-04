@@ -132,6 +132,7 @@ class Club(models.Model):
         ("yoga", "Yoga"),
         ("striking", "Striking"),
         ("bjj/grappling", "BJJ/Grappling"),
+        ("karate/judo", "Karate/Judo"),
     ]
     layout = models.CharField(
         max_length=20,
