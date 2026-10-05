@@ -12,6 +12,15 @@ def event_test(event):
         return None
 
 
+def test_payload(test):
+    return {
+        "id": test.id,
+        "results_public": test.results_public,
+        "reservations_open_until": test.reservations_open_until,
+        "frozen_at": test.frozen_at,
+    }
+
+
 def visible_test_results(event, user):
     test = event_test(event)
     if test is None:

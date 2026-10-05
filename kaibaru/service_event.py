@@ -144,6 +144,32 @@ def _require_upcoming(event):
         raise ValueError("このイベントの予約受付は終了しています。")
 
 
+def _registration_closed_message(event, now=None):
+    now = now or timezone.now()
+    test = (
+        Test.objects
+        .filter(event_id=event.id)
+        .only("frozen_at", "reservations_open_until")
+        .first()
+    )
+    if test is None:
+        return None
+    if test.frozen_at is not None:
+        return "このテストは凍結されているため、予約できません。"
+    if (
+        test.reservations_open_until is not None
+        and test.reservations_open_until <= now
+    ):
+        return "予約の受付は終了しています。"
+    return None
+
+
+def _require_registration_open(event):
+    message = _registration_closed_message(event)
+    if message:
+        raise ValueError(message)
+
+
 def _require_stripe_for_price(club, amount):
     if amount > 0 and not club.stripe_account_id:
         raise ValueError(
@@ -213,6 +239,7 @@ class EventReservationService:
             raise ValueError("このイベントは会員予約を受け付けていません。")
 
         _require_upcoming(event)
+        _require_registration_open(event)
 
         price = selected_event_price(event, price_id)
         amount = price.amount
@@ -241,6 +268,7 @@ class EventReservationService:
                 .get(id=event.id)
             )
             _require_upcoming(locked_event)
+            _require_registration_open(locked_event)
 
             if not audience_allows(locked_event, "member"):
                 raise ValueError("このイベントは会員予約を受け付けていません。")
@@ -468,6 +496,7 @@ class EventReservationService:
             raise ValueError("このイベントは一般予約を受け付けていません。")
 
         _require_upcoming(event)
+        _require_registration_open(event)
 
         full_name = " ".join(
             str(full_name or "").replace("\u3000", " ").strip().split()
@@ -539,6 +568,7 @@ def _save_visitor_reservation(
 
     locked_event = Event.objects.select_for_update().get(id=event.id)
     _require_upcoming(locked_event)
+    _require_registration_open(locked_event)
 
     if not audience_allows(locked_event, "visitor"):
         raise ValueError("このイベントは一般予約を受け付けていません。")
@@ -1056,6 +1086,10 @@ def _start_unusable_reason(reservation):
 
     if not audience_allows(event, "visitor"):
         return "このイベントは一般予約を受け付けていません。"
+
+    closed = _registration_closed_message(event, now)
+    if closed:
+        return closed
 
     if (
         reservation.status == EventReservation.Status.NOT_STARTED
@@ -1602,16 +1636,16 @@ def _color(value, default):
     return text
 
 
-def _parse_starts_at(value):
+def _parse_when(value, label):
     if not value:
-        raise ValueError("開催日時を入力してください。")
+        raise ValueError(f"{label}を入力してください。")
 
     parsed = parse_datetime(str(value))
     if parsed is None:
         try:
             parsed = datetime.strptime(str(value), "%Y-%m-%dT%H:%M")
         except ValueError:
-            raise ValueError("開催日時の形式が正しくありません。")
+            raise ValueError(f"{label}の形式が正しくありません。")
 
     if timezone.is_naive(parsed):
         parsed = timezone.make_aware(
@@ -1619,6 +1653,10 @@ def _parse_starts_at(value):
             timezone.get_current_timezone(),
         )
     return parsed
+
+
+def _parse_starts_at(value):
+    return _parse_when(value, "開催日時")
 
 
 def save_section_event(*, club, section_id, title, payload):
@@ -1646,6 +1684,11 @@ def save_section_event(*, club, section_id, title, payload):
     if kind not in {"standard", "test"}:
         raise ValueError("イベントの種類が正しくありません。")
     results_public = kind == "test" and _flag(payload.get("results_public"))
+    open_until = (
+        _parse_when(payload.get("reservations_open_until"), "予約締切")
+        if kind == "test"
+        else None
+    )
 
     defaults = {
         "title": clean_title[:200],
@@ -1669,7 +1712,10 @@ def save_section_event(*, club, section_id, title, payload):
     if kind == "test":
         Test.objects.update_or_create(
             event=event,
-            defaults={"results_public": results_public},
+            defaults={
+                "results_public": results_public,
+                "reservations_open_until": open_until,
+            },
         )
     else:
         Test.objects.filter(event=event).delete()

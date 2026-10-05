@@ -1880,6 +1880,16 @@ class Test(models.Model):
         default=False,
         help_text="When off, only the owner sees every test result. Each participant sees their own.",
     )
+    reservations_open_until = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Registration closes at this time. Start links stop working.",
+    )
+    frozen_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Set when the owner freezes the test, at least one hour after registration closes.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

@@ -2213,12 +2213,12 @@ class EventSerializer(serializers.ModelSerializer):
         return cached
 
     def get_test(self, event):
-        from .service_member_record import event_test
+        from .service_member_record import event_test, test_payload
 
         test = event_test(event)
         if test is None:
             return None
-        return {"id": test.id, "results_public": test.results_public}
+        return test_payload(test)
 
     def get_results(self, event):
         from .service_member_record import visible_test_results
