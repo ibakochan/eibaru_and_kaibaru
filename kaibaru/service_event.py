@@ -11,7 +11,7 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from .models import Event, EventPrice, EventReservation, StripeCustomer, Subscription
+from .models import Event, EventPrice, EventReservation, StripeCustomer, Subscription, Test
 from .reservation_checkout_recovery import (
     read_stripe_payment,
     record_stripe_payment,
@@ -1585,6 +1585,14 @@ def _optional_cap(value):
     return number
 
 
+def _flag(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return False
+
+
 def _color(value, default):
     if value is None or value == "":
         return default
@@ -1634,6 +1642,10 @@ def save_section_event(*, club, section_id, title, payload):
         raise ValueError("画像のURLが長すぎます。")
 
     prices = _event_prices(payload)
+    kind = payload.get("kind") or "standard"
+    if kind not in {"standard", "test"}:
+        raise ValueError("イベントの種類が正しくありません。")
+    results_public = kind == "test" and _flag(payload.get("results_public"))
 
     defaults = {
         "title": clean_title[:200],
@@ -1654,6 +1666,13 @@ def save_section_event(*, club, section_id, title, payload):
         section_id=section_id,
         defaults=defaults,
     )
+    if kind == "test":
+        Test.objects.update_or_create(
+            event=event,
+            defaults={"results_public": results_public},
+        )
+    else:
+        Test.objects.filter(event=event).delete()
     event.prices.all().delete()
     EventPrice.objects.bulk_create(
         [

@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import TicketType, TicketPackage, Reservation, Event, EventPrice, EventReservation, MembershipPlanGroup, MemberPricingAdjustment, Discount, DiscountCondition, Member, Club, Lesson, Participation, SlateImage, JoinRequest, InvoiceItem, Invoice, Subscription, SubscriptionItem
+from .models import TicketType, TicketPackage, Reservation, Event, EventPrice, EventReservation, MemberRecord, MembershipPlanGroup, MemberPricingAdjustment, Discount, DiscountCondition, Member, Club, Lesson, Participation, SlateImage, JoinRequest, InvoiceItem, Invoice, Subscription, SubscriptionItem
 from types import SimpleNamespace
 from django.core.exceptions import ValidationError as DjangoValidationError
 
@@ -2093,6 +2093,80 @@ class EventPriceSerializer(serializers.ModelSerializer):
         fields = ["id", "name", "amount", "position"]
 
 
+class MemberRecordSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MemberRecord
+        fields = [
+            "id",
+            "member",
+            "event",
+            "reservation",
+            "kind",
+            "name",
+            "occurred_on",
+            "result",
+            "description",
+            "details",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "event",
+            "reservation",
+            "created_at",
+            "updated_at",
+        ]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance is not None:
+            self.fields["member"].read_only = True
+
+    def validate_name(self, value):
+        text = (value or "").strip()
+        if not text:
+            raise serializers.ValidationError("名前を入力してください。")
+        if len(text) > 200:
+            raise serializers.ValidationError("名前は200文字以内にしてください。")
+        return text
+
+    def validate_result(self, value):
+        text = (value or "").strip()
+        if len(text) > 80:
+            raise serializers.ValidationError("結果は80文字以内にしてください。")
+        return text
+
+    def validate_description(self, value):
+        text = (value or "").strip()
+        if len(text) > 4000:
+            raise serializers.ValidationError("説明は4000文字以内にしてください。")
+        return text
+
+    def validate_details(self, value):
+        if value in (None, ""):
+            return []
+        if not isinstance(value, list):
+            raise serializers.ValidationError("詳細は項目の一覧で入力してください。")
+        cleaned = []
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            label = str(item.get("label") or "").strip()
+            detail_value = str(item.get("value") or "").strip()
+            if not label and not detail_value:
+                continue
+            if not label:
+                raise serializers.ValidationError("項目名を入力してください。")
+            if len(label) > 40:
+                raise serializers.ValidationError("項目名は40文字以内にしてください。")
+            if len(detail_value) > 200:
+                raise serializers.ValidationError("項目の内容は200文字以内にしてください。")
+            cleaned.append({"label": label, "value": detail_value})
+        if len(cleaned) > 30:
+            raise serializers.ValidationError("項目は30件までです。")
+        return cleaned
+
+
 class EventSerializer(serializers.ModelSerializer):
     prices = EventPriceSerializer(many=True, read_only=True)
     spots_taken = serializers.SerializerMethodField()
@@ -2100,6 +2174,8 @@ class EventSerializer(serializers.ModelSerializer):
     my_reservation = serializers.SerializerMethodField()
     my_reservations = serializers.SerializerMethodField()
     guests = serializers.SerializerMethodField()
+    test = serializers.SerializerMethodField()
+    results = serializers.SerializerMethodField()
 
     class Meta:
         model = Event
@@ -2113,6 +2189,7 @@ class EventSerializer(serializers.ModelSerializer):
             "prices",
             "reservation_limit",
             "audience",
+            "test",
             "title_color",
             "description_color",
             "detail_color",
@@ -2123,6 +2200,7 @@ class EventSerializer(serializers.ModelSerializer):
             "my_reservation",
             "my_reservations",
             "guests",
+            "results",
         ]
 
     def _held_count(self, event):
@@ -2133,6 +2211,21 @@ class EventSerializer(serializers.ModelSerializer):
             cached = held_reservations(event, hold_cutoff_at()).count()
             event._held_count = cached
         return cached
+
+    def get_test(self, event):
+        from .service_member_record import event_test
+
+        test = event_test(event)
+        if test is None:
+            return None
+        return {"id": test.id, "results_public": test.results_public}
+
+    def get_results(self, event):
+        from .service_member_record import visible_test_results
+
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        return visible_test_results(event, user)
 
     def get_spots_taken(self, event):
         return self._held_count(event)

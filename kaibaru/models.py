@@ -1868,3 +1868,91 @@ class EventReservation(models.Model):
         return (
             f"{self.full_name} - {self.event.title} - {self.reservation_type}"
         )
+
+
+class Test(models.Model):
+    event = models.OneToOneField(
+        Event,
+        on_delete=models.CASCADE,
+        related_name="test",
+    )
+    results_public = models.BooleanField(
+        default=False,
+        help_text="When off, only the owner sees every test result. Each participant sees their own.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.event.title} test"
+
+
+class TestResult(models.Model):
+    test = models.ForeignKey(
+        Test,
+        on_delete=models.CASCADE,
+        related_name="results",
+    )
+    reservation = models.OneToOneField(
+        EventReservation,
+        on_delete=models.CASCADE,
+        related_name="test_result",
+    )
+    score = models.CharField(max_length=80, blank=True, default="")
+
+    def __str__(self):
+        return f"{self.reservation.full_name} - {self.score}"
+
+
+class MemberRecord(models.Model):
+    class Kind(models.TextChoices):
+        TEST = "test", "Test"
+        INDIVIDUAL_COMPETITION = "individual_competition", "Individual competition"
+        TEAM_COMPETITION = "team_competition", "Team competition"
+        INDIVIDUAL_TOURNAMENT = "individual_tournament", "Individual tournament"
+        TEAM_TOURNAMENT = "team_tournament", "Team tournament"
+
+    club = models.ForeignKey(
+        Club,
+        on_delete=models.CASCADE,
+        related_name="member_records",
+    )
+    member = models.ForeignKey(
+        Member,
+        on_delete=models.CASCADE,
+        related_name="records",
+    )
+    event = models.ForeignKey(
+        Event,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="member_records",
+    )
+    reservation = models.OneToOneField(
+        EventReservation,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="member_record",
+    )
+    kind = models.CharField(
+        max_length=32,
+        choices=Kind.choices,
+        default=Kind.TEST,
+    )
+    name = models.CharField(max_length=200)
+    occurred_on = models.DateField(null=True, blank=True)
+    result = models.CharField(max_length=80, blank=True, default="")
+    description = models.TextField(blank=True, default="")
+    details = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-occurred_on", "-id"]
+        indexes = [
+            models.Index(fields=["member", "occurred_on"]),
+        ]
+
+    def __str__(self):
+        return f"{self.member.full_name} - {self.name}"

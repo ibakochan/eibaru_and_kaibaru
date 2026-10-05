@@ -3,7 +3,7 @@ from rest_framework import viewsets, serializers, status
 from rest_framework.decorators import action
 from rest_framework.viewsets import ViewSet
 from rest_framework.response import Response
-from .models import TicketGrant, TicketType, TicketPackage, Reservation, Event, Invoice, MemberPricingAdjustment, Discount, DiscountCondition, SubscriptionItem, Member, Club, Lesson, Participation, SlateImage, JoinRequest, MembershipPlan, Subscription
+from .models import TicketGrant, TicketType, TicketPackage, Reservation, Event, EventReservation, MemberRecord, Invoice, MemberPricingAdjustment, Discount, DiscountCondition, SubscriptionItem, Member, Club, Lesson, Participation, SlateImage, JoinRequest, MembershipPlan, Subscription
 from accounts.models import CustomUser
 from django.contrib.auth import login
 import re
@@ -36,7 +36,7 @@ from .pricing import (
     get_effective_subscription_price,
 )
 
-from .serializers import TicketTypeSerializer, TicketPackageSerializer, ReservationSerializer, PaymentHistoryInvoiceSerializer, MemberPricingAdjustmentSerializer, DiscountConditionSerializer, DiscountSerializer, MembershipPlanSerializer, MemberSerializer, ClubSerializer, LessonSerializer, ParticipationSerializer, SlateImageSerializer, JoinRequestSerializer
+from .serializers import TicketTypeSerializer, TicketPackageSerializer, ReservationSerializer, PaymentHistoryInvoiceSerializer, MemberPricingAdjustmentSerializer, DiscountConditionSerializer, DiscountSerializer, MembershipPlanSerializer, MemberSerializer, MemberRecordSerializer, ClubSerializer, LessonSerializer, ParticipationSerializer, SlateImageSerializer, JoinRequestSerializer
 from .service_event import save_section_event
 from django.conf import settings
 from datetime import timedelta
@@ -2262,6 +2262,164 @@ class EventReservationViewSet(viewsets.ViewSet):
 
         return Response(payload, status=status.HTTP_200_OK)
 
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path=r"result/(?P<reservation_id>\d+)",
+    )
+    def result(self, request, reservation_id=None):
+        from .service_member_record import set_test_result
+
+        if not request.user.is_authenticated:
+            return Response(
+                {"detail": "ログインしてください。"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            reservation_id = int(reservation_id)
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "予約が見つかりません。"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        reservation = (
+            EventReservation.objects
+            .select_related("event__test", "club", "member")
+            .filter(id=reservation_id, is_deleted=False)
+            .first()
+        )
+        if reservation is None or reservation.club.owner_id != request.user.id:
+            return Response(
+                {"detail": "予約が見つかりません。"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        from .service_member_record import event_test
+        if event_test(reservation.event) is None:
+            return Response(
+                {"detail": "テストの結果だけ入力できます。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if reservation.canceled or reservation.status != EventReservation.Status.PAID:
+            return Response(
+                {"detail": "支払い済みの予約だけ結果を入力できます。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            score = set_test_result(reservation, request.data.get("result"))
+        except ValueError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            {"id": reservation.id, "result": score},
+            status=status.HTTP_200_OK,
+        )
+
+
+class MemberRecordViewSet(viewsets.ModelViewSet):
+    serializer_class = MemberRecordSerializer
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+
+    def _readable(self):
+        user = self.request.user
+        if not user.is_authenticated:
+            return MemberRecord.objects.none()
+        return MemberRecord.objects.filter(
+            Q(club__owner=user) | Q(member__owner=user) | Q(member__user=user)
+        )
+
+    def get_queryset(self):
+        records = self._readable()
+        if self.action == "list":
+            member_id = self.request.query_params.get("member")
+            if not member_id:
+                return MemberRecord.objects.none()
+            return records.filter(member_id=member_id)
+        return records
+
+    def list(self, request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return Response(
+                {"detail": "ログインしてください。"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        member_id = request.query_params.get("member")
+        if not member_id:
+            return Response(
+                {"detail": "会員を指定してください。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        member = Member.objects.filter(id=member_id).select_related("club").first()
+        if member is None or not self._can_read_member(member):
+            return Response(
+                {"detail": "会員が見つかりません。"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return super().list(request, *args, **kwargs)
+
+    def _can_read_member(self, member):
+        user = self.request.user
+        if not user.is_authenticated:
+            return False
+        if member.club_id and member.club.owner_id == user.id:
+            return True
+        return member.owner_id == user.id or member.user_id == user.id
+
+    def _require_owner(self, club):
+        if club.owner_id != self.request.user.id:
+            return Response(
+                {"detail": "許可なし"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return None
+
+    def create(self, request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return Response(
+                {"detail": "ログインしてください。"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        member = serializer.validated_data["member"]
+        if member.club_id is None:
+            return Response(
+                {"detail": "会員が見つかりません。"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        denied = self._require_owner(member.club)
+        if denied is not None:
+            return denied
+        serializer.save(club=member.club, event=None, reservation=None)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    def partial_update(self, request, *args, **kwargs):
+        record = self.get_object()
+        denied = self._require_owner(record.club)
+        if denied is not None:
+            return denied
+        serializer = self.get_serializer(record, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        from django.db import transaction
+        from .service_member_record import sync_test_result_from_record
+        with transaction.atomic():
+            serializer.save()
+            sync_test_result_from_record(record)
+        return Response(serializer.data)
+
+    def destroy(self, request, *args, **kwargs):
+        record = self.get_object()
+        denied = self._require_owner(record.club)
+        if denied is not None:
+            return denied
+        record.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class LessonViewSet(viewsets.ModelViewSet):
     queryset = Lesson.objects.all()
@@ -2529,6 +2687,7 @@ class ClubViewSet(viewsets.ModelViewSet):
                     queryset=Lesson.objects.prefetch_related("participations"),
                 ),
                 "events__prices",
+                "events__test",
                 "slate_images",
                 "join_requests",
                 "membership_plans",
