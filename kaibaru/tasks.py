@@ -799,6 +799,9 @@ def reconcile_reservation_refunds():
         from .service_reservation_refund import ReservationRefundReconciler
 
         result = ReservationRefundReconciler.reconcile_started_refunds()
+        event_result = ReservationRefundReconciler.reconcile_started_event_refunds()
+        result["event_checked"] = event_result["checked"]
+        result["event_completed"] = event_result["completed"]
 
         logger.info(
             "[RESERVATION REFUND TASK] Finished reconciliation result=%s",

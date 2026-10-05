@@ -2059,6 +2059,7 @@ def _event_reservation_detail(row):
         "amount": row.amount,
         "price_name": row.price_name,
         "canceled": row.canceled,
+        "refunded_at": row.refunded_at,
         "created_at": row.created_at,
     }
 
@@ -2216,6 +2217,20 @@ class EventSerializer(serializers.ModelSerializer):
         for row in rows:
             detail = _event_reservation_detail(row)
             cancel, restore = _event_reservation_urls(row, user)
+            if self._viewer_can_manage(event):
+                from .reservation_cancel import (
+                    cancel_url,
+                    owner_may_cancel_free,
+                    owner_may_restore_free,
+                    restore_url,
+                )
+                from .service_reservation_refund import event_reservation_is_refundable
+
+                if owner_may_cancel_free(row, user):
+                    cancel = cancel_url(row.club, "event", row.id)
+                elif owner_may_restore_free(row, user):
+                    restore = restore_url(row.club, "event", row.id)
+                detail["can_refund"] = event_reservation_is_refundable(row, user)
             detail["cancel_url"] = cancel
             detail["restore_url"] = restore
             details.append(detail)
@@ -2959,18 +2974,28 @@ class ReservationSerializer(serializers.ModelSerializer):
         return bool(email) and (obj.email or "").strip().lower() == email
 
     def get_cancel_url(self, obj):
-        if obj.canceled or not self._is_own_reservation(obj):
+        if obj.canceled:
             return None
 
-        from .reservation_cancel import cancel_url
+        from .reservation_cancel import cancel_url, owner_may_cancel_free
+
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not self._is_own_reservation(obj) and not owner_may_cancel_free(obj, user):
+            return None
 
         return cancel_url(obj.club, "lesson", obj.id)
 
     def get_restore_url(self, obj):
-        if not obj.canceled or not self._is_own_reservation(obj):
+        if not obj.canceled:
             return None
 
-        from .reservation_cancel import restore_url
+        from .reservation_cancel import owner_may_restore_free, restore_url
+
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not self._is_own_reservation(obj) and not owner_may_restore_free(obj, user):
+            return None
 
         return restore_url(obj.club, "lesson", obj.id)
 

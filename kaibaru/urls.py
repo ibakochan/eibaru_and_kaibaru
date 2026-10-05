@@ -21,6 +21,7 @@ router.register(r'discounts', viewsets.DiscountViewSet)
 router.register(r'member_pricing_adjustments', viewsets.MemberPricingAdjustmentViewSet)
 router.register(r'invoices', viewsets.InvoiceViewSet, basename='invoice')
 router.register(r'reservations', viewsets.ReservationViewSet, basename='reservation')
+router.register(r'event-reservations', viewsets.EventReservationViewSet, basename='event-reservation')
 router.register(r'ticket-types', viewsets.TicketTypeViewSet, basename='ticket-type')
 router.register(r'ticket-packages', viewsets.TicketPackageViewSet, basename='ticket-package')
 

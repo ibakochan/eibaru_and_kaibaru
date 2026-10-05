@@ -34,6 +34,37 @@ def canceled_rebook_message():
     )
 
 
+def owner_may_cancel_free(reservation, user):
+    """Owner cancel for a confirmed reservation that took no money and no ticket."""
+    if user is None or not getattr(user, "is_authenticated", False):
+        return False
+    if reservation.club.owner_id != user.id:
+        return False
+    if reservation.canceled or getattr(reservation, "refunded_at", None):
+        return False
+    if reservation.status != "paid":
+        return False
+    if reservation.amount != 0:
+        return False
+    if (reservation.payment_method or "") == "ticket":
+        return False
+    return True
+
+
+def owner_may_restore_free(reservation, user):
+    if user is None or not getattr(user, "is_authenticated", False):
+        return False
+    if reservation.club.owner_id != user.id:
+        return False
+    if not reservation.canceled or getattr(reservation, "refunded_at", None):
+        return False
+    if reservation.amount != 0:
+        return False
+    if (reservation.payment_method or "") == "ticket":
+        return False
+    return True
+
+
 def read_cancel_token(token):
     try:
         raw = _signer.unsign(token)
