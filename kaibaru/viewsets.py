@@ -2486,6 +2486,7 @@ class ClubViewSet(viewsets.ModelViewSet):
                     "lessons",
                     queryset=Lesson.objects.prefetch_related("participations"),
                 ),
+                "events__prices",
                 "slate_images",
                 "join_requests",
                 "membership_plans",

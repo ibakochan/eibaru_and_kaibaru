@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import TicketType, TicketPackage, Reservation, Event, EventReservation, MembershipPlanGroup, MemberPricingAdjustment, Discount, DiscountCondition, Member, Club, Lesson, Participation, SlateImage, JoinRequest, InvoiceItem, Invoice, Subscription, SubscriptionItem
+from .models import TicketType, TicketPackage, Reservation, Event, EventPrice, EventReservation, MembershipPlanGroup, MemberPricingAdjustment, Discount, DiscountCondition, Member, Club, Lesson, Participation, SlateImage, JoinRequest, InvoiceItem, Invoice, Subscription, SubscriptionItem
 from types import SimpleNamespace
 from django.core.exceptions import ValidationError as DjangoValidationError
 
@@ -2057,6 +2057,7 @@ def _event_reservation_detail(row):
         "status": row.status,
         "reservation_type": row.reservation_type,
         "amount": row.amount,
+        "price_name": row.price_name,
         "canceled": row.canceled,
         "created_at": row.created_at,
     }
@@ -2085,7 +2086,14 @@ def _event_reservation_urls(row, user):
     return cancel_url(row.club, "event", row.id), None
 
 
+class EventPriceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EventPrice
+        fields = ["id", "name", "amount", "position"]
+
+
 class EventSerializer(serializers.ModelSerializer):
+    prices = EventPriceSerializer(many=True, read_only=True)
     spots_taken = serializers.SerializerMethodField()
     spots_left = serializers.SerializerMethodField()
     my_reservation = serializers.SerializerMethodField()
@@ -2101,8 +2109,7 @@ class EventSerializer(serializers.ModelSerializer):
             "description",
             "picture",
             "starts_at",
-            "member_price",
-            "visitor_price",
+            "prices",
             "reservation_limit",
             "audience",
             "title_color",

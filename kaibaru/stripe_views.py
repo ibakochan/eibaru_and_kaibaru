@@ -3140,6 +3140,7 @@ def create_member_event_reservation(request, event_id):
         result = EventReservationService.create_member_reservation(
             event=event,
             member=member,
+            price_id=request.POST.get("price_id"),
         )
     except ValueError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
@@ -3177,6 +3178,7 @@ def create_visitor_event_reservation(request, event_id):
             email=request.POST.get("email", ""),
             phone_number=request.POST.get("phone_number", ""),
             user=user,
+            price_id=request.POST.get("price_id"),
         )
     except ValueError as exc:
         return JsonResponse({"error": str(exc)}, status=400)

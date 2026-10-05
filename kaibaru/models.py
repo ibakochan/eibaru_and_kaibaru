@@ -1700,16 +1700,6 @@ class Event(models.Model):
     picture = models.CharField(max_length=1000, blank=True, default="")
     starts_at = models.DateTimeField()
 
-    member_price = models.PositiveIntegerField(
-        null=True,
-        blank=True,
-        help_text="Member price in yen. Empty means free.",
-    )
-    visitor_price = models.PositiveIntegerField(
-        null=True,
-        blank=True,
-        help_text="Visitor price in yen. Empty means free.",
-    )
     reservation_limit = models.PositiveIntegerField(
         null=True,
         blank=True,
@@ -1759,6 +1749,26 @@ class Event(models.Model):
 
     def __str__(self):
         return f"{self.club.subdomain} - {self.title}"
+
+
+class EventPrice(models.Model):
+    event = models.ForeignKey(
+        Event,
+        on_delete=models.CASCADE,
+        related_name="prices",
+    )
+    name = models.CharField(max_length=80)
+    amount = models.PositiveIntegerField(
+        default=0,
+        help_text="Price in yen. 0 means free.",
+    )
+    position = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["position", "id"]
+
+    def __str__(self):
+        return f"{self.name} ¥{self.amount}"
 
 
 class EventReservation(models.Model):
@@ -1813,6 +1823,7 @@ class EventReservation(models.Model):
     email = models.EmailField()
     phone_number = models.CharField(max_length=30, blank=True, default="")
     amount = models.PositiveIntegerField(default=0)
+    price_name = models.CharField(max_length=80, blank=True, default="")
     currency = models.CharField(max_length=10, default="jpy")
 
     stripe_checkout_session_id = models.CharField(

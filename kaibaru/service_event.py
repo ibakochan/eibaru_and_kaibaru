@@ -11,7 +11,7 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from .models import Event, EventReservation, StripeCustomer, Subscription
+from .models import Event, EventPrice, EventReservation, StripeCustomer, Subscription
 from .reservation_checkout_recovery import (
     read_stripe_payment,
     record_stripe_payment,
@@ -46,11 +46,16 @@ class EventStartError(Exception):
         self.retryable = retryable
 
 
-def price_for(event, kind):
-    raw = event.member_price if kind == "member" else event.visitor_price
-    if raw is None:
-        return 0
-    return raw
+def selected_event_price(event, price_id):
+    try:
+        price_pk = int(price_id)
+    except (TypeError, ValueError):
+        raise ValueError("料金を選んでください。")
+
+    price = event.prices.filter(id=price_pk).first()
+    if price is None:
+        raise ValueError("選択した料金は見つかりません。")
+    return price
 
 
 def audience_allows(event, kind):
@@ -187,7 +192,7 @@ def _email_sent_result(reservation):
 class EventReservationService:
 
     @staticmethod
-    def create_member_reservation(*, event, member):
+    def create_member_reservation(*, event, member, price_id):
         club = event.club
 
         if member.club_id != club.id or event.club_id != club.id:
@@ -209,7 +214,9 @@ class EventReservationService:
 
         _require_upcoming(event)
 
-        amount = price_for(event, "member")
+        price = selected_event_price(event, price_id)
+        amount = price.amount
+        price_name = price.name
         _require_stripe_for_price(club, amount)
 
         if not member.full_name:
@@ -238,7 +245,9 @@ class EventReservationService:
             if not audience_allows(locked_event, "member"):
                 raise ValueError("このイベントは会員予約を受け付けていません。")
 
-            amount = price_for(locked_event, "member")
+            price = selected_event_price(locked_event, price_id)
+            amount = price.amount
+            price_name = price.name
             _require_stripe_for_price(club, amount)
 
             existing = (
@@ -349,6 +358,7 @@ class EventReservationService:
                 existing.email = email
                 existing.phone_number = phone_number
                 existing.amount = amount
+                existing.price_name = price_name
                 existing.currency = "jpy"
                 existing.canceled = False
                 existing.paid_at = now if amount == 0 else None
@@ -376,6 +386,7 @@ class EventReservationService:
                     email=email,
                     phone_number=phone_number,
                     amount=amount,
+                    price_name=price_name,
                     currency="jpy",
                     reservation_key=reservation_key,
                     paid_at=now if amount == 0 else None,
@@ -441,6 +452,7 @@ class EventReservationService:
         email,
         phone_number="",
         user=None,
+        price_id=None,
     ):
         club = event.club
 
@@ -476,7 +488,9 @@ class EventReservationService:
             if not email:
                 raise ValueError("メールアドレスを入力してください。")
 
-        amount = price_for(event, "visitor")
+        price = selected_event_price(event, price_id)
+        amount = price.amount
+        price_name = price.name
         _require_stripe_for_price(club, amount)
         reservation_key = visitor_reservation_key(event, email)
 
@@ -489,7 +503,7 @@ class EventReservationService:
                     email=email,
                     phone_number=phone_number,
                     user=user,
-                    amount=amount,
+                    price_id=price_id,
                     reservation_key=reservation_key,
                 )
                 _queue_start_email(token)
@@ -517,7 +531,7 @@ def _save_visitor_reservation(
     email,
     phone_number,
     user,
-    amount,
+    price_id,
     reservation_key,
 ):
     now = timezone.now()
@@ -529,7 +543,9 @@ def _save_visitor_reservation(
     if not audience_allows(locked_event, "visitor"):
         raise ValueError("このイベントは一般予約を受け付けていません。")
 
-    amount = price_for(locked_event, "visitor")
+    price = selected_event_price(locked_event, price_id)
+    amount = price.amount
+    price_name = price.name
     _require_stripe_for_price(club, amount)
 
     existing = (
@@ -598,6 +614,7 @@ def _save_visitor_reservation(
             existing.full_name = full_name
             existing.phone_number = phone_number
             existing.amount = amount
+            existing.price_name = price_name
             existing.user = user
             existing.requested_at = now
             existing.event = locked_event
@@ -606,6 +623,7 @@ def _save_visitor_reservation(
                     "full_name",
                     "phone_number",
                     "amount",
+                    "price_name",
                     "user",
                     "requested_at",
                     "event",
@@ -631,6 +649,7 @@ def _save_visitor_reservation(
         existing.email = email
         existing.phone_number = phone_number
         existing.amount = amount
+        existing.price_name = price_name
         existing.currency = "jpy"
         existing.start_token = token
         existing.requested_at = now
@@ -660,6 +679,7 @@ def _save_visitor_reservation(
         email=email,
         phone_number=phone_number,
         amount=amount,
+        price_name=price_name,
         currency="jpy",
         reservation_key=reservation_key,
         start_token=token,
@@ -786,7 +806,11 @@ def _create_checkout_session(
                 "price_data": {
                     "currency": reservation.currency or "jpy",
                     "product_data": {
-                        "name": (event.title or "イベント")[:250],
+                        "name": (
+                            f"{event.title or 'イベント'} / {reservation.price_name}"
+                            if reservation.price_name
+                            else (event.title or "イベント")
+                        )[:250],
                     },
                     "unit_amount": reservation.amount,
                 },
@@ -1609,13 +1633,13 @@ def save_section_event(*, club, section_id, title, payload):
     if len(picture) > 1000:
         raise ValueError("画像のURLが長すぎます。")
 
+    prices = _event_prices(payload)
+
     defaults = {
         "title": clean_title[:200],
         "description": description,
         "picture": picture,
         "starts_at": _parse_starts_at(payload.get("starts_at")),
-        "member_price": _optional_money(payload.get("member_price"), "会員料金"),
-        "visitor_price": _optional_money(payload.get("visitor_price"), "一般料金"),
         "reservation_limit": _optional_cap(payload.get("reservation_limit")),
         "audience": audience,
         "title_color": _color(payload.get("title_color"), "#1c1917"),
@@ -1630,4 +1654,48 @@ def save_section_event(*, club, section_id, title, payload):
         section_id=section_id,
         defaults=defaults,
     )
+    event.prices.all().delete()
+    EventPrice.objects.bulk_create(
+        [
+            EventPrice(
+                event=event,
+                name=item["name"],
+                amount=item["amount"],
+                position=item["position"],
+            )
+            for item in prices
+        ]
+    )
     return event
+
+
+def _event_prices(payload):
+    raw = payload.get("prices")
+    if not isinstance(raw, list):
+        raise ValueError("料金を1つ以上追加してください。")
+
+    cleaned = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        amount_raw = item.get("amount")
+        blank_amount = amount_raw is None or amount_raw == ""
+        if not name and blank_amount:
+            continue
+        if not name:
+            raise ValueError("料金の名前を入力してください。")
+        if len(name) > 80:
+            raise ValueError("料金の名前は80文字以内にしてください。")
+        amount = _optional_money(amount_raw, "料金")
+        cleaned.append({
+            "name": name,
+            "amount": 0 if amount is None else amount,
+            "position": len(cleaned),
+        })
+
+    if not cleaned:
+        raise ValueError("料金を1つ以上追加してください。")
+    if len(cleaned) > 20:
+        raise ValueError("料金は20件までです。")
+    return cleaned

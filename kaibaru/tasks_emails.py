@@ -1766,6 +1766,8 @@ def send_event_reservation_start_email(self, start_token):
     event = reservation.event
     club_name = club.title or club.subdomain or "クラブ"
     price_text = "無料" if reservation.amount == 0 else f"¥{reservation.amount:,}"
+    if reservation.price_name:
+        price_text = f"{reservation.price_name} {price_text}"
     link = (
         f"https://{club.subdomain}.kaibaru.jp/"
         f"start_event_reservation/{start_token}/"
@@ -1843,7 +1845,10 @@ def send_event_reservation_confirmation_email(self, reservation_id):
             f"{club_name}のイベント予約ありがとうございます。\n"
             f"ご予約が確定しました。\n\n"
         )
-        payment_section = "■ 料金\n無料\n\n"
+        payment_section = (
+            f"■ 料金\n"
+            f"{reservation.price_name + ' ' if reservation.price_name else ''}無料\n\n"
+        )
     else:
         subject = f"【{club_name}】イベント予約・お支払い完了のお知らせ"
         intro = (
@@ -1852,7 +1857,7 @@ def send_event_reservation_confirmation_email(self, reservation_id):
         )
         payment_section = (
             f"■ お支払い\n"
-            f"金額：¥{reservation.amount:,}\n"
+            f"料金：{reservation.price_name + ' ' if reservation.price_name else ''}¥{reservation.amount:,}\n"
             f"お支払い方法：クレジットカード\n\n"
         )
 
