@@ -2309,6 +2309,7 @@ class ClubSerializer(serializers.ModelSerializer):
             "ticket_types",
             "ticket_packages",
             "layout",
+            "default_background_color",
         ]
         read_only_fields = [
             "id",
@@ -2323,6 +2324,18 @@ class ClubSerializer(serializers.ModelSerializer):
             "stripe_account_id",
             "stripe_subscription_id",
         ]
+
+    def validate_default_background_color(self, value):
+        if value in (None, ""):
+            return None
+        text = str(value).strip()
+        if (
+            len(text) == 7
+            and text.startswith("#")
+            and all(char in "0123456789abcdefABCDEF" for char in text[1:])
+        ):
+            return text.lower()
+        raise serializers.ValidationError("背景色は #RRGGBB で指定してください。")
 
     def validate(self, attrs):
         validate_reservation_cap_attrs(attrs, self.instance)

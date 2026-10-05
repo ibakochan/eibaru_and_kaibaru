@@ -149,6 +149,13 @@ class Club(models.Model):
         help_text="Public page look. Default uses the standard layout.",
     )
 
+    default_background_color = models.CharField(
+        max_length=7,
+        null=True,
+        blank=True,
+        help_text="Page background as #RRGGBB. Empty follows the layout preset. Any hex is allowed.",
+    )
+
 
 
     picture = models.ImageField(upload_to=club_picture_upload_to, null=True, blank=True)
