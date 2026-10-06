@@ -124,7 +124,7 @@ def visible_competition_results(event, user):
     return placed + unplaced
 
 
-def _sync_member_record(reservation, score, kind=MemberRecord.Kind.TEST):
+def _sync_member_record(reservation, score, kind=MemberRecord.Kind.TEST, details=None):
     if not reservation.member_id:
         return
 
@@ -140,6 +140,7 @@ def _sync_member_record(reservation, score, kind=MemberRecord.Kind.TEST):
             name=(reservation.event.title or "")[:200] or "記録",
             occurred_on=occurred_on,
             result=score,
+            details=details if details is not None else [],
         )
         return
 
@@ -147,7 +148,11 @@ def _sync_member_record(reservation, score, kind=MemberRecord.Kind.TEST):
     record.event = reservation.event
     record.kind = kind
     record.result = score
-    record.save(update_fields=["member", "event", "kind", "result", "updated_at"])
+    update_fields = ["member", "event", "kind", "result", "updated_at"]
+    if details is not None:
+        record.details = details
+        update_fields.append("details")
+    record.save(update_fields=update_fields)
 
 
 @transaction.atomic
@@ -265,6 +270,7 @@ def _match_payload(pairing):
         "second": _person(pairing.second),
         "winner_id": pairing.winner_id,
         "drawn": pairing.drawn,
+        "note": pairing.note,
     }
 
 
@@ -367,10 +373,13 @@ def _write_duel_records(pairing):
             outcome = "勝ち"
         else:
             outcome = "負け"
+        note = (pairing.note or "").strip()
+        details = [{"label": "勝因", "value": note}] if pairing.winner_id and note else []
         _sync_member_record(
             person,
             _duel_label(outcome, opponent.full_name),
             MemberRecord.Kind.DUEL,
+            details,
         )
 
 
@@ -482,13 +491,15 @@ def set_duel_winner(duel, pairing_id, winner_value):
     if raw == "" or raw == "clear":
         pairing.winner = None
         pairing.drawn = False
-        pairing.save(update_fields=["winner", "drawn"])
+        pairing.note = ""
+        pairing.save(update_fields=["winner", "drawn", "note"])
         _clear_duel_records(pairing)
         return
     if raw == "draw":
         pairing.winner = None
         pairing.drawn = True
-        pairing.save(update_fields=["winner", "drawn"])
+        pairing.note = ""
+        pairing.save(update_fields=["winner", "drawn", "note"])
         _write_duel_records(pairing)
         return
     try:
@@ -500,6 +511,35 @@ def set_duel_winner(duel, pairing_id, winner_value):
     pairing.winner_id = winner_id
     pairing.drawn = False
     pairing.save(update_fields=["winner", "drawn"])
+    _write_duel_records(pairing)
+
+
+def _duel_pairing(duel, pairing_id):
+    try:
+        pairing_key = int(pairing_id)
+    except (TypeError, ValueError):
+        raise ValueError("試合が見つかりません。")
+    pairing = (
+        Pairing.objects.select_for_update()
+        .select_related("first", "second")
+        .filter(duel=duel, id=pairing_key)
+        .first()
+    )
+    if pairing is None:
+        raise ValueError("試合が見つかりません。")
+    return pairing
+
+
+@transaction.atomic
+def set_duel_note(duel, pairing_id, note):
+    pairing = _duel_pairing(duel, pairing_id)
+    if pairing.winner_id is None:
+        raise ValueError("勝ちが決まってから理由を書けます。")
+    text = str(note or "").strip()
+    if len(text) > 200:
+        raise ValueError("理由は200文字以内にしてください。")
+    pairing.note = text
+    pairing.save(update_fields=["note"])
     _write_duel_records(pairing)
 
 

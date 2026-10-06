@@ -2461,6 +2461,23 @@ class DuelViewSet(viewsets.ViewSet):
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return self._saved(duel, request.user)
 
+    @action(detail=True, methods=["post"])
+    def note(self, request, pk=None):
+        from .service_member_record import set_duel_note
+
+        duel, denied = self._duel(request, pk)
+        if denied is not None:
+            return denied
+        try:
+            set_duel_note(
+                duel,
+                request.data.get("pairing_id"),
+                request.data.get("note"),
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return self._saved(duel, request.user)
+
 
 class MemberRecordViewSet(viewsets.ModelViewSet):
     serializer_class = MemberRecordSerializer

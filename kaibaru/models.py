@@ -2007,6 +2007,12 @@ class Pairing(models.Model):
         related_name="pairing_wins",
     )
     drawn = models.BooleanField(default=False)
+    note = models.CharField(
+        max_length=200,
+        blank=True,
+        default="",
+        help_text="Optional reason the winner won, such as a finish or a no-show.",
+    )
 
     class Meta:
         ordering = ["position", "id"]
