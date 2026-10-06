@@ -264,6 +264,7 @@ def _match_payload(pairing):
         "first": _person(pairing.first),
         "second": _person(pairing.second),
         "winner_id": pairing.winner_id,
+        "drawn": pairing.drawn,
     }
 
 
@@ -360,7 +361,12 @@ def _write_duel_records(pairing):
         (pairing.second, pairing.first),
     )
     for person, opponent in sides:
-        outcome = "勝ち" if person.id == pairing.winner_id else "負け"
+        if pairing.drawn:
+            outcome = "引き分け"
+        elif person.id == pairing.winner_id:
+            outcome = "勝ち"
+        else:
+            outcome = "負け"
         _sync_member_record(
             person,
             _duel_label(outcome, opponent.full_name),
@@ -473,10 +479,17 @@ def set_duel_winner(duel, pairing_id, winner_value):
     if pairing is None:
         raise ValueError("試合が見つかりません。")
     raw = "" if winner_value is None else str(winner_value).strip()
-    if raw == "":
+    if raw == "" or raw == "clear":
         pairing.winner = None
-        pairing.save(update_fields=["winner"])
+        pairing.drawn = False
+        pairing.save(update_fields=["winner", "drawn"])
         _clear_duel_records(pairing)
+        return
+    if raw == "draw":
+        pairing.winner = None
+        pairing.drawn = True
+        pairing.save(update_fields=["winner", "drawn"])
+        _write_duel_records(pairing)
         return
     try:
         winner_id = int(raw)
@@ -485,7 +498,8 @@ def set_duel_winner(duel, pairing_id, winner_value):
     if winner_id not in {pairing.first_id, pairing.second_id}:
         raise ValueError("勝った人はこの試合の2人から選んでください。")
     pairing.winner_id = winner_id
-    pairing.save(update_fields=["winner"])
+    pairing.drawn = False
+    pairing.save(update_fields=["winner", "drawn"])
     _write_duel_records(pairing)
 
 
@@ -513,7 +527,10 @@ def sync_duel_winner_from_record(record):
         )
         set_duel_winner(pairing.duel, pairing.id, other)
         return
+    if text.startswith("引き分け"):
+        set_duel_winner(pairing.duel, pairing.id, "draw")
+        return
     if text == "":
         set_duel_winner(pairing.duel, pairing.id, "")
         return
-    raise ValueError("対戦の結果は「勝ち」か「負け」で入力してください。")
+    raise ValueError("対戦の結果は「勝ち」「負け」「引き分け」で入力してください。")

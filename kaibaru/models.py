@@ -2006,6 +2006,7 @@ class Pairing(models.Model):
         blank=True,
         related_name="pairing_wins",
     )
+    drawn = models.BooleanField(default=False)
 
     class Meta:
         ordering = ["position", "id"]
