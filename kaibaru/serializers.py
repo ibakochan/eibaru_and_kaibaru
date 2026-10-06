@@ -2176,6 +2176,7 @@ class EventSerializer(serializers.ModelSerializer):
     guests = serializers.SerializerMethodField()
     test = serializers.SerializerMethodField()
     competition = serializers.SerializerMethodField()
+    duel = serializers.SerializerMethodField()
     results = serializers.SerializerMethodField()
 
     class Meta:
@@ -2192,6 +2193,7 @@ class EventSerializer(serializers.ModelSerializer):
             "audience",
             "test",
             "competition",
+            "duel",
             "title_color",
             "description_color",
             "detail_color",
@@ -2229,6 +2231,16 @@ class EventSerializer(serializers.ModelSerializer):
         if competition is None:
             return None
         return test_payload(competition)
+
+    def get_duel(self, event):
+        from .service_member_record import duel_payload, event_duel
+
+        duel = event_duel(event)
+        if duel is None:
+            return None
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        return duel_payload(duel, user)
 
     def get_results(self, event):
         from .service_member_record import (

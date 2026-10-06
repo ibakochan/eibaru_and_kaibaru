@@ -1960,10 +1960,73 @@ class Placement(models.Model):
         return f"{self.reservation.full_name} - {self.place}"
 
 
+class Duel(models.Model):
+    event = models.OneToOneField(
+        Event,
+        on_delete=models.CASCADE,
+        related_name="duel",
+    )
+    results_public = models.BooleanField(
+        default=False,
+        help_text="When off, only the owner sees every match. Each participant sees their own match.",
+    )
+    reservations_open_until = models.DateTimeField(null=True, blank=True)
+    frozen_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Scheduled freeze time. Registration locks once this time is reached. Must be at least one hour after reservations_open_until.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.event.title} duel"
+
+
+class Pairing(models.Model):
+    duel = models.ForeignKey(
+        Duel,
+        on_delete=models.CASCADE,
+        related_name="pairings",
+    )
+    position = models.PositiveIntegerField()
+    first = models.ForeignKey(
+        EventReservation,
+        on_delete=models.CASCADE,
+        related_name="pairing_first",
+    )
+    second = models.ForeignKey(
+        EventReservation,
+        on_delete=models.CASCADE,
+        related_name="pairing_second",
+    )
+    winner = models.ForeignKey(
+        EventReservation,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="pairing_wins",
+    )
+
+    class Meta:
+        ordering = ["position", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["duel", "position"],
+                name="unique_duel_pairing_position",
+            ),
+            models.UniqueConstraint(fields=["first"], name="unique_pairing_first"),
+            models.UniqueConstraint(fields=["second"], name="unique_pairing_second"),
+        ]
+
+    def __str__(self):
+        return f"{self.first.full_name} vs {self.second.full_name}"
+
+
 class MemberRecord(models.Model):
     class Kind(models.TextChoices):
         TEST = "test", "Test"
         INDIVIDUAL_COMPETITION = "individual_competition", "Individual competition"
+        DUEL = "duel", "Duel"
         TEAM_COMPETITION = "team_competition", "Team competition"
         INDIVIDUAL_TOURNAMENT = "individual_tournament", "Individual tournament"
         TEAM_TOURNAMENT = "team_tournament", "Team tournament"

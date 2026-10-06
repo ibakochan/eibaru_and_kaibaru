@@ -2378,6 +2378,90 @@ class EventReservationViewSet(viewsets.ViewSet):
         )
 
 
+class DuelViewSet(viewsets.ViewSet):
+    def _duel(self, request, pk):
+        from .models import Duel
+
+        if not request.user.is_authenticated:
+            return None, Response(
+                {"detail": "ログインしてください。"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        duel = (
+            Duel.objects
+            .select_related("event", "event__club")
+            .filter(id=pk)
+            .first()
+        )
+        if duel is None or duel.event.club.owner_id != request.user.id:
+            return None, Response(
+                {"detail": "対戦が見つかりません。"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return duel, None
+
+    def _saved(self, duel, user):
+        from .service_member_record import duel_payload
+
+        return Response(duel_payload(duel, user))
+
+    @action(detail=True, methods=["post"])
+    def pair(self, request, pk=None):
+        from .service_member_record import pair_duel
+
+        duel, denied = self._duel(request, pk)
+        if denied is not None:
+            return denied
+        try:
+            pair_duel(duel, request.data.get("first_id"), request.data.get("second_id"))
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return self._saved(duel, request.user)
+
+    @action(detail=True, methods=["post"], url_path="pair-rest")
+    def pair_rest(self, request, pk=None):
+        from .service_member_record import pair_duel_rest
+
+        duel, denied = self._duel(request, pk)
+        if denied is not None:
+            return denied
+        try:
+            pair_duel_rest(duel)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return self._saved(duel, request.user)
+
+    @action(detail=True, methods=["post"])
+    def unpair(self, request, pk=None):
+        from .service_member_record import unpair_duel
+
+        duel, denied = self._duel(request, pk)
+        if denied is not None:
+            return denied
+        try:
+            unpair_duel(duel, request.data.get("pairing_id"))
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return self._saved(duel, request.user)
+
+    @action(detail=True, methods=["post"])
+    def winner(self, request, pk=None):
+        from .service_member_record import set_duel_winner
+
+        duel, denied = self._duel(request, pk)
+        if denied is not None:
+            return denied
+        try:
+            set_duel_winner(
+                duel,
+                request.data.get("pairing_id"),
+                request.data.get("winner_id"),
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return self._saved(duel, request.user)
+
+
 class MemberRecordViewSet(viewsets.ModelViewSet):
     serializer_class = MemberRecordSerializer
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
@@ -2465,6 +2549,7 @@ class MemberRecordViewSet(viewsets.ModelViewSet):
         from django.db import transaction
         from .service_member_record import (
             sync_competition_place_from_record,
+            sync_duel_winner_from_record,
             sync_test_result_from_record,
         )
         with transaction.atomic():
@@ -2472,6 +2557,7 @@ class MemberRecordViewSet(viewsets.ModelViewSet):
             try:
                 sync_test_result_from_record(record)
                 sync_competition_place_from_record(record)
+                sync_duel_winner_from_record(record)
             except ValueError as exc:
                 transaction.set_rollback(True)
                 return Response(
@@ -2757,6 +2843,10 @@ class ClubViewSet(viewsets.ModelViewSet):
                 "events__prices",
                 "events__test",
                 "events__competition",
+                "events__duel",
+                "events__duel__pairings",
+                "events__duel__pairings__first",
+                "events__duel__pairings__second",
                 "slate_images",
                 "join_requests",
                 "membership_plans",

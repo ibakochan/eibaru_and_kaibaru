@@ -1,11 +1,13 @@
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.utils import timezone
 
 from .models import (
     Competition,
+    Duel,
     EventReservation,
     MemberRecord,
+    Pairing,
     Placement,
     Test,
     TestResult,
@@ -236,3 +238,271 @@ def sync_competition_place_from_record(record):
     if not digits:
         raise ValueError("順位は数字で入力してください。")
     set_competition_place(reservation, digits)
+
+
+def event_duel(event):
+    try:
+        return event.duel
+    except Duel.DoesNotExist:
+        return None
+
+
+def _person(reservation):
+    return {
+        "id": reservation.id,
+        "full_name": reservation.full_name,
+        "member": reservation.member_id,
+    }
+
+
+def _match_payload(pairing):
+    return {
+        "id": pairing.id,
+        "position": pairing.position,
+        "first": _person(pairing.first),
+        "second": _person(pairing.second),
+        "winner_id": pairing.winner_id,
+    }
+
+
+def _is_owner(event, user):
+    return (
+        user is not None
+        and getattr(user, "is_authenticated", False)
+        and event.club.owner_id == user.id
+    )
+
+
+def visible_duel_matches(duel, user):
+    pairings = duel.pairings.select_related("first", "second").order_by("position", "id")
+    if duel.results_public or _is_owner(duel.event, user):
+        return [_match_payload(pairing) for pairing in pairings]
+    visible_ids = set(
+        _visible_paid_rows(duel.event, False, user).values_list("id", flat=True)
+    )
+    return [
+        _match_payload(pairing)
+        for pairing in pairings
+        if pairing.first_id in visible_ids or pairing.second_id in visible_ids
+    ]
+
+
+def unpaired_pool(duel):
+    paired_ids = set()
+    for first_id, second_id in duel.pairings.values_list("first_id", "second_id"):
+        paired_ids.add(first_id)
+        paired_ids.add(second_id)
+    rows = _paid_rows(duel.event).exclude(id__in=paired_ids).order_by("full_name", "id")
+    return [_person(row) for row in rows]
+
+
+def duel_payload(duel, user):
+    payload = test_payload(duel)
+    payload["matches"] = visible_duel_matches(duel, user)
+    payload["pool"] = unpaired_pool(duel) if _is_owner(duel.event, user) else []
+    return payload
+
+
+def _parse_pair_ids(first_id, second_id):
+    try:
+        first = int(first_id)
+        second = int(second_id)
+    except (TypeError, ValueError):
+        raise ValueError("2人を選んでください。")
+    if first == second:
+        raise ValueError("同じ人同士では対戦できません。")
+    return first, second
+
+
+def _locked_paid(event, ids):
+    rows = list(
+        EventReservation.objects.select_for_update()
+        .filter(id__in=ids)
+        .order_by("id")
+    )
+    found = {row.id: row for row in rows}
+    if len(found) != len(set(ids)):
+        raise ValueError("支払い済みの予約だけ対戦にできます。")
+    for row in rows:
+        if (
+            row.event_id != event.id
+            or row.is_deleted
+            or row.canceled
+            or row.status != EventReservation.Status.PAID
+        ):
+            raise ValueError("支払い済みの予約だけ対戦にできます。")
+    return found
+
+
+def _ensure_free(ids):
+    if Pairing.objects.filter(
+        Q(first_id__in=ids) | Q(second_id__in=ids)
+    ).exists():
+        raise ValueError("すでに対戦が決まっている人がいます。")
+
+
+def _next_position(duel):
+    current = (
+        duel.pairings.order_by("-position").values_list("position", flat=True).first()
+    )
+    return (current or 0) + 1
+
+
+def _duel_label(outcome, opponent_name):
+    return f"{outcome}（{opponent_name}）"[:80]
+
+
+def _write_duel_records(pairing):
+    sides = (
+        (pairing.first, pairing.second),
+        (pairing.second, pairing.first),
+    )
+    for person, opponent in sides:
+        outcome = "勝ち" if person.id == pairing.winner_id else "負け"
+        _sync_member_record(
+            person,
+            _duel_label(outcome, opponent.full_name),
+            MemberRecord.Kind.DUEL,
+        )
+
+
+def _clear_duel_records(pairing):
+    MemberRecord.objects.filter(
+        reservation_id__in=[pairing.first_id, pairing.second_id]
+    ).delete()
+
+
+def _renumber_pairings(duel):
+    for index, pairing in enumerate(
+        list(duel.pairings.order_by("position", "id")),
+        start=1,
+    ):
+        if pairing.position != index:
+            pairing.position = index
+            pairing.save(update_fields=["position"])
+
+
+@transaction.atomic
+def pair_duel(duel, first_id, second_id):
+    first, second = _parse_pair_ids(first_id, second_id)
+    _locked_paid(duel.event, [first, second])
+    _ensure_free([first, second])
+    try:
+        Pairing.objects.create(
+            duel=duel,
+            position=_next_position(duel),
+            first_id=first,
+            second_id=second,
+        )
+    except IntegrityError:
+        raise ValueError("すでに対戦が決まっている人がいます。")
+
+
+@transaction.atomic
+def pair_duel_rest(duel):
+    paired_ids = set()
+    for first_id, second_id in duel.pairings.values_list("first_id", "second_id"):
+        paired_ids.add(first_id)
+        paired_ids.add(second_id)
+    free_ids = list(
+        _paid_rows(duel.event)
+        .exclude(id__in=paired_ids)
+        .order_by("id")
+        .values_list("id", flat=True)
+    )
+    if len(free_ids) < 2:
+        raise ValueError("対戦できる人が2人未満です。")
+    locked = _locked_paid(duel.event, free_ids)
+    _ensure_free(free_ids)
+    people = sorted(locked.values(), key=lambda row: (row.full_name, row.id))
+    position = _next_position(duel) - 1
+    try:
+        for index in range(0, len(people) - 1, 2):
+            position += 1
+            Pairing.objects.create(
+                duel=duel,
+                position=position,
+                first=people[index],
+                second=people[index + 1],
+            )
+    except IntegrityError:
+        raise ValueError("すでに対戦が決まっている人がいます。")
+
+
+@transaction.atomic
+def unpair_duel(duel, pairing_id):
+    try:
+        pairing_key = int(pairing_id)
+    except (TypeError, ValueError):
+        raise ValueError("試合が見つかりません。")
+    pairing = (
+        Pairing.objects.select_for_update()
+        .filter(duel=duel, id=pairing_key)
+        .first()
+    )
+    if pairing is None:
+        raise ValueError("試合が見つかりません。")
+    _clear_duel_records(pairing)
+    pairing.delete()
+    _renumber_pairings(duel)
+
+
+@transaction.atomic
+def set_duel_winner(duel, pairing_id, winner_value):
+    try:
+        pairing_key = int(pairing_id)
+    except (TypeError, ValueError):
+        raise ValueError("試合が見つかりません。")
+    pairing = (
+        Pairing.objects.select_for_update()
+        .select_related("first", "second")
+        .filter(duel=duel, id=pairing_key)
+        .first()
+    )
+    if pairing is None:
+        raise ValueError("試合が見つかりません。")
+    raw = "" if winner_value is None else str(winner_value).strip()
+    if raw == "":
+        pairing.winner = None
+        pairing.save(update_fields=["winner"])
+        _clear_duel_records(pairing)
+        return
+    try:
+        winner_id = int(raw)
+    except (TypeError, ValueError):
+        raise ValueError("勝った人はこの試合の2人から選んでください。")
+    if winner_id not in {pairing.first_id, pairing.second_id}:
+        raise ValueError("勝った人はこの試合の2人から選んでください。")
+    pairing.winner_id = winner_id
+    pairing.save(update_fields=["winner"])
+    _write_duel_records(pairing)
+
+
+def sync_duel_winner_from_record(record):
+    if not record.reservation_id:
+        return
+    pairing = (
+        Pairing.objects.filter(
+            Q(first_id=record.reservation_id) | Q(second_id=record.reservation_id)
+        )
+        .select_related("duel")
+        .first()
+    )
+    if pairing is None:
+        return
+    text = (record.result or "").strip()
+    if text.startswith("勝ち"):
+        set_duel_winner(pairing.duel, pairing.id, record.reservation_id)
+        return
+    if text.startswith("負け"):
+        other = (
+            pairing.second_id
+            if pairing.first_id == record.reservation_id
+            else pairing.first_id
+        )
+        set_duel_winner(pairing.duel, pairing.id, other)
+        return
+    if text == "":
+        set_duel_winner(pairing.duel, pairing.id, "")
+        return
+    raise ValueError("対戦の結果は「勝ち」か「負け」で入力してください。")
