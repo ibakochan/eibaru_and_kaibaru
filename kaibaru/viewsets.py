@@ -3,7 +3,7 @@ from rest_framework import viewsets, serializers, status
 from rest_framework.decorators import action
 from rest_framework.viewsets import ViewSet
 from rest_framework.response import Response
-from .models import TicketGrant, TicketType, TicketPackage, Reservation, Event, EventReservation, MemberRecord, Test, Competition, Invoice, MemberPricingAdjustment, Discount, DiscountCondition, SubscriptionItem, Member, Club, Lesson, Participation, SlateImage, JoinRequest, MembershipPlan, Subscription
+from .models import TicketGrant, TicketType, TicketPackage, Reservation, Event, EventReservation, MemberRecord, Invoice, MemberPricingAdjustment, Discount, DiscountCondition, SubscriptionItem, Member, Club, Lesson, Participation, SlateImage, JoinRequest, MembershipPlan, Subscription
 from accounts.models import CustomUser
 from django.contrib.auth import login
 import re
@@ -2376,88 +2376,6 @@ class EventReservationViewSet(viewsets.ViewSet):
             {"id": reservation.id, "result": label, "place": place},
             status=status.HTTP_200_OK,
         )
-
-
-class TestViewSet(viewsets.ViewSet):
-    @action(detail=True, methods=["post"])
-    def freeze(self, request, pk=None):
-        from datetime import timedelta
-        from .service_member_record import test_payload
-
-        if not request.user.is_authenticated:
-            return Response(
-                {"detail": "ログインしてください。"},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        test = (
-            Test.objects
-            .select_related("event", "event__club")
-            .filter(id=pk)
-            .first()
-        )
-        if test is None or test.event.club.owner_id != request.user.id:
-            return Response(
-                {"detail": "テストが見つかりません。"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-        if test.frozen_at is not None:
-            return Response(test_payload(test))
-        if test.reservations_open_until is None:
-            return Response(
-                {"detail": "予約締切を設定してください。"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if timezone.now() < test.reservations_open_until + timedelta(hours=1):
-            return Response(
-                {"detail": "予約締切の1時間後まで凍結できません。"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        test.frozen_at = timezone.now()
-        test.save(update_fields=["frozen_at"])
-        return Response(test_payload(test))
-
-
-class CompetitionViewSet(viewsets.ViewSet):
-    @action(detail=True, methods=["post"])
-    def freeze(self, request, pk=None):
-        from datetime import timedelta
-        from .service_member_record import test_payload
-
-        if not request.user.is_authenticated:
-            return Response(
-                {"detail": "ログインしてください。"},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        competition = (
-            Competition.objects
-            .select_related("event", "event__club")
-            .filter(id=pk)
-            .first()
-        )
-        if competition is None or competition.event.club.owner_id != request.user.id:
-            return Response(
-                {"detail": "競技が見つかりません。"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-        if competition.frozen_at is not None:
-            return Response(test_payload(competition))
-        if competition.reservations_open_until is None:
-            return Response(
-                {"detail": "予約締切を設定してください。"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if timezone.now() < competition.reservations_open_until + timedelta(hours=1):
-            return Response(
-                {"detail": "予約締切の1時間後まで凍結できません。"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        competition.frozen_at = timezone.now()
-        competition.save(update_fields=["frozen_at"])
-        return Response(test_payload(competition))
 
 
 class MemberRecordViewSet(viewsets.ModelViewSet):

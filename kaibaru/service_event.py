@@ -163,7 +163,7 @@ def _registration_closed_message(event, now=None):
         frozen_label = "この競技は凍結されているため、予約できません。"
     if sheet is None:
         return None
-    if sheet.frozen_at is not None:
+    if sheet.frozen_at is not None and sheet.frozen_at <= now:
         return frozen_label
     if (
         sheet.reservations_open_until is not None
@@ -1668,6 +1668,33 @@ def _parse_starts_at(value):
     return _parse_when(value, "開催日時")
 
 
+def _scheduled_freeze(*, payload, open_until, existing_frozen_at):
+    raw = payload.get("frozen_at")
+    if raw is None or str(raw).strip() == "":
+        submitted = None
+    else:
+        submitted = _parse_when(raw, "凍結日時")
+
+    now = timezone.now()
+    if existing_frozen_at is not None and existing_frozen_at <= now:
+        if (
+            submitted is None
+            or abs((submitted - existing_frozen_at).total_seconds()) >= 60
+        ):
+            raise ValueError("凍結済みの時刻は変更できません。")
+        freeze_at = existing_frozen_at
+    else:
+        freeze_at = submitted
+
+    if freeze_at is None:
+        return None
+    if open_until is None:
+        raise ValueError("予約締切を設定してから凍結を予約してください。")
+    if freeze_at < open_until + timedelta(hours=1):
+        raise ValueError("凍結は予約締切の1時間後以降に設定してください。")
+    return freeze_at
+
+
 def save_section_event(*, club, section_id, title, payload):
     if not isinstance(payload, dict):
         payload = {}
@@ -1719,12 +1746,31 @@ def save_section_event(*, club, section_id, title, payload):
         section_id=section_id,
         defaults=defaults,
     )
+    existing_sheet = None
+    if kind == "test":
+        existing_sheet = Test.objects.filter(event=event).only("frozen_at").first()
+    elif kind == "competition":
+        existing_sheet = (
+            Competition.objects.filter(event=event).only("frozen_at").first()
+        )
+    freeze_at = (
+        _scheduled_freeze(
+            payload=payload,
+            open_until=open_until,
+            existing_frozen_at=(
+                existing_sheet.frozen_at if existing_sheet is not None else None
+            ),
+        )
+        if timed
+        else None
+    )
     if kind == "test":
         Test.objects.update_or_create(
             event=event,
             defaults={
                 "results_public": results_public,
                 "reservations_open_until": open_until,
+                "frozen_at": freeze_at,
             },
         )
         Competition.objects.filter(event=event).delete()
@@ -1734,6 +1780,7 @@ def save_section_event(*, club, section_id, title, payload):
             defaults={
                 "results_public": results_public,
                 "reservations_open_until": open_until,
+                "frozen_at": freeze_at,
             },
         )
         Test.objects.filter(event=event).delete()

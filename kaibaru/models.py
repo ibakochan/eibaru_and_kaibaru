@@ -1888,7 +1888,7 @@ class Test(models.Model):
     frozen_at = models.DateTimeField(
         null=True,
         blank=True,
-        help_text="Set when the owner freezes the test, at least one hour after registration closes.",
+        help_text="Scheduled freeze time. Registration locks once this time is reached. Must be at least one hour after reservations_open_until.",
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -1924,7 +1924,11 @@ class Competition(models.Model):
         help_text="When off, only the owner sees every place. Each participant sees their own.",
     )
     reservations_open_until = models.DateTimeField(null=True, blank=True)
-    frozen_at = models.DateTimeField(null=True, blank=True)
+    frozen_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Scheduled freeze time. Registration locks once this time is reached. Must be at least one hour after reservations_open_until.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
