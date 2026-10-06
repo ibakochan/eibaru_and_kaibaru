@@ -1,3 +1,5 @@
+import random
+
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -410,11 +412,20 @@ def pair_duel_rest(duel):
         .order_by("id")
         .values_list("id", flat=True)
     )
+    if len(free_ids) % 2 != 0:
+        raise ValueError(
+            "ランダムに組むには、予約をあと1件取るか、予約を1件キャンセルして偶数にしてください。"
+        )
     if len(free_ids) < 2:
         raise ValueError("対戦できる人が2人未満です。")
     locked = _locked_paid(duel.event, free_ids)
     _ensure_free(free_ids)
-    people = sorted(locked.values(), key=lambda row: (row.full_name, row.id))
+    people = list(locked.values())
+    if len(people) % 2 != 0:
+        raise ValueError(
+            "ランダムに組むには、予約をあと1件取るか、予約を1件キャンセルして偶数にしてください。"
+        )
+    random.shuffle(people)
     position = _next_position(duel) - 1
     try:
         for index in range(0, len(people) - 1, 2):
