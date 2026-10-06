@@ -2175,6 +2175,7 @@ class EventSerializer(serializers.ModelSerializer):
     my_reservations = serializers.SerializerMethodField()
     guests = serializers.SerializerMethodField()
     test = serializers.SerializerMethodField()
+    competition = serializers.SerializerMethodField()
     results = serializers.SerializerMethodField()
 
     class Meta:
@@ -2190,6 +2191,7 @@ class EventSerializer(serializers.ModelSerializer):
             "reservation_limit",
             "audience",
             "test",
+            "competition",
             "title_color",
             "description_color",
             "detail_color",
@@ -2220,12 +2222,26 @@ class EventSerializer(serializers.ModelSerializer):
             return None
         return test_payload(test)
 
+    def get_competition(self, event):
+        from .service_member_record import event_competition, test_payload
+
+        competition = event_competition(event)
+        if competition is None:
+            return None
+        return test_payload(competition)
+
     def get_results(self, event):
-        from .service_member_record import visible_test_results
+        from .service_member_record import (
+            visible_competition_results,
+            visible_test_results,
+        )
 
         request = self.context.get("request")
         user = getattr(request, "user", None)
-        return visible_test_results(event, user)
+        test_rows = visible_test_results(event, user)
+        if test_rows is not None:
+            return test_rows
+        return visible_competition_results(event, user)
 
     def get_spots_taken(self, event):
         return self._held_count(event)

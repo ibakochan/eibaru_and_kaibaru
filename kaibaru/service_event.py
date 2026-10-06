@@ -11,7 +11,7 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from .models import Event, EventPrice, EventReservation, StripeCustomer, Subscription, Test
+from .models import Event, EventPrice, EventReservation, StripeCustomer, Subscription, Test, Competition
 from .reservation_checkout_recovery import (
     read_stripe_payment,
     record_stripe_payment,
@@ -146,19 +146,28 @@ def _require_upcoming(event):
 
 def _registration_closed_message(event, now=None):
     now = now or timezone.now()
-    test = (
+    sheet = (
         Test.objects
         .filter(event_id=event.id)
         .only("frozen_at", "reservations_open_until")
         .first()
     )
-    if test is None:
+    frozen_label = "このテストは凍結されているため、予約できません。"
+    if sheet is None:
+        sheet = (
+            Competition.objects
+            .filter(event_id=event.id)
+            .only("frozen_at", "reservations_open_until")
+            .first()
+        )
+        frozen_label = "この競技は凍結されているため、予約できません。"
+    if sheet is None:
         return None
-    if test.frozen_at is not None:
-        return "このテストは凍結されているため、予約できません。"
+    if sheet.frozen_at is not None:
+        return frozen_label
     if (
-        test.reservations_open_until is not None
-        and test.reservations_open_until <= now
+        sheet.reservations_open_until is not None
+        and sheet.reservations_open_until <= now
     ):
         return "予約の受付は終了しています。"
     return None
@@ -1681,12 +1690,13 @@ def save_section_event(*, club, section_id, title, payload):
 
     prices = _event_prices(payload)
     kind = payload.get("kind") or "standard"
-    if kind not in {"standard", "test"}:
+    if kind not in {"standard", "test", "competition"}:
         raise ValueError("イベントの種類が正しくありません。")
-    results_public = kind == "test" and _flag(payload.get("results_public"))
+    timed = kind in {"test", "competition"}
+    results_public = timed and _flag(payload.get("results_public"))
     open_until = (
         _parse_when(payload.get("reservations_open_until"), "予約締切")
-        if kind == "test"
+        if timed
         else None
     )
 
@@ -1717,8 +1727,19 @@ def save_section_event(*, club, section_id, title, payload):
                 "reservations_open_until": open_until,
             },
         )
+        Competition.objects.filter(event=event).delete()
+    elif kind == "competition":
+        Competition.objects.update_or_create(
+            event=event,
+            defaults={
+                "results_public": results_public,
+                "reservations_open_until": open_until,
+            },
+        )
+        Test.objects.filter(event=event).delete()
     else:
         Test.objects.filter(event=event).delete()
+        Competition.objects.filter(event=event).delete()
     event.prices.all().delete()
     EventPrice.objects.bulk_create(
         [

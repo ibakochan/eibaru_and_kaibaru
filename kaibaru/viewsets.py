@@ -3,7 +3,7 @@ from rest_framework import viewsets, serializers, status
 from rest_framework.decorators import action
 from rest_framework.viewsets import ViewSet
 from rest_framework.response import Response
-from .models import TicketGrant, TicketType, TicketPackage, Reservation, Event, EventReservation, MemberRecord, Test, Invoice, MemberPricingAdjustment, Discount, DiscountCondition, SubscriptionItem, Member, Club, Lesson, Participation, SlateImage, JoinRequest, MembershipPlan, Subscription
+from .models import TicketGrant, TicketType, TicketPackage, Reservation, Event, EventReservation, MemberRecord, Test, Competition, Invoice, MemberPricingAdjustment, Discount, DiscountCondition, SubscriptionItem, Member, Club, Lesson, Participation, SlateImage, JoinRequest, MembershipPlan, Subscription
 from accounts.models import CustomUser
 from django.contrib.auth import login
 import re
@@ -2316,7 +2316,64 @@ class EventReservationViewSet(viewsets.ViewSet):
             )
 
         return Response(
-            {"id": reservation.id, "result": score},
+            {"id": reservation.id, "result": score, "place": None},
+            status=status.HTTP_200_OK,
+        )
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path=r"place/(?P<reservation_id>\d+)",
+    )
+    def place(self, request, reservation_id=None):
+        from .service_member_record import event_competition, set_competition_place
+
+        if not request.user.is_authenticated:
+            return Response(
+                {"detail": "ログインしてください。"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            reservation_id = int(reservation_id)
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "予約が見つかりません。"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        reservation = (
+            EventReservation.objects
+            .select_related("event__competition", "club", "member")
+            .filter(id=reservation_id, is_deleted=False)
+            .first()
+        )
+        if reservation is None or reservation.club.owner_id != request.user.id:
+            return Response(
+                {"detail": "予約が見つかりません。"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if event_competition(reservation.event) is None:
+            return Response(
+                {"detail": "競技の順位だけ入力できます。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if reservation.canceled or reservation.status != EventReservation.Status.PAID:
+            return Response(
+                {"detail": "支払い済みの予約だけ順位を入力できます。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            place, label = set_competition_place(reservation, request.data.get("place"))
+        except ValueError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            {"id": reservation.id, "result": label, "place": place},
             status=status.HTTP_200_OK,
         )
 
@@ -2360,6 +2417,47 @@ class TestViewSet(viewsets.ViewSet):
         test.frozen_at = timezone.now()
         test.save(update_fields=["frozen_at"])
         return Response(test_payload(test))
+
+
+class CompetitionViewSet(viewsets.ViewSet):
+    @action(detail=True, methods=["post"])
+    def freeze(self, request, pk=None):
+        from datetime import timedelta
+        from .service_member_record import test_payload
+
+        if not request.user.is_authenticated:
+            return Response(
+                {"detail": "ログインしてください。"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        competition = (
+            Competition.objects
+            .select_related("event", "event__club")
+            .filter(id=pk)
+            .first()
+        )
+        if competition is None or competition.event.club.owner_id != request.user.id:
+            return Response(
+                {"detail": "競技が見つかりません。"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if competition.frozen_at is not None:
+            return Response(test_payload(competition))
+        if competition.reservations_open_until is None:
+            return Response(
+                {"detail": "予約締切を設定してください。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if timezone.now() < competition.reservations_open_until + timedelta(hours=1):
+            return Response(
+                {"detail": "予約締切の1時間後まで凍結できません。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        competition.frozen_at = timezone.now()
+        competition.save(update_fields=["frozen_at"])
+        return Response(test_payload(competition))
 
 
 class MemberRecordViewSet(viewsets.ModelViewSet):
@@ -2447,10 +2545,21 @@ class MemberRecordViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(record, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         from django.db import transaction
-        from .service_member_record import sync_test_result_from_record
+        from .service_member_record import (
+            sync_competition_place_from_record,
+            sync_test_result_from_record,
+        )
         with transaction.atomic():
             serializer.save()
-            sync_test_result_from_record(record)
+            try:
+                sync_test_result_from_record(record)
+                sync_competition_place_from_record(record)
+            except ValueError as exc:
+                transaction.set_rollback(True)
+                return Response(
+                    {"detail": str(exc)},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         return Response(serializer.data)
 
     def destroy(self, request, *args, **kwargs):
@@ -2729,6 +2838,7 @@ class ClubViewSet(viewsets.ModelViewSet):
                 ),
                 "events__prices",
                 "events__test",
+                "events__competition",
                 "slate_images",
                 "join_requests",
                 "membership_plans",

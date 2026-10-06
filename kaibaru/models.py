@@ -1913,6 +1913,49 @@ class TestResult(models.Model):
         return f"{self.reservation.full_name} - {self.score}"
 
 
+class Competition(models.Model):
+    event = models.OneToOneField(
+        Event,
+        on_delete=models.CASCADE,
+        related_name="competition",
+    )
+    results_public = models.BooleanField(
+        default=False,
+        help_text="When off, only the owner sees every place. Each participant sees their own.",
+    )
+    reservations_open_until = models.DateTimeField(null=True, blank=True)
+    frozen_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.event.title} competition"
+
+
+class Placement(models.Model):
+    competition = models.ForeignKey(
+        Competition,
+        on_delete=models.CASCADE,
+        related_name="placements",
+    )
+    reservation = models.OneToOneField(
+        EventReservation,
+        on_delete=models.CASCADE,
+        related_name="placement",
+    )
+    place = models.PositiveIntegerField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["competition", "place"],
+                name="unique_competition_place",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.reservation.full_name} - {self.place}"
+
+
 class MemberRecord(models.Model):
     class Kind(models.TextChoices):
         TEST = "test", "Test"
