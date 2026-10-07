@@ -2479,6 +2479,176 @@ class DuelViewSet(viewsets.ViewSet):
         return self._saved(duel, request.user)
 
 
+class TournamentViewSet(viewsets.ViewSet):
+    def _tournament(self, request, pk):
+        from .models import Tournament
+
+        if not request.user.is_authenticated:
+            return None, Response(
+                {"detail": "ログインしてください。"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        tournament = (
+            Tournament.objects
+            .select_related("event", "event__club")
+            .filter(id=pk)
+            .first()
+        )
+        if tournament is None or tournament.event.club.owner_id != request.user.id:
+            return None, Response(
+                {"detail": "トーナメントが見つかりません。"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return tournament, None
+
+    def _run(self, request, pk, fn):
+        from .service_tournament import tournament_payload
+
+        tournament, denied = self._tournament(request, pk)
+        if denied is not None:
+            return denied
+        try:
+            fn(tournament)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(tournament_payload(tournament, request.user))
+
+    @action(detail=True, methods=["post"])
+    def brackets(self, request, pk=None):
+        from .service_tournament import create_bracket
+
+        return self._run(
+            request,
+            pk,
+            lambda tournament: create_bracket(tournament, request.data.get("name")),
+        )
+
+    @action(detail=True, methods=["post"])
+    def rename(self, request, pk=None):
+        from .service_tournament import rename_bracket
+
+        return self._run(
+            request,
+            pk,
+            lambda tournament: rename_bracket(
+                tournament,
+                request.data.get("bracket_id"),
+                request.data.get("name"),
+            ),
+        )
+
+    @action(detail=True, methods=["post"], url_path="remove-bracket")
+    def remove_bracket(self, request, pk=None):
+        from .service_tournament import remove_bracket
+
+        return self._run(
+            request,
+            pk,
+            lambda tournament: remove_bracket(tournament, request.data.get("bracket_id")),
+        )
+
+    @action(detail=True, methods=["post"])
+    def enter(self, request, pk=None):
+        from .service_tournament import enter_bracket
+
+        return self._run(
+            request,
+            pk,
+            lambda tournament: enter_bracket(
+                tournament,
+                request.data.get("bracket_id"),
+                request.data.get("reservation_id"),
+            ),
+        )
+
+    @action(detail=True, methods=["post"])
+    def leave(self, request, pk=None):
+        from .service_tournament import leave_bracket
+
+        return self._run(
+            request,
+            pk,
+            lambda tournament: leave_bracket(tournament, request.data.get("reservation_id")),
+        )
+
+    @action(detail=True, methods=["post"])
+    def pair(self, request, pk=None):
+        from .service_tournament import pair_bracket
+
+        return self._run(
+            request,
+            pk,
+            lambda tournament: pair_bracket(
+                tournament,
+                request.data.get("bracket_id"),
+                request.data.get("first_id"),
+                request.data.get("second_id"),
+            ),
+        )
+
+    @action(detail=True, methods=["post"], url_path="pair-rest")
+    def pair_rest(self, request, pk=None):
+        from .service_tournament import pair_bracket_rest
+
+        return self._run(
+            request,
+            pk,
+            lambda tournament: pair_bracket_rest(tournament, request.data.get("bracket_id")),
+        )
+
+    @action(detail=True, methods=["post"])
+    def bye(self, request, pk=None):
+        from .service_tournament import bye_bracket
+
+        return self._run(
+            request,
+            pk,
+            lambda tournament: bye_bracket(
+                tournament,
+                request.data.get("bracket_id"),
+                request.data.get("reservation_id"),
+            ),
+        )
+
+    @action(detail=True, methods=["post"])
+    def unpair(self, request, pk=None):
+        from .service_tournament import unpair_tournament
+
+        return self._run(
+            request,
+            pk,
+            lambda tournament: unpair_tournament(tournament, request.data.get("match_id")),
+        )
+
+    @action(detail=True, methods=["post"])
+    def winner(self, request, pk=None):
+        from .service_tournament import set_tournament_winner
+
+        return self._run(
+            request,
+            pk,
+            lambda tournament: set_tournament_winner(
+                tournament,
+                request.data.get("match_id"),
+                request.data.get("winner_id"),
+            ),
+        )
+
+    @action(detail=True, methods=["post"])
+    def note(self, request, pk=None):
+        from .service_tournament import set_tournament_note
+
+        return self._run(
+            request,
+            pk,
+            lambda tournament: set_tournament_note(
+                tournament,
+                request.data.get("match_id"),
+                request.data.get("note"),
+            ),
+        )
+
+
 class MemberRecordViewSet(viewsets.ModelViewSet):
     serializer_class = MemberRecordSerializer
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
@@ -2569,12 +2739,14 @@ class MemberRecordViewSet(viewsets.ModelViewSet):
             sync_duel_winner_from_record,
             sync_test_result_from_record,
         )
+        from .service_tournament import sync_tournament_from_record
         with transaction.atomic():
             serializer.save()
             try:
                 sync_test_result_from_record(record)
                 sync_competition_place_from_record(record)
                 sync_duel_winner_from_record(record)
+                sync_tournament_from_record(record)
             except ValueError as exc:
                 transaction.set_rollback(True)
                 return Response(
@@ -2864,6 +3036,7 @@ class ClubViewSet(viewsets.ModelViewSet):
                 "events__duel__pairings",
                 "events__duel__pairings__first",
                 "events__duel__pairings__second",
+                "events__tournament",
                 "slate_images",
                 "join_requests",
                 "membership_plans",

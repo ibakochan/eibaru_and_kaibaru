@@ -11,7 +11,7 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from .models import Event, EventPrice, EventReservation, StripeCustomer, Subscription, Test, Competition, Duel
+from .models import Event, EventPrice, EventReservation, StripeCustomer, Subscription, Test, Competition, Duel, Tournament
 from .reservation_checkout_recovery import (
     read_stripe_payment,
     record_stripe_payment,
@@ -169,6 +169,14 @@ def _registration_closed_message(event, now=None):
             .first()
         )
         frozen_label = "この対戦は凍結されているため、予約できません。"
+    if sheet is None:
+        sheet = (
+            Tournament.objects
+            .filter(event_id=event.id)
+            .only("frozen_at", "reservations_open_until")
+            .first()
+        )
+        frozen_label = "このトーナメントは凍結されているため、予約できません。"
     if sheet is None:
         return None
     if sheet.frozen_at is not None and sheet.frozen_at <= now:
@@ -1725,9 +1733,9 @@ def save_section_event(*, club, section_id, title, payload):
 
     prices = _event_prices(payload)
     kind = payload.get("kind") or "standard"
-    if kind not in {"standard", "test", "competition", "duel"}:
+    if kind not in {"standard", "test", "competition", "duel", "tournament"}:
         raise ValueError("イベントの種類が正しくありません。")
-    timed = kind in {"test", "competition", "duel"}
+    timed = kind in {"test", "competition", "duel", "tournament"}
     results_public = timed and _flag(payload.get("results_public"))
     open_until = (
         _parse_when(payload.get("reservations_open_until"), "予約締切")
@@ -1754,7 +1762,12 @@ def save_section_event(*, club, section_id, title, payload):
         section_id=section_id,
         defaults=defaults,
     )
-    sheet_model = {"test": Test, "competition": Competition, "duel": Duel}.get(kind)
+    sheet_model = {
+        "test": Test,
+        "competition": Competition,
+        "duel": Duel,
+        "tournament": Tournament,
+    }.get(kind)
     existing_sheet = (
         sheet_model.objects.filter(event=event).only("frozen_at").first()
         if sheet_model is not None
@@ -1782,12 +1795,16 @@ def save_section_event(*, club, section_id, title, payload):
         Competition.objects.update_or_create(event=event, defaults=sheet_defaults)
     elif kind == "duel":
         Duel.objects.update_or_create(event=event, defaults=sheet_defaults)
+    elif kind == "tournament":
+        Tournament.objects.update_or_create(event=event, defaults=sheet_defaults)
     if kind != "test":
         Test.objects.filter(event=event).delete()
     if kind != "competition":
         Competition.objects.filter(event=event).delete()
     if kind != "duel":
         Duel.objects.filter(event=event).delete()
+    if kind != "tournament":
+        Tournament.objects.filter(event=event).delete()
     event.prices.all().delete()
     EventPrice.objects.bulk_create(
         [

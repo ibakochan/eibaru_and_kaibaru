@@ -24,6 +24,7 @@ router.register(r'reservations', viewsets.ReservationViewSet, basename='reservat
 router.register(r'event-reservations', viewsets.EventReservationViewSet, basename='event-reservation')
 router.register(r'member-records', viewsets.MemberRecordViewSet, basename='member-record')
 router.register(r'duels', viewsets.DuelViewSet, basename='duel')
+router.register(r'tournaments', viewsets.TournamentViewSet, basename='tournament')
 router.register(r'ticket-types', viewsets.TicketTypeViewSet, basename='ticket-type')
 router.register(r'ticket-packages', viewsets.TicketPackageViewSet, basename='ticket-package')
 
