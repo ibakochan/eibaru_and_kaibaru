@@ -151,8 +151,16 @@ def _tree_view(entries, matches):
                 "bye": bye,
                 "pending": pending,
                 "note": note,
+                "result_locked": False,
             })
         rounds.append({"label": label, "matches": rows})
+    for round_index, rnd in enumerate(rounds):
+        for match_index, row in enumerate(rnd["matches"]):
+            row["result_locked"] = bool(
+                row["winner_id"]
+                and not row["bye"]
+                and _later_result(rounds, round_index, match_index)
+            )
     champion = None
     complete = False
     if structure:
@@ -163,6 +171,31 @@ def _tree_view(entries, matches):
             complete = True
     locked = any(row["winner_id"] and not row["bye"] for rnd in rounds for row in rnd["matches"])
     return rounds, champion, complete, locked
+
+
+def _later_result(rounds, round_index, match_index):
+    """True when a later match that depends on this one already has a winner."""
+    current_round = round_index
+    current_index = match_index
+    while current_round + 1 < len(rounds):
+        row = rounds[current_round]["matches"]
+        nxt = rounds[current_round + 1]["matches"]
+        if not row or not nxt or current_index >= len(row):
+            return False
+        if len(row) % 2 == 1 and current_index == len(row) - 1:
+            current_round += 1
+            current_index = len(nxt) - 1
+            continue
+        parent_index = current_index // 2
+        if parent_index >= len(nxt):
+            return False
+        parent = nxt[parent_index]
+        if parent["bye"]:
+            current_round += 1
+            current_index = parent_index
+            continue
+        return bool(parent["winner_id"])
+    return False
 
 
 def _open_label(rounds, complete):
@@ -546,6 +579,29 @@ def _optional_int(value):
         return None
 
 
+def _changes_winner(match, winner_value):
+    raw = "" if winner_value is None else str(winner_value).strip()
+    if raw in {"", "clear"}:
+        return match.winner_id is not None
+    if raw == "draw":
+        return True
+    try:
+        winner_id = int(raw)
+    except (TypeError, ValueError):
+        return True
+    return winner_id != match.winner_id
+
+
+def _match_result_locked(bracket, match):
+    entries, matches = _load(bracket)
+    rounds, _champion, _complete, _locked_now = _tree_view(entries, matches)
+    for rnd in rounds:
+        for row in rnd["matches"]:
+            if row["round"] == match.round and row["position"] == match.position:
+                return bool(row["result_locked"])
+    return False
+
+
 def _apply_winner(match, winner_value, note):
     raw = "" if winner_value is None else str(winner_value).strip()
     if raw in {"", "clear"}:
@@ -619,6 +675,8 @@ def set_tournament_winner(
         raise ValueError("対戦する2人が揃ってから決められます。")
     if found.second_id is None:
         raise ValueError("不戦勝の相手は選べません。")
+    if _changes_winner(found, winner_value) and _match_result_locked(bracket, found):
+        raise ValueError("この勝敗は次の試合に使われているので、先に次の試合の勝敗を取り消してください。")
     _apply_winner(found, winner_value, note)
     _materialize(bracket)
     _refresh_all(bracket)
