@@ -85,6 +85,7 @@ def visible_test_results(event, user):
             "result": scores.get(row.id, ""),
             "place": None,
             "price_name": row.price_name,
+            "amount": row.amount,
             "member": row.member_id,
         }
         for row in rows
@@ -114,6 +115,7 @@ def visible_competition_results(event, user):
             "result": f"{place}位 / {total}人" if place else "",
             "place": place,
             "price_name": row.price_name,
+            "amount": row.amount,
             "member": row.member_id,
         }
         if place:
@@ -124,20 +126,51 @@ def visible_competition_results(event, user):
     return placed + unplaced
 
 
-def _sync_member_record(reservation, score, kind=MemberRecord.Kind.TEST, details=None):
+def purchased_price(reservation):
+    from .models import EventPrice
+
+    name = (reservation.price_name or "").strip()
+    if not name:
+        return None
+    return (
+        EventPrice.objects.filter(event_id=reservation.event_id, name=name)
+        .order_by("position", "id")
+        .first()
+    )
+
+
+def _sync_member_record(
+    reservation,
+    score,
+    kind=MemberRecord.Kind.TEST,
+    details=None,
+    division=None,
+    bracket=None,
+    record_name=None,
+):
     if not reservation.member_id:
         return
 
     occurred_on = timezone.localtime(reservation.event.starts_at).date()
-    record = MemberRecord.objects.filter(reservation=reservation).first()
+    records = MemberRecord.objects.filter(reservation=reservation)
+    if division is not None:
+        records = records.filter(division=division)
+    elif bracket is not None:
+        records = records.filter(bracket=bracket)
+    else:
+        records = records.filter(division__isnull=True, bracket__isnull=True)
+    record = records.order_by("id").first()
+    name = (record_name or reservation.event.title or "")[:200] or "記録"
     if record is None:
         MemberRecord.objects.create(
             club=reservation.club,
             member=reservation.member,
             event=reservation.event,
             reservation=reservation,
+            division=division,
+            bracket=bracket,
             kind=kind,
-            name=(reservation.event.title or "")[:200] or "記録",
+            name=name,
             occurred_on=occurred_on,
             result=score,
             details=details if details is not None else [],
@@ -149,6 +182,15 @@ def _sync_member_record(reservation, score, kind=MemberRecord.Kind.TEST, details
     record.kind = kind
     record.result = score
     update_fields = ["member", "event", "kind", "result", "updated_at"]
+    if record_name:
+        record.name = name
+        update_fields.append("name")
+    if division is not None and record.division_id != division.id:
+        record.division = division
+        update_fields.append("division")
+    if bracket is not None and record.bracket_id != bracket.id:
+        record.bracket = bracket
+        update_fields.append("bracket")
     if details is not None:
         record.details = details
         update_fields.append("details")
@@ -232,6 +274,16 @@ def sync_competition_place_from_record(record):
     reservation = record.reservation
     if event_competition(reservation.event) is None:
         return
+    if record.division_id:
+        from .service_competition import set_division_place
+
+        set_division_place(
+            record.division.competition,
+            record.division_id,
+            record.reservation_id,
+            record.result,
+        )
+        return
     text = (record.result or "").strip()
     if not text:
         set_competition_place(reservation, "")
@@ -259,6 +311,8 @@ def _person(reservation):
         "id": reservation.id,
         "full_name": reservation.full_name,
         "member": reservation.member_id,
+        "price_name": reservation.price_name,
+        "amount": reservation.amount,
     }
 
 
@@ -385,7 +439,10 @@ def _write_duel_records(pairing):
 
 def _clear_duel_records(pairing):
     MemberRecord.objects.filter(
-        reservation_id__in=[pairing.first_id, pairing.second_id]
+        reservation_id__in=[pairing.first_id, pairing.second_id],
+        kind=MemberRecord.Kind.DUEL,
+        division__isnull=True,
+        bracket__isnull=True,
     ).delete()
 
 

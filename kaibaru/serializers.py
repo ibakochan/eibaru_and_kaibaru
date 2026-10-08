@@ -2088,12 +2088,22 @@ def _event_reservation_urls(row, user):
 
 
 class EventPriceSerializer(serializers.ModelSerializer):
+    included_names = serializers.SerializerMethodField()
+
     class Meta:
         model = EventPrice
-        fields = ["id", "name", "amount", "position"]
+        fields = ["id", "name", "amount", "position", "included_names"]
+
+    def get_included_names(self, price):
+        divisions = sorted(price.divisions.all(), key=lambda item: (item.position, item.id))
+        brackets = sorted(price.brackets.all(), key=lambda item: (item.position, item.id))
+        return [item.name for item in divisions] + [item.name for item in brackets]
 
 
 class MemberRecordSerializer(serializers.ModelSerializer):
+    price_name = serializers.SerializerMethodField()
+    amount = serializers.SerializerMethodField()
+
     class Meta:
         model = MemberRecord
         fields = [
@@ -2107,15 +2117,31 @@ class MemberRecordSerializer(serializers.ModelSerializer):
             "result",
             "description",
             "details",
+            "price_name",
+            "amount",
             "created_at",
             "updated_at",
         ]
         read_only_fields = [
             "event",
             "reservation",
+            "price_name",
+            "amount",
             "created_at",
             "updated_at",
         ]
+
+    def get_price_name(self, record):
+        reservation = record.reservation
+        if reservation is None:
+            return ""
+        return reservation.price_name or ""
+
+    def get_amount(self, record):
+        reservation = record.reservation
+        if reservation is None:
+            return None
+        return reservation.amount
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -2227,12 +2253,15 @@ class EventSerializer(serializers.ModelSerializer):
         return test_payload(test)
 
     def get_competition(self, event):
-        from .service_member_record import event_competition, test_payload
+        from .service_competition import competition_payload
+        from .service_member_record import event_competition
 
         competition = event_competition(event)
         if competition is None:
             return None
-        return test_payload(competition)
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        return competition_payload(competition, user)
 
     def get_duel(self, event):
         from .service_member_record import duel_payload, event_duel

@@ -11,7 +11,19 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from .models import Event, EventPrice, EventReservation, StripeCustomer, Subscription, Test, Competition, Duel, Tournament
+from .models import (
+    Bracket,
+    Competition,
+    Division,
+    Duel,
+    Event,
+    EventPrice,
+    EventReservation,
+    StripeCustomer,
+    Subscription,
+    Test,
+    Tournament,
+)
 from .reservation_checkout_recovery import (
     read_stripe_payment,
     record_stripe_payment,
@@ -1805,18 +1817,32 @@ def save_section_event(*, club, section_id, title, payload):
         Duel.objects.filter(event=event).delete()
     if kind != "tournament":
         Tournament.objects.filter(event=event).delete()
+    saved_links = [
+        (
+            price.name,
+            list(price.divisions.values_list("id", flat=True)),
+            list(price.brackets.values_list("id", flat=True)),
+        )
+        for price in event.prices.prefetch_related("divisions", "brackets")
+    ]
     event.prices.all().delete()
-    EventPrice.objects.bulk_create(
-        [
-            EventPrice(
-                event=event,
-                name=item["name"],
-                amount=item["amount"],
-                position=item["position"],
-            )
-            for item in prices
-        ]
-    )
+    used = set()
+    for item in prices:
+        price = EventPrice.objects.create(
+            event=event,
+            name=item["name"],
+            amount=item["amount"],
+            position=item["position"],
+        )
+        for index, (name, division_ids, bracket_ids) in enumerate(saved_links):
+            if index in used or name != price.name:
+                continue
+            used.add(index)
+            if division_ids:
+                price.divisions.set(Division.objects.filter(id__in=division_ids))
+            if bracket_ids:
+                price.brackets.set(Bracket.objects.filter(id__in=bracket_ids))
+            break
     return event
 
 

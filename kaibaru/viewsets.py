@@ -2568,7 +2568,26 @@ class TournamentViewSet(viewsets.ViewSet):
         return self._run(
             request,
             pk,
-            lambda tournament: leave_bracket(tournament, request.data.get("reservation_id")),
+            lambda tournament: leave_bracket(
+                tournament,
+                request.data.get("bracket_id"),
+                request.data.get("reservation_id"),
+            ),
+        )
+
+    @action(detail=True, methods=["post"])
+    def include(self, request, pk=None):
+        from .service_tournament import set_bracket_price
+
+        return self._run(
+            request,
+            pk,
+            lambda tournament: set_bracket_price(
+                tournament,
+                request.data.get("price_id"),
+                request.data.get("bracket_id"),
+                request.data.get("included"),
+            ),
         )
 
     @action(detail=True, methods=["post"])
@@ -2668,6 +2687,133 @@ class TournamentViewSet(viewsets.ViewSet):
         )
 
 
+class CompetitionViewSet(viewsets.ViewSet):
+    def _competition(self, request, pk):
+        from .models import Competition
+
+        if not request.user.is_authenticated:
+            return None, Response(
+                {"detail": "ログインしてください。"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        competition = (
+            Competition.objects
+            .select_related("event", "event__club")
+            .filter(id=pk)
+            .first()
+        )
+        if competition is None or competition.event.club.owner_id != request.user.id:
+            return None, Response(
+                {"detail": "競技が見つかりません。"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return competition, None
+
+    def _run(self, request, pk, fn):
+        from .service_competition import competition_payload
+
+        competition, denied = self._competition(request, pk)
+        if denied is not None:
+            return denied
+        try:
+            fn(competition)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(competition_payload(competition, request.user))
+
+    @action(detail=True, methods=["post"])
+    def divisions(self, request, pk=None):
+        from .service_competition import create_division
+
+        return self._run(
+            request,
+            pk,
+            lambda competition: create_division(competition, request.data.get("name")),
+        )
+
+    @action(detail=True, methods=["post"])
+    def rename(self, request, pk=None):
+        from .service_competition import rename_division
+
+        return self._run(
+            request,
+            pk,
+            lambda competition: rename_division(
+                competition,
+                request.data.get("division_id"),
+                request.data.get("name"),
+            ),
+        )
+
+    @action(detail=True, methods=["post"], url_path="remove-division")
+    def remove_division(self, request, pk=None):
+        from .service_competition import remove_division
+
+        return self._run(
+            request,
+            pk,
+            lambda competition: remove_division(competition, request.data.get("division_id")),
+        )
+
+    @action(detail=True, methods=["post"])
+    def include(self, request, pk=None):
+        from .service_competition import set_division_price
+
+        return self._run(
+            request,
+            pk,
+            lambda competition: set_division_price(
+                competition,
+                request.data.get("price_id"),
+                request.data.get("division_id"),
+                request.data.get("included"),
+            ),
+        )
+
+    @action(detail=True, methods=["post"])
+    def enter(self, request, pk=None):
+        from .service_competition import enter_division
+
+        return self._run(
+            request,
+            pk,
+            lambda competition: enter_division(
+                competition,
+                request.data.get("division_id"),
+                request.data.get("reservation_id"),
+            ),
+        )
+
+    @action(detail=True, methods=["post"])
+    def leave(self, request, pk=None):
+        from .service_competition import leave_division
+
+        return self._run(
+            request,
+            pk,
+            lambda competition: leave_division(
+                competition,
+                request.data.get("division_id"),
+                request.data.get("reservation_id"),
+            ),
+        )
+
+    @action(detail=True, methods=["post"])
+    def place(self, request, pk=None):
+        from .service_competition import set_division_place
+
+        return self._run(
+            request,
+            pk,
+            lambda competition: set_division_place(
+                competition,
+                request.data.get("division_id"),
+                request.data.get("reservation_id"),
+                request.data.get("place"),
+            ),
+        )
+
+
 class MemberRecordViewSet(viewsets.ModelViewSet):
     serializer_class = MemberRecordSerializer
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
@@ -2681,7 +2827,7 @@ class MemberRecordViewSet(viewsets.ModelViewSet):
         )
 
     def get_queryset(self):
-        records = self._readable()
+        records = self._readable().select_related("reservation")
         if self.action == "list":
             member_id = self.request.query_params.get("member")
             if not member_id:
@@ -2772,7 +2918,7 @@ class MemberRecordViewSet(viewsets.ModelViewSet):
                     {"detail": str(exc)},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-        return Response(serializer.data)
+        return Response(self.get_serializer(record).data)
 
     def destroy(self, request, *args, **kwargs):
         record = self.get_object()
@@ -3049,6 +3195,8 @@ class ClubViewSet(viewsets.ModelViewSet):
                     queryset=Lesson.objects.prefetch_related("participations"),
                 ),
                 "events__prices",
+                "events__prices__divisions",
+                "events__prices__brackets",
                 "events__test",
                 "events__competition",
                 "events__duel",

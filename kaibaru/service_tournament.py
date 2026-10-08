@@ -1,12 +1,13 @@
 from django.db import transaction
 from django.db.models import Q
 
-from .models import Bracket, BracketEntry, EventReservation, MemberRecord, Tournament, TournamentMatch
+from .models import Bracket, BracketEntry, EventPrice, EventReservation, MemberRecord, Tournament, TournamentMatch
 from .service_member_record import (
     _is_owner,
     _paid_rows,
     _sync_member_record,
     _visible_paid_rows,
+    purchased_price,
     test_payload,
 )
 
@@ -25,6 +26,8 @@ def _person(reservation):
         "id": reservation.id,
         "full_name": reservation.full_name,
         "member": reservation.member_id,
+        "price_name": reservation.price_name,
+        "amount": reservation.amount,
     }
 
 
@@ -233,18 +236,19 @@ def _visible_brackets(tournament, user):
 def tournament_payload(tournament, user):
     payload = test_payload(tournament)
     owner = _is_owner(tournament.event, user)
-    entered_ids = set(
-        BracketEntry.objects.filter(bracket__tournament=tournament).values_list(
-            "reservation_id",
-            flat=True,
-        )
-    )
     payload["pool"] = [
         _person(row)
-        for row in _paid_rows(tournament.event).exclude(id__in=entered_ids).order_by(
-            "full_name", "id"
-        )
+        for row in _paid_rows(tournament.event).order_by("full_name", "id")
     ] if owner else []
+    payload["prices"] = []
+    if owner:
+        for price in tournament.event.prices.prefetch_related("brackets").order_by("position", "id"):
+            payload["prices"].append({
+                "id": price.id,
+                "name": price.name,
+                "amount": price.amount,
+                "bracket_ids": [bracket.id for bracket in price.brackets.all()],
+            })
     brackets = []
     for bracket in _visible_brackets(tournament, user):
         entries, matches = _load(bracket)
@@ -465,10 +469,20 @@ def _refresh_all(bracket):
     _rounds, champion, _complete, _locked_now = _tree_view(entries, matches)
     champion_id = champion.id if champion is not None else None
     for entry in entries:
-        _write_person(entry.reservation, matches, champion_id, len(entries))
+        _write_person(entry.reservation, matches, champion_id, len(entries), bracket)
 
 
-def _write_person(reservation, matches, champion_id, entry_count):
+def _bracket_record_name(reservation, bracket):
+    title = (reservation.event.title or "").strip()
+    return f"{title} {bracket.name}".strip()[:200] or "記録"
+
+
+def _write_person(reservation, matches, champion_id, entry_count, bracket):
+    MemberRecord.objects.filter(
+        reservation=reservation,
+        kind=MemberRecord.Kind.INDIVIDUAL_TOURNAMENT,
+        bracket__isnull=True,
+    ).delete()
     mine = [
         match
         for match in matches
@@ -476,7 +490,7 @@ def _write_person(reservation, matches, champion_id, entry_count):
         and (match.first_id == reservation.id or match.second_id == reservation.id)
     ]
     if not mine:
-        MemberRecord.objects.filter(reservation=reservation).delete()
+        MemberRecord.objects.filter(reservation=reservation, bracket=bracket).delete()
         return
     latest = max(mine, key=lambda match: (match.round, match.position, match.id))
     label = _record_label(reservation, latest, champion_id, entry_count)
@@ -485,6 +499,8 @@ def _write_person(reservation, matches, champion_id, entry_count):
         label[:80],
         MemberRecord.Kind.INDIVIDUAL_TOURNAMENT,
         [],
+        bracket=bracket,
+        record_name=_bracket_record_name(reservation, bracket),
     )
 
 
@@ -504,6 +520,7 @@ def rename_bracket(tournament, bracket_id, name):
     bracket = _bracket(tournament, bracket_id)
     bracket.name = _clean_name(name, bracket.name)
     bracket.save(update_fields=["name"])
+    _refresh_all(bracket)
 
 
 @transaction.atomic
@@ -512,9 +529,22 @@ def remove_bracket(tournament, bracket_id):
     if _locked(bracket):
         raise ValueError("勝敗が決まっているので、このブラケットは削除できません。")
     reservation_ids = list(bracket.entries.values_list("reservation_id", flat=True))
+    MemberRecord.objects.filter(bracket=bracket).delete()
     bracket.delete()
     if reservation_ids:
-        MemberRecord.objects.filter(reservation_id__in=reservation_ids).delete()
+        still = set(
+            BracketEntry.objects.filter(reservation_id__in=reservation_ids).values_list(
+                "reservation_id",
+                flat=True,
+            )
+        )
+        orphans = [item for item in reservation_ids if item not in still]
+        if orphans:
+            MemberRecord.objects.filter(
+                reservation_id__in=orphans,
+                kind=MemberRecord.Kind.INDIVIDUAL_TOURNAMENT,
+                bracket__isnull=True,
+            ).delete()
 
 
 @transaction.atomic
@@ -523,8 +553,11 @@ def enter_bracket(tournament, bracket_id, reservation_id):
     if _locked(bracket):
         raise ValueError("勝敗が決まっているので、人の入れ替えはできません。")
     reservation = _paid(tournament.event, reservation_id)
-    if BracketEntry.objects.filter(reservation=reservation).exists():
-        raise ValueError("この人はすでにブラケットに入っています。")
+    if BracketEntry.objects.filter(bracket=bracket, reservation=reservation).exists():
+        raise ValueError("この人はすでにこのブラケットに入っています。")
+    price = purchased_price(reservation)
+    if price is None or not price.brackets.filter(id=bracket.id).exists():
+        raise ValueError("この人の料金にはこのブラケットが入っていません。")
     BracketEntry.objects.create(
         bracket=bracket,
         reservation=reservation,
@@ -535,26 +568,41 @@ def enter_bracket(tournament, bracket_id, reservation_id):
 
 
 @transaction.atomic
-def leave_bracket(tournament, reservation_id):
+def leave_bracket(tournament, bracket_id, reservation_id):
+    bracket = _bracket(tournament, bracket_id)
     try:
         key = int(reservation_id)
     except (TypeError, ValueError):
         raise ValueError("参加者が見つかりません。")
     entry = (
         BracketEntry.objects.select_for_update()
-        .select_related("bracket")
-        .filter(bracket__tournament=tournament, reservation_id=key)
+        .filter(bracket=bracket, reservation_id=key)
         .first()
     )
     if entry is None:
         raise ValueError("参加者が見つかりません。")
-    if _locked(entry.bracket):
+    if _locked(bracket):
         raise ValueError("勝敗が決まっているので、人の入れ替えはできません。")
-    bracket = entry.bracket
     entry.delete()
+    MemberRecord.objects.filter(reservation_id=key, bracket=bracket).delete()
     _materialize(bracket)
     _refresh_all(bracket)
-    MemberRecord.objects.filter(reservation_id=key).delete()
+
+
+@transaction.atomic
+def set_bracket_price(tournament, price_id, bracket_id, included):
+    bracket = _bracket(tournament, bracket_id)
+    try:
+        key = int(price_id)
+    except (TypeError, ValueError):
+        raise ValueError("料金が見つかりません。")
+    price = EventPrice.objects.filter(id=key, event_id=tournament.event_id).first()
+    if price is None:
+        raise ValueError("料金が見つかりません。")
+    if included is True or included == "true" or included == 1 or included == "1":
+        price.brackets.add(bracket)
+    else:
+        price.brackets.remove(bracket)
 
 
 @transaction.atomic
@@ -739,10 +787,13 @@ def set_tournament_note(tournament, match_id, note):
 def sync_tournament_from_record(record):
     if not record.reservation_id:
         return
+    matches = TournamentMatch.objects.filter(
+        Q(first_id=record.reservation_id) | Q(second_id=record.reservation_id)
+    )
+    if record.bracket_id:
+        matches = matches.filter(bracket_id=record.bracket_id)
     match = (
-        TournamentMatch.objects.filter(
-            Q(first_id=record.reservation_id) | Q(second_id=record.reservation_id)
-        )
+        matches
         .select_related("bracket__tournament")
         .order_by("-round", "-id")
         .first()

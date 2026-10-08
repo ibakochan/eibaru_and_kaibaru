@@ -1763,6 +1763,16 @@ class EventPrice(models.Model):
         help_text="Price in yen. 0 means free.",
     )
     position = models.PositiveIntegerField(default=0)
+    divisions = models.ManyToManyField(
+        "Division",
+        blank=True,
+        related_name="prices",
+    )
+    brackets = models.ManyToManyField(
+        "Bracket",
+        blank=True,
+        related_name="prices",
+    )
 
     class Meta:
         ordering = ["position", "id"]
@@ -1935,6 +1945,59 @@ class Competition(models.Model):
         return f"{self.event.title} competition"
 
 
+class Division(models.Model):
+    competition = models.ForeignKey(
+        Competition,
+        on_delete=models.CASCADE,
+        related_name="divisions",
+    )
+    name = models.CharField(max_length=80)
+    position = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["position", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["competition", "name"],
+                name="unique_division_name",
+            )
+        ]
+
+    def __str__(self):
+        return self.name
+
+
+class DivisionEntry(models.Model):
+    division = models.ForeignKey(
+        Division,
+        on_delete=models.CASCADE,
+        related_name="entries",
+    )
+    reservation = models.ForeignKey(
+        EventReservation,
+        on_delete=models.CASCADE,
+        related_name="division_entries",
+    )
+    position = models.PositiveIntegerField(default=0)
+    place = models.PositiveIntegerField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["position", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["division", "reservation"],
+                name="unique_division_entry",
+            ),
+            models.UniqueConstraint(
+                fields=["division", "place"],
+                name="unique_division_place",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.reservation.full_name} - {self.division.name}"
+
+
 class Placement(models.Model):
     competition = models.ForeignKey(
         Competition,
@@ -2079,15 +2142,21 @@ class BracketEntry(models.Model):
         on_delete=models.CASCADE,
         related_name="entries",
     )
-    reservation = models.OneToOneField(
+    reservation = models.ForeignKey(
         EventReservation,
         on_delete=models.CASCADE,
-        related_name="bracket_entry",
+        related_name="bracket_entries",
     )
     position = models.PositiveIntegerField()
 
     class Meta:
         ordering = ["position", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["bracket", "reservation"],
+                name="unique_bracket_reservation",
+            )
+        ]
 
     def __str__(self):
         return self.reservation.full_name
@@ -2162,12 +2231,26 @@ class MemberRecord(models.Model):
         blank=True,
         related_name="member_records",
     )
-    reservation = models.OneToOneField(
+    reservation = models.ForeignKey(
         EventReservation,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name="member_record",
+        related_name="member_records",
+    )
+    division = models.ForeignKey(
+        Division,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="member_records",
+    )
+    bracket = models.ForeignKey(
+        Bracket,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="member_records",
     )
     kind = models.CharField(
         max_length=32,
