@@ -2621,6 +2621,21 @@ class TournamentViewSet(viewsets.ViewSet):
         )
 
     @action(detail=True, methods=["post"])
+    def move(self, request, pk=None):
+        from .service_tournament import move_entry
+
+        return self._run(
+            request,
+            pk,
+            lambda tournament: move_entry(
+                tournament,
+                request.data.get("bracket_id"),
+                request.data.get("reservation_id"),
+                request.data.get("direction"),
+            ),
+        )
+
+    @action(detail=True, methods=["post"])
     def winner(self, request, pk=None):
         from .service_tournament import set_tournament_winner
 
@@ -2631,6 +2646,10 @@ class TournamentViewSet(viewsets.ViewSet):
                 tournament,
                 request.data.get("match_id"),
                 request.data.get("winner_id"),
+                request.data.get("note"),
+                request.data.get("bracket_id"),
+                request.data.get("round"),
+                request.data.get("position"),
             ),
         )
 
