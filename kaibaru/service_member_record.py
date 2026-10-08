@@ -357,8 +357,8 @@ def _next_position(duel):
     return (current or 0) + 1
 
 
-def _duel_label(outcome, opponent_name):
-    return f"{outcome}（{opponent_name}）"[:80]
+def _duel_label(outcome, _opponent_name):
+    return outcome[:80]
 
 
 def _write_duel_records(pairing):

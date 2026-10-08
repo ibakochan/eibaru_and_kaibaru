@@ -406,6 +406,60 @@ def _label_for(match, entry_count):
     return _round_title(match.round - 1, total)
 
 
+def _kanji_round(match, entry_count):
+    title = _label_for(match, entry_count)
+    if title in {"決勝", "準決勝", "準々決勝"}:
+        return title
+    digits = ""
+    for char in title:
+        if char.isdigit():
+            digits += char
+        else:
+            break
+    if not digits:
+        return title
+    names = {
+        1: "一",
+        2: "二",
+        3: "三",
+        4: "四",
+        5: "五",
+        6: "六",
+        7: "七",
+        8: "八",
+        9: "九",
+        10: "十",
+        11: "十一",
+        12: "十二",
+    }
+    number = int(digits)
+    return f"{names.get(number, number)}回戦"
+
+
+def _record_label(reservation, latest, champion_id, entry_count):
+    total = len(_sources(entry_count))
+    won = latest.winner_id == reservation.id
+    bye = latest.second_id is None
+    final = total >= 1 and latest.round == total
+    semi = total >= 2 and latest.round == total - 1
+    if champion_id == reservation.id or (final and won):
+        return "優勝"
+    if final and not won:
+        return "準優勝"
+    if semi and won:
+        return "決勝"
+    if semi and not won:
+        return "３位"
+    name = _kanji_round(latest, entry_count)
+    if bye:
+        return f"{name}不戦勝"
+    if not won:
+        return f"{name}負け"
+    if total >= 3 and latest.round == total - 2:
+        return "準決勝"
+    return name
+
+
 def _refresh_all(bracket):
     entries, matches = _load(bracket)
     _rounds, champion, _complete, _locked_now = _tree_view(entries, matches)
@@ -425,25 +479,12 @@ def _write_person(reservation, matches, champion_id, entry_count):
         MemberRecord.objects.filter(reservation=reservation).delete()
         return
     latest = max(mine, key=lambda match: (match.round, match.position, match.id))
-    title = _label_for(latest, entry_count)
-    champion = champion_id == reservation.id
-    if latest.second_id is None:
-        label = "優勝" if champion else f"{title} 不戦勝"
-    else:
-        opponent = latest.second if latest.first_id == reservation.id else latest.first
-        if champion and latest.winner_id == reservation.id:
-            label = f"優勝（{opponent.full_name}）"
-        elif latest.winner_id == reservation.id:
-            label = f"{title} 勝ち（{opponent.full_name}）"
-        else:
-            label = f"{title} 負け（{opponent.full_name}）"
-    note = (latest.note or "").strip()
-    details = [{"label": "勝因", "value": note}] if note and latest.second_id else []
+    label = _record_label(reservation, latest, champion_id, entry_count)
     _sync_member_record(
         reservation,
         label[:80],
         MemberRecord.Kind.INDIVIDUAL_TOURNAMENT,
-        details,
+        [],
     )
 
 
@@ -713,7 +754,22 @@ def sync_tournament_from_record(record):
         raise ValueError("トーナメントに引き分けはありません。")
     if "不戦勝" in text:
         return
-    if text.startswith("優勝") or "勝ち" in text:
+    lost = (
+        text.startswith("準優勝")
+        or text.startswith("３位")
+        or text.startswith("3位")
+        or "負け" in text
+    )
+    won = (
+        not lost
+        and (
+            text.startswith("優勝")
+            or "勝ち" in text
+            or text in {"決勝", "準決勝", "準々決勝"}
+            or text.endswith("回戦")
+        )
+    )
+    if won:
         set_tournament_winner(
             match.bracket.tournament,
             match.id,
@@ -724,7 +780,7 @@ def sync_tournament_from_record(record):
             match.position,
         )
         return
-    if "負け" in text:
+    if lost:
         other = (
             match.second_id
             if match.first_id == record.reservation_id
