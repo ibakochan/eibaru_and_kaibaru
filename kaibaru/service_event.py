@@ -1754,12 +1754,48 @@ def save_section_event(*, club, section_id, title, payload):
         if timed
         else None
     )
+    starts_at = _parse_starts_at(payload.get("starts_at"))
+    existing_event = Event.objects.filter(club=club, section_id=section_id).first()
+    now = timezone.now()
+    same_start = (
+        existing_event is not None
+        and abs((existing_event.starts_at - starts_at).total_seconds()) < 60
+    )
+    if starts_at <= now and not same_start:
+        raise ValueError("開催日時は今より後にしてください。")
+    if open_until is not None and open_until >= starts_at:
+        raise ValueError("予約締切は開催日時より前にしてください。")
+
+    sheet_model = {
+        "test": Test,
+        "competition": Competition,
+        "duel": Duel,
+        "tournament": Tournament,
+    }.get(kind)
+    existing_sheet = (
+        sheet_model.objects.filter(event=existing_event).only("frozen_at").first()
+        if sheet_model is not None and existing_event is not None
+        else None
+    )
+    freeze_at = (
+        _scheduled_freeze(
+            payload=payload,
+            open_until=open_until,
+            existing_frozen_at=(
+                existing_sheet.frozen_at if existing_sheet is not None else None
+            ),
+        )
+        if timed
+        else None
+    )
+    if freeze_at is not None and freeze_at >= starts_at:
+        raise ValueError("凍結は開催日時より前にしてください。")
 
     defaults = {
         "title": clean_title[:200],
         "description": description,
         "picture": picture,
-        "starts_at": _parse_starts_at(payload.get("starts_at")),
+        "starts_at": starts_at,
         "reservation_limit": _optional_cap(payload.get("reservation_limit")),
         "audience": audience,
         "title_color": _color(payload.get("title_color"), "#1c1917"),
@@ -1773,28 +1809,6 @@ def save_section_event(*, club, section_id, title, payload):
         club=club,
         section_id=section_id,
         defaults=defaults,
-    )
-    sheet_model = {
-        "test": Test,
-        "competition": Competition,
-        "duel": Duel,
-        "tournament": Tournament,
-    }.get(kind)
-    existing_sheet = (
-        sheet_model.objects.filter(event=event).only("frozen_at").first()
-        if sheet_model is not None
-        else None
-    )
-    freeze_at = (
-        _scheduled_freeze(
-            payload=payload,
-            open_until=open_until,
-            existing_frozen_at=(
-                existing_sheet.frozen_at if existing_sheet is not None else None
-            ),
-        )
-        if timed
-        else None
     )
     sheet_defaults = {
         "results_public": results_public,
