@@ -7,7 +7,6 @@ from .service_member_record import (
     _person,
     _sync_member_record,
     _visible_paid_rows,
-    purchased_price,
     test_payload,
 )
 
@@ -173,12 +172,6 @@ def set_division_price(competition, price_id, division_id, included):
         price.divisions.remove(division)
 
 
-def _require_division_price(reservation, division):
-    price = purchased_price(reservation)
-    if price is None or not price.divisions.filter(id=division.id).exists():
-        raise ValueError("この人の料金にはこの種目が入っていません。")
-
-
 @transaction.atomic
 def enter_division(competition, division_id, reservation_id):
     division = _division(competition, division_id)
@@ -191,7 +184,6 @@ def enter_division(competition, division_id, reservation_id):
         raise ValueError("支払い済みの予約だけ種目に入れられます。")
     if division.entries.filter(reservation=reservation).exists():
         raise ValueError("この人はすでにこの種目に入っています。")
-    _require_division_price(reservation, division)
     position = (division.entries.order_by("-position").values_list("position", flat=True).first() or 0) + 1
     DivisionEntry.objects.create(
         division=division,

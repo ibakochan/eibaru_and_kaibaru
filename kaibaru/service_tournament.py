@@ -7,7 +7,6 @@ from .service_member_record import (
     _paid_rows,
     _sync_member_record,
     _visible_paid_rows,
-    purchased_price,
     test_payload,
 )
 
@@ -555,9 +554,6 @@ def enter_bracket(tournament, bracket_id, reservation_id):
     reservation = _paid(tournament.event, reservation_id)
     if BracketEntry.objects.filter(bracket=bracket, reservation=reservation).exists():
         raise ValueError("この人はすでにこのブラケットに入っています。")
-    price = purchased_price(reservation)
-    if price is None or not price.brackets.filter(id=bracket.id).exists():
-        raise ValueError("この人の料金にはこのブラケットが入っていません。")
     BracketEntry.objects.create(
         bracket=bracket,
         reservation=reservation,
