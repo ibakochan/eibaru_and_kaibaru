@@ -43,35 +43,55 @@ def _load(bracket):
 
 
 def _sources(count):
-    """Pair people from the top. A leftover person byes and advances."""
+    """Pair people from the top. The same person can take at most one bye."""
     if count < 2:
         return []
     rounds = []
     current = [("player", index) for index in range(count)]
+    byed = set()
     round_no = 1
     while len(current) > 1:
+        bye_at = None
+        if len(current) % 2 == 1:
+            bye_at = len(current) - 1
+            if current[bye_at] in byed:
+                for index, item in enumerate(current):
+                    if item not in byed:
+                        bye_at = index
+                        break
         specs = []
         nxt = []
-        row = list(current)
-        bye = row.pop() if len(row) % 2 == 1 else None
         position = 1
-        for index in range(0, len(row), 2):
+        playing = [
+            (index, item)
+            for index, item in enumerate(current)
+            if index != bye_at
+        ]
+        for pair in range(0, len(playing), 2):
+            left_index, left = playing[pair]
+            right_index, right = playing[pair + 1]
+            winner = ("winner", round_no, position)
             specs.append({
                 "round": round_no,
                 "position": position,
-                "left": row[index],
-                "right": row[index + 1],
+                "left": left,
+                "right": right,
+                "from": [] if round_no == 1 else [left_index, right_index],
             })
-            nxt.append(("winner", round_no, position))
+            nxt.append(winner)
+            if left in byed or right in byed:
+                byed.add(winner)
             position += 1
-        if bye is not None:
+        if bye_at is not None:
             specs.append({
                 "round": round_no,
                 "position": position,
-                "left": bye,
+                "left": current[bye_at],
                 "right": None,
+                "from": [] if round_no == 1 else [bye_at],
             })
-            nxt.append(bye)
+            nxt.append(current[bye_at])
+            byed.add(current[bye_at])
         rounds.append(specs)
         current = nxt
         round_no += 1
@@ -153,6 +173,7 @@ def _tree_view(entries, matches):
                 "bye": bye,
                 "pending": pending,
                 "note": note,
+                "from": spec.get("from") or [],
                 "result_locked": False,
             })
         rounds.append({"label": label, "matches": rows})
@@ -180,16 +201,13 @@ def _later_result(rounds, round_index, match_index):
     current_round = round_index
     current_index = match_index
     while current_round + 1 < len(rounds):
-        row = rounds[current_round]["matches"]
         nxt = rounds[current_round + 1]["matches"]
-        if not row or not nxt or current_index >= len(row):
-            return False
-        if len(row) % 2 == 1 and current_index == len(row) - 1:
-            current_round += 1
-            current_index = len(nxt) - 1
-            continue
-        parent_index = current_index // 2
-        if parent_index >= len(nxt):
+        parent_index = None
+        for index, row in enumerate(nxt):
+            if current_index in (row.get("from") or []):
+                parent_index = index
+                break
+        if parent_index is None:
             return False
         parent = nxt[parent_index]
         if parent["bye"]:
