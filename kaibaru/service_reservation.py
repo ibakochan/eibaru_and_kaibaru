@@ -11,11 +11,11 @@ from .tasks_emails import send_visitor_reservation_confirmation_email
 from .models import (
     Lesson,
     Reservation,
-    StripeCustomer,
     Subscription,
     TicketGrant,
     TicketUsage,
 )
+from .stripe_service import get_or_create_stripe_customer
 from .discounts import calculate_age
 from .rules_eligibility import assert_member_eligible_for_lesson
 from .reservation_checkout_recovery import (
@@ -860,14 +860,12 @@ class MemberReservationService:
         # Stripe payment
         # --------------------------------------------------
 
-        stripe_customer = (
-            StripeCustomer.objects
-            .filter(
-                user=member.owner,
-                club=club,
+        stripe_customer = None
+        if member.owner_id:
+            stripe_customer = get_or_create_stripe_customer(
+                member.owner,
+                club,
             )
-            .first()
-        )
 
         # --------------------------------------------------
         # Only use the saved Stripe payment method when

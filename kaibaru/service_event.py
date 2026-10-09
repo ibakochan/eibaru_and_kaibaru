@@ -19,7 +19,6 @@ from .models import (
     Event,
     EventPrice,
     EventReservation,
-    StripeCustomer,
     Subscription,
     Test,
     Tournament,
@@ -29,6 +28,7 @@ from .reservation_checkout_recovery import (
     record_stripe_payment,
     soft_delete_reservation,
 )
+from .stripe_service import get_or_create_stripe_customer
 
 
 logger = logging.getLogger(__name__)
@@ -763,11 +763,10 @@ def _charge_member_off_session(
     event,
     idempotency_key,
 ):
-    stripe_customer = (
-        StripeCustomer.objects
-        .filter(user=member.owner, club=club)
-        .first()
-    )
+    if not member.owner_id:
+        return None
+
+    stripe_customer = get_or_create_stripe_customer(member.owner, club)
     stripe_subscription = (
         Subscription.objects
         .filter(
@@ -779,7 +778,7 @@ def _charge_member_off_session(
         .first()
     )
 
-    if not stripe_customer or not stripe_subscription:
+    if not stripe_subscription:
         return None
 
     try:
@@ -853,10 +852,9 @@ def _create_checkout_session(
 ):
     stripe_customer = None
     if reservation.user_id:
-        stripe_customer = (
-            StripeCustomer.objects
-            .filter(user_id=reservation.user_id, club=club)
-            .first()
+        stripe_customer = get_or_create_stripe_customer(
+            reservation.user,
+            club,
         )
 
     session_kwargs = {

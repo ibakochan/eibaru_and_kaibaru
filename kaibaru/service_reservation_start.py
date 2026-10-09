@@ -22,6 +22,7 @@ from .rules_reservations import (
     request_is_fresh,
     resolve_max_days_ahead,
 )
+from .stripe_service import get_or_create_stripe_customer
 from .tasks_emails import (
     send_visitor_reservation_confirmation_email,
 )
@@ -413,10 +414,23 @@ def _open_new_checkout(prepared):
     lesson = prepared["lesson"]
     started_at = prepared["started_at"]
 
+    customer_kwargs = {
+        "customer_email": reservations[0].email,
+    }
+    user_ids = {reservation.user_id for reservation in reservations}
+    if len(user_ids) == 1 and reservations[0].user_id:
+        stripe_customer = get_or_create_stripe_customer(
+            reservations[0].user,
+            club,
+        )
+        customer_kwargs = {
+            "customer": stripe_customer.stripe_customer_id,
+        }
+
     session = stripe.checkout.Session.create(
         mode="payment",
         payment_method_types=["card"],
-        customer_email=reservations[0].email,
+        **customer_kwargs,
         expires_at=int(
             (
                 timezone.now()
