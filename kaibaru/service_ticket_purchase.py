@@ -6,13 +6,12 @@ from django.utils import timezone
 from .pricing import calculate_ticket_expiration
 
 from .models import (
-    Member,
     TicketPackage,
     TicketPurchase,
     TicketGrant,
-    StripeCustomer,
     Subscription,
 )
+from .stripe_service import get_or_create_stripe_customer
 
 
 STRIPE_CHECKOUT_MINUTES = 30
@@ -152,16 +151,20 @@ class TicketPurchaseService:
 
         # --------------------------------------------------
         # Stripe customer
+        #
+        # The owner is required above, so this always
+        # attaches the purchase to the same customer
+        # used by the other club payments.
         # --------------------------------------------------
 
-        stripe_customer = (
-            StripeCustomer.objects
-            .filter(
-                user=member.owner,
-                club=club,
+        try:
+            stripe_customer = get_or_create_stripe_customer(
+                member.owner,
+                club,
             )
-            .first()
-        )
+        except Exception:
+            purchase.delete()
+            raise
 
         # --------------------------------------------------
         # Only use the saved Stripe payment method when
@@ -407,20 +410,12 @@ class TicketPurchaseService:
                     f"ticket_purchase_"
                     f"{purchase.id}"
                 ),
-            }
 
-            if stripe_customer:
-
-                session_kwargs["customer"] = (
+                "customer": (
                     stripe_customer
                     .stripe_customer_id
-                )
-
-            else:
-
-                session_kwargs["customer_email"] = (
-                    email
-                )
+                ),
+            }
 
             session = (
                 stripe.checkout.Session.create(
