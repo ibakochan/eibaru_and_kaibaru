@@ -20,6 +20,8 @@ from .models import (
     EventPrice,
     EventReservation,
     Subscription,
+    TeamBattle,
+    TeamTournament,
     Test,
     Tournament,
 )
@@ -189,6 +191,22 @@ def _registration_closed_message(event, now=None):
             .first()
         )
         frozen_label = "このトーナメントは凍結されているため、予約できません。"
+    if sheet is None:
+        sheet = (
+            TeamBattle.objects
+            .filter(event_id=event.id)
+            .only("frozen_at", "reservations_open_until")
+            .first()
+        )
+        frozen_label = "この団体戦は凍結されているため、予約できません。"
+    if sheet is None:
+        sheet = (
+            TeamTournament.objects
+            .filter(event_id=event.id)
+            .only("frozen_at", "reservations_open_until")
+            .first()
+        )
+        frozen_label = "この団体トーナメントは凍結されているため、予約できません。"
     if sheet is None:
         return None
     if sheet.frozen_at is not None and sheet.frozen_at <= now:
@@ -1743,9 +1761,24 @@ def save_section_event(*, club, section_id, title, payload):
 
     prices = _event_prices(payload)
     kind = payload.get("kind") or "standard"
-    if kind not in {"standard", "test", "competition", "duel", "tournament"}:
+    if kind not in {
+        "standard",
+        "test",
+        "competition",
+        "duel",
+        "tournament",
+        "team_battle",
+        "team_tournament",
+    }:
         raise ValueError("イベントの種類が正しくありません。")
-    timed = kind in {"test", "competition", "duel", "tournament"}
+    timed = kind in {
+        "test",
+        "competition",
+        "duel",
+        "tournament",
+        "team_battle",
+        "team_tournament",
+    }
     results_public = timed and _flag(payload.get("results_public"))
     open_until = (
         _parse_when(payload.get("reservations_open_until"), "予約締切")
@@ -1769,6 +1802,8 @@ def save_section_event(*, club, section_id, title, payload):
         "competition": Competition,
         "duel": Duel,
         "tournament": Tournament,
+        "team_battle": TeamBattle,
+        "team_tournament": TeamTournament,
     }.get(kind)
     existing_sheet = (
         sheet_model.objects.filter(event=existing_event).only("frozen_at").first()
@@ -1821,6 +1856,10 @@ def save_section_event(*, club, section_id, title, payload):
         Duel.objects.update_or_create(event=event, defaults=sheet_defaults)
     elif kind == "tournament":
         Tournament.objects.update_or_create(event=event, defaults=sheet_defaults)
+    elif kind == "team_battle":
+        TeamBattle.objects.update_or_create(event=event, defaults=sheet_defaults)
+    elif kind == "team_tournament":
+        TeamTournament.objects.update_or_create(event=event, defaults=sheet_defaults)
     if kind != "test":
         Test.objects.filter(event=event).delete()
     if kind != "competition":
@@ -1829,6 +1868,10 @@ def save_section_event(*, club, section_id, title, payload):
         Duel.objects.filter(event=event).delete()
     if kind != "tournament":
         Tournament.objects.filter(event=event).delete()
+    if kind != "team_battle":
+        TeamBattle.objects.filter(event=event).delete()
+    if kind != "team_tournament":
+        TeamTournament.objects.filter(event=event).delete()
     saved_links = [
         (
             price.name,

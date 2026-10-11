@@ -2814,6 +2814,355 @@ class CompetitionViewSet(viewsets.ViewSet):
         )
 
 
+class TeamBattleViewSet(viewsets.ViewSet):
+    def _battle(self, request, pk):
+        from .models import TeamBattle
+
+        if not request.user.is_authenticated:
+            return None, Response(
+                {"detail": "ログインしてください。"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        battle = (
+            TeamBattle.objects
+            .select_related("event", "event__club")
+            .filter(id=pk)
+            .first()
+        )
+        if battle is None or battle.event.club.owner_id != request.user.id:
+            return None, Response(
+                {"detail": "団体戦が見つかりません。"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return battle, None
+
+    def _run(self, request, pk, fn):
+        from .service_team_battle import team_battle_payload
+
+        battle, denied = self._battle(request, pk)
+        if denied is not None:
+            return denied
+        try:
+            fn(battle)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(team_battle_payload(battle, request.user))
+
+    @action(detail=True, methods=["post"])
+    def teams(self, request, pk=None):
+        from .service_team_battle import create_team
+
+        return self._run(request, pk, lambda battle: create_team(battle, request.data.get("name")))
+
+    @action(detail=True, methods=["post"])
+    def rename(self, request, pk=None):
+        from .service_team_battle import rename_team
+
+        return self._run(
+            request,
+            pk,
+            lambda battle: rename_team(battle, request.data.get("team_id"), request.data.get("name")),
+        )
+
+    @action(detail=True, methods=["post"], url_path="remove-team")
+    def remove_team(self, request, pk=None):
+        from .service_team_battle import remove_team
+
+        return self._run(
+            request,
+            pk,
+            lambda battle: remove_team(battle, request.data.get("team_id")),
+        )
+
+    @action(detail=True, methods=["post"], url_path="add-member")
+    def add_member(self, request, pk=None):
+        from .service_team_battle import add_member
+
+        return self._run(
+            request,
+            pk,
+            lambda battle: add_member(
+                battle,
+                request.data.get("team_id"),
+                request.data.get("reservation_id"),
+            ),
+        )
+
+    @action(detail=True, methods=["post"], url_path="remove-member")
+    def remove_member(self, request, pk=None):
+        from .service_team_battle import remove_member
+
+        return self._run(
+            request,
+            pk,
+            lambda battle: remove_member(
+                battle,
+                request.data.get("team_id"),
+                request.data.get("reservation_id"),
+            ),
+        )
+
+    @action(detail=True, methods=["post"])
+    def pair(self, request, pk=None):
+        from .service_team_battle import pair_teams
+
+        return self._run(
+            request,
+            pk,
+            lambda battle: pair_teams(
+                battle,
+                request.data.get("first_id"),
+                request.data.get("second_id"),
+            ),
+        )
+
+    @action(detail=True, methods=["post"], url_path="pair-rest")
+    def pair_rest(self, request, pk=None):
+        from .service_team_battle import pair_rest
+
+        return self._run(request, pk, lambda battle: pair_rest(battle))
+
+    @action(detail=True, methods=["post"])
+    def unpair(self, request, pk=None):
+        from .service_team_battle import unpair
+
+        return self._run(request, pk, lambda battle: unpair(battle, request.data.get("match_id")))
+
+    @action(detail=True, methods=["post"])
+    def winner(self, request, pk=None):
+        from .service_team_battle import set_winner
+
+        return self._run(
+            request,
+            pk,
+            lambda battle: set_winner(
+                battle,
+                request.data.get("match_id"),
+                request.data.get("winner_id"),
+            ),
+        )
+
+    @action(detail=True, methods=["post"])
+    def note(self, request, pk=None):
+        from .service_team_battle import set_note
+
+        return self._run(
+            request,
+            pk,
+            lambda battle: set_note(
+                battle,
+                request.data.get("match_id"),
+                request.data.get("note"),
+            ),
+        )
+
+
+class TeamTournamentViewSet(viewsets.ViewSet):
+    def _tournament(self, request, pk):
+        from .models import TeamTournament
+
+        if not request.user.is_authenticated:
+            return None, Response(
+                {"detail": "ログインしてください。"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        tournament = (
+            TeamTournament.objects
+            .select_related("event", "event__club")
+            .filter(id=pk)
+            .first()
+        )
+        if tournament is None or tournament.event.club.owner_id != request.user.id:
+            return None, Response(
+                {"detail": "団体トーナメントが見つかりません。"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return tournament, None
+
+    def _run(self, request, pk, fn):
+        from .service_team_tournament import team_tournament_payload
+
+        tournament, denied = self._tournament(request, pk)
+        if denied is not None:
+            return denied
+        try:
+            fn(tournament)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(team_tournament_payload(tournament, request.user))
+
+    @action(detail=True, methods=["post"])
+    def teams(self, request, pk=None):
+        from .service_team_tournament import create_team
+
+        return self._run(
+            request,
+            pk,
+            lambda tournament: create_team(tournament, request.data.get("name")),
+        )
+
+    @action(detail=True, methods=["post"])
+    def rename(self, request, pk=None):
+        from .service_team_tournament import rename_team
+
+        return self._run(
+            request,
+            pk,
+            lambda tournament: rename_team(
+                tournament,
+                request.data.get("team_id"),
+                request.data.get("name"),
+            ),
+        )
+
+    @action(detail=True, methods=["post"], url_path="remove-team")
+    def remove_team(self, request, pk=None):
+        from .service_team_tournament import remove_team
+
+        return self._run(
+            request,
+            pk,
+            lambda tournament: remove_team(tournament, request.data.get("team_id")),
+        )
+
+    @action(detail=True, methods=["post"], url_path="add-member")
+    def add_member(self, request, pk=None):
+        from .service_team_tournament import add_member
+
+        return self._run(
+            request,
+            pk,
+            lambda tournament: add_member(
+                tournament,
+                request.data.get("team_id"),
+                request.data.get("reservation_id"),
+            ),
+        )
+
+    @action(detail=True, methods=["post"], url_path="remove-member")
+    def remove_member(self, request, pk=None):
+        from .service_team_tournament import remove_member
+
+        return self._run(
+            request,
+            pk,
+            lambda tournament: remove_member(
+                tournament,
+                request.data.get("team_id"),
+                request.data.get("reservation_id"),
+            ),
+        )
+
+    @action(detail=True, methods=["post"])
+    def brackets(self, request, pk=None):
+        from .service_team_tournament import create_bracket
+
+        return self._run(
+            request,
+            pk,
+            lambda tournament: create_bracket(tournament, request.data.get("name")),
+        )
+
+    @action(detail=True, methods=["post"], url_path="rename-bracket")
+    def rename_bracket(self, request, pk=None):
+        from .service_team_tournament import rename_bracket
+
+        return self._run(
+            request,
+            pk,
+            lambda tournament: rename_bracket(
+                tournament,
+                request.data.get("bracket_id"),
+                request.data.get("name"),
+            ),
+        )
+
+    @action(detail=True, methods=["post"], url_path="remove-bracket")
+    def remove_bracket(self, request, pk=None):
+        from .service_team_tournament import remove_bracket
+
+        return self._run(
+            request,
+            pk,
+            lambda tournament: remove_bracket(tournament, request.data.get("bracket_id")),
+        )
+
+    @action(detail=True, methods=["post"])
+    def enter(self, request, pk=None):
+        from .service_team_tournament import enter_bracket
+
+        return self._run(
+            request,
+            pk,
+            lambda tournament: enter_bracket(
+                tournament,
+                request.data.get("bracket_id"),
+                request.data.get("team_id"),
+            ),
+        )
+
+    @action(detail=True, methods=["post"])
+    def leave(self, request, pk=None):
+        from .service_team_tournament import leave_bracket
+
+        return self._run(
+            request,
+            pk,
+            lambda tournament: leave_bracket(
+                tournament,
+                request.data.get("bracket_id"),
+                request.data.get("team_id"),
+            ),
+        )
+
+    @action(detail=True, methods=["post"])
+    def move(self, request, pk=None):
+        from .service_team_tournament import move_team
+
+        return self._run(
+            request,
+            pk,
+            lambda tournament: move_team(
+                tournament,
+                request.data.get("bracket_id"),
+                request.data.get("team_id"),
+                request.data.get("direction"),
+            ),
+        )
+
+    @action(detail=True, methods=["post"])
+    def winner(self, request, pk=None):
+        from .service_team_tournament import set_winner
+
+        return self._run(
+            request,
+            pk,
+            lambda tournament: set_winner(
+                tournament,
+                request.data.get("match_id"),
+                request.data.get("winner_id"),
+                request.data.get("note"),
+                request.data.get("bracket_id"),
+                request.data.get("round"),
+                request.data.get("position"),
+            ),
+        )
+
+    @action(detail=True, methods=["post"])
+    def note(self, request, pk=None):
+        from .service_team_tournament import set_note
+
+        return self._run(
+            request,
+            pk,
+            lambda tournament: set_note(
+                tournament,
+                request.data.get("match_id"),
+                request.data.get("note"),
+            ),
+        )
+
+
 class MemberRecordViewSet(viewsets.ModelViewSet):
     serializer_class = MemberRecordSerializer
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
@@ -2904,6 +3253,8 @@ class MemberRecordViewSet(viewsets.ModelViewSet):
             sync_duel_winner_from_record,
             sync_test_result_from_record,
         )
+        from .service_team_battle import sync_team_battle_from_record
+        from .service_team_tournament import sync_team_tournament_from_record
         from .service_tournament import sync_tournament_from_record
         with transaction.atomic():
             serializer.save()
@@ -2912,6 +3263,8 @@ class MemberRecordViewSet(viewsets.ModelViewSet):
                 sync_competition_place_from_record(record)
                 sync_duel_winner_from_record(record)
                 sync_tournament_from_record(record)
+                sync_team_battle_from_record(record)
+                sync_team_tournament_from_record(record)
             except ValueError as exc:
                 transaction.set_rollback(True)
                 return Response(
@@ -3204,6 +3557,8 @@ class ClubViewSet(viewsets.ModelViewSet):
                 "events__duel__pairings__first",
                 "events__duel__pairings__second",
                 "events__tournament",
+                "events__team_battle",
+                "events__team_tournament",
                 "slate_images",
                 "join_requests",
                 "membership_plans",

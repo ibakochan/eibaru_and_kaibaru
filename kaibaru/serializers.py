@@ -2204,6 +2204,8 @@ class EventSerializer(serializers.ModelSerializer):
     competition = serializers.SerializerMethodField()
     duel = serializers.SerializerMethodField()
     tournament = serializers.SerializerMethodField()
+    team_battle = serializers.SerializerMethodField()
+    team_tournament = serializers.SerializerMethodField()
     results = serializers.SerializerMethodField()
 
     class Meta:
@@ -2222,6 +2224,8 @@ class EventSerializer(serializers.ModelSerializer):
             "competition",
             "duel",
             "tournament",
+            "team_battle",
+            "team_tournament",
             "title_color",
             "description_color",
             "detail_color",
@@ -2282,6 +2286,26 @@ class EventSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         user = getattr(request, "user", None)
         return tournament_payload(tournament, user)
+
+    def get_team_battle(self, event):
+        from .service_team_battle import event_team_battle, team_battle_payload
+
+        battle = event_team_battle(event)
+        if battle is None:
+            return None
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        return team_battle_payload(battle, user)
+
+    def get_team_tournament(self, event):
+        from .service_team_tournament import event_team_tournament, team_tournament_payload
+
+        tournament = event_team_tournament(event)
+        if tournament is None:
+            return None
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        return team_tournament_payload(tournament, user)
 
     def get_results(self, event):
         from .service_member_record import (

@@ -2205,6 +2205,261 @@ class TournamentMatch(models.Model):
         return f"{self.first.full_name} vs {other}"
 
 
+class TeamBattle(models.Model):
+    event = models.OneToOneField(
+        Event,
+        on_delete=models.CASCADE,
+        related_name="team_battle",
+    )
+    results_public = models.BooleanField(
+        default=False,
+        help_text="When off, only the owner sees every match. A participant sees the match their team is in.",
+    )
+    reservations_open_until = models.DateTimeField(null=True, blank=True)
+    frozen_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Scheduled freeze time. Registration locks once this time is reached. Must be at least one hour after reservations_open_until.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.event.title} team battle"
+
+
+class BattleTeam(models.Model):
+    battle = models.ForeignKey(
+        TeamBattle,
+        on_delete=models.CASCADE,
+        related_name="teams",
+    )
+    name = models.CharField(max_length=80)
+    position = models.PositiveIntegerField()
+
+    class Meta:
+        ordering = ["position", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["battle", "position"],
+                name="unique_battle_team_position",
+            )
+        ]
+
+    def __str__(self):
+        return self.name
+
+
+class BattleMember(models.Model):
+    team = models.ForeignKey(
+        BattleTeam,
+        on_delete=models.CASCADE,
+        related_name="members",
+    )
+    reservation = models.OneToOneField(
+        EventReservation,
+        on_delete=models.CASCADE,
+        related_name="battle_membership",
+    )
+    position = models.PositiveIntegerField()
+
+    class Meta:
+        ordering = ["position", "id"]
+
+    def __str__(self):
+        return self.reservation.full_name
+
+
+class BattleMatch(models.Model):
+    battle = models.ForeignKey(
+        TeamBattle,
+        on_delete=models.CASCADE,
+        related_name="matches",
+    )
+    position = models.PositiveIntegerField()
+    first = models.ForeignKey(
+        BattleTeam,
+        on_delete=models.CASCADE,
+        related_name="matches_as_first",
+    )
+    second = models.ForeignKey(
+        BattleTeam,
+        on_delete=models.CASCADE,
+        related_name="matches_as_second",
+    )
+    winner = models.ForeignKey(
+        BattleTeam,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="matches_won",
+    )
+    drawn = models.BooleanField(default=False)
+    note = models.CharField(max_length=200, blank=True, default="")
+
+    class Meta:
+        ordering = ["position", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["battle", "position"],
+                name="unique_battle_match_position",
+            ),
+            models.UniqueConstraint(fields=["first"], name="unique_battle_match_first"),
+            models.UniqueConstraint(fields=["second"], name="unique_battle_match_second"),
+        ]
+
+    def __str__(self):
+        return f"{self.first.name} vs {self.second.name}"
+
+
+class TeamTournament(models.Model):
+    event = models.OneToOneField(
+        Event,
+        on_delete=models.CASCADE,
+        related_name="team_tournament",
+    )
+    results_public = models.BooleanField(
+        default=False,
+        help_text="When off, only the owner sees every bracket. A participant sees the bracket their team is in.",
+    )
+    reservations_open_until = models.DateTimeField(null=True, blank=True)
+    frozen_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Scheduled freeze time. Registration locks once this time is reached. Must be at least one hour after reservations_open_until.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.event.title} team tournament"
+
+
+class TournamentTeam(models.Model):
+    tournament = models.ForeignKey(
+        TeamTournament,
+        on_delete=models.CASCADE,
+        related_name="teams",
+    )
+    name = models.CharField(max_length=80)
+    position = models.PositiveIntegerField()
+
+    class Meta:
+        ordering = ["position", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tournament", "position"],
+                name="unique_tournament_team_position",
+            )
+        ]
+
+    def __str__(self):
+        return self.name
+
+
+class TournamentTeamMember(models.Model):
+    team = models.ForeignKey(
+        TournamentTeam,
+        on_delete=models.CASCADE,
+        related_name="members",
+    )
+    reservation = models.OneToOneField(
+        EventReservation,
+        on_delete=models.CASCADE,
+        related_name="tournament_team_membership",
+    )
+    position = models.PositiveIntegerField()
+
+    class Meta:
+        ordering = ["position", "id"]
+
+    def __str__(self):
+        return self.reservation.full_name
+
+
+class TeamBracket(models.Model):
+    tournament = models.ForeignKey(
+        TeamTournament,
+        on_delete=models.CASCADE,
+        related_name="brackets",
+    )
+    name = models.CharField(max_length=80)
+    position = models.PositiveIntegerField()
+
+    class Meta:
+        ordering = ["position", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tournament", "position"],
+                name="unique_team_bracket_position",
+            )
+        ]
+
+    def __str__(self):
+        return self.name
+
+
+class TeamBracketEntry(models.Model):
+    bracket = models.ForeignKey(
+        TeamBracket,
+        on_delete=models.CASCADE,
+        related_name="entries",
+    )
+    team = models.OneToOneField(
+        TournamentTeam,
+        on_delete=models.CASCADE,
+        related_name="bracket_entry",
+    )
+    position = models.PositiveIntegerField()
+
+    class Meta:
+        ordering = ["position", "id"]
+
+    def __str__(self):
+        return self.team.name
+
+
+class TeamBracketMatch(models.Model):
+    bracket = models.ForeignKey(
+        TeamBracket,
+        on_delete=models.CASCADE,
+        related_name="matches",
+    )
+    round = models.PositiveIntegerField()
+    position = models.PositiveIntegerField()
+    first = models.ForeignKey(
+        TournamentTeam,
+        on_delete=models.CASCADE,
+        related_name="bracket_first",
+    )
+    second = models.ForeignKey(
+        TournamentTeam,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="bracket_second",
+    )
+    winner = models.ForeignKey(
+        TournamentTeam,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="bracket_wins",
+    )
+    note = models.CharField(max_length=200, blank=True, default="")
+
+    class Meta:
+        ordering = ["round", "position", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["bracket", "round", "position"],
+                name="unique_team_bracket_match_position",
+            )
+        ]
+
+    def __str__(self):
+        other = self.second.name if self.second_id else "bye"
+        return f"{self.first.name} vs {other}"
+
+
 class MemberRecord(models.Model):
     class Kind(models.TextChoices):
         TEST = "test", "Test"
