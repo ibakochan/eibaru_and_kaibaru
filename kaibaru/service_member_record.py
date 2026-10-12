@@ -338,7 +338,7 @@ def _is_owner(event, user):
 
 def visible_duel_matches(duel, user):
     pairings = duel.pairings.select_related("first", "second").order_by("position", "id")
-    if duel.results_public or _is_owner(duel.event, user):
+    if duel.results_public or duel.event.archive_visibility or _is_owner(duel.event, user):
         return [_match_payload(pairing) for pairing in pairings]
     visible_ids = set(
         _visible_paid_rows(duel.event, False, user).values_list("id", flat=True)

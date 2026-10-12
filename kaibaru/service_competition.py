@@ -81,7 +81,7 @@ def competition_payload(competition, user):
         competition.divisions.prefetch_related("entries__reservation").order_by("position", "id")
     )
     visible_ids = set()
-    if not owner and not competition.results_public:
+    if not owner and not competition.results_public and not event.archive_visibility:
         visible_ids = set(
             _visible_paid_rows(event, False, user).values_list("id", flat=True)
         )
@@ -97,6 +97,7 @@ def competition_payload(competition, user):
             if (
                 not owner
                 and not competition.results_public
+                and not event.archive_visibility
                 and entry.reservation_id not in visible_ids
             ):
                 continue

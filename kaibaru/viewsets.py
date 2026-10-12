@@ -37,7 +37,11 @@ from .pricing import (
 )
 
 from .serializers import TicketTypeSerializer, TicketPackageSerializer, ReservationSerializer, PaymentHistoryInvoiceSerializer, MemberPricingAdjustmentSerializer, DiscountConditionSerializer, DiscountSerializer, MembershipPlanSerializer, MemberSerializer, MemberRecordSerializer, ClubSerializer, LessonSerializer, ParticipationSerializer, SlateImageSerializer, JoinRequestSerializer
-from .service_event import save_section_event
+from .service_event import (
+    finish_section_event,
+    save_section_event,
+    set_event_archive_visibility,
+)
 from django.conf import settings
 from datetime import timedelta
 import hashlib
@@ -3686,6 +3690,42 @@ class ClubViewSet(viewsets.ModelViewSet):
     
     
 
+    @action(detail=True, methods=["post"], url_path="finish-event")
+    def finish_event(self, request, pk=None):
+        club = self.get_object()
+        if not request.user.is_authenticated or club.owner_id != request.user.id:
+            return Response(
+                {"detail": "このイベントを終了する権限がありません。"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        try:
+            finish_section_event(
+                club=club,
+                event_id=request.data.get("event_id"),
+                visibility=request.data.get("visibility"),
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"ok": True})
+
+    @action(detail=True, methods=["post"], url_path="event-visibility")
+    def event_visibility(self, request, pk=None):
+        club = self.get_object()
+        if not request.user.is_authenticated or club.owner_id != request.user.id:
+            return Response(
+                {"detail": "公開範囲を変更する権限がありません。"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        try:
+            set_event_archive_visibility(
+                club=club,
+                event_id=request.data.get("event_id"),
+                visibility=request.data.get("visibility"),
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"ok": True})
+
     @action(detail=True, methods=["post"], url_path="mutate_page_section")
     def mutate_page_section(self, request, pk=None):
       with transaction.atomic():
@@ -4103,6 +4143,16 @@ class ClubViewSet(viewsets.ModelViewSet):
                     club=club,
                     section_id=removed_section["id"],
                 ).delete()
+
+            if removed_section.get("type") == "past":
+                if Event.objects.filter(
+                    club=club,
+                    section_id=removed_section["id"],
+                ).exists():
+                    return Response(
+                        {"detail": "過去のイベントが残っているため、このセクションは削除できません。"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
 
             # Prevent removing join if dependent sections exist
             if removed_section.get("type") == "join":

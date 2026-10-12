@@ -2237,6 +2237,7 @@ class EventSerializer(serializers.ModelSerializer):
             "my_reservations",
             "guests",
             "results",
+            "archive_visibility",
         ]
 
     def _held_count(self, event):
@@ -2308,6 +2309,8 @@ class EventSerializer(serializers.ModelSerializer):
         return team_tournament_payload(tournament, user)
 
     def get_results(self, event):
+        if event.archive_visibility:
+            return None
         from .service_member_record import (
             visible_competition_results,
             visible_test_results,
@@ -2426,7 +2429,7 @@ class EventSerializer(serializers.ModelSerializer):
 class ClubSerializer(serializers.ModelSerializer):
     members = MemberSerializer(many=True, read_only=True)
     lessons = LessonSerializer(many=True, read_only=True)
-    events = EventSerializer(many=True, read_only=True)
+    events = serializers.SerializerMethodField()
     current_user = serializers.SerializerMethodField()
     today = serializers.SerializerMethodField()
     home_images = SlateImageSerializer(many=True, read_only=True)
@@ -2443,8 +2446,25 @@ class ClubSerializer(serializers.ModelSerializer):
     invoices = serializers.SerializerMethodField()
     has_member_subscription = serializers.SerializerMethodField()
 
-
-
+    def get_events(self, club):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        authenticated = user is not None and user.is_authenticated
+        is_owner = authenticated and club.owner_id == user.id
+        is_member = False
+        if authenticated and not is_owner:
+            is_member = any(
+                row.user_id == user.id or row.owner_id == user.id
+                for row in club.members.all()
+            )
+        visible = []
+        for event in club.events.all():
+            visibility = event.archive_visibility
+            if not visibility or is_owner or visibility == "public":
+                visible.append(event)
+            elif visibility == "members" and is_member:
+                visible.append(event)
+        return EventSerializer(visible, many=True, context=self.context).data
 
     class Meta:
         model = Club

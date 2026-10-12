@@ -157,7 +157,7 @@ def _tree_view(entries, matches):
 
 def _visible_brackets(tournament, user):
     brackets = list(tournament.brackets.all())
-    if tournament.results_public or _is_owner(tournament.event, user):
+    if tournament.results_public or tournament.event.archive_visibility or _is_owner(tournament.event, user):
         return brackets
     visible_ids = set(
         _visible_paid_rows(tournament.event, False, user).values_list("id", flat=True)

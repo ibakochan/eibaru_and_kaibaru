@@ -87,7 +87,7 @@ def _paired_team_ids(battle):
 
 def _visible_matches(battle, user):
     matches = list(_matches(battle))
-    if battle.results_public or _is_owner(battle.event, user):
+    if battle.results_public or battle.event.archive_visibility or _is_owner(battle.event, user):
         return matches
     visible_ids = set(
         _visible_paid_rows(battle.event, False, user).values_list("id", flat=True)

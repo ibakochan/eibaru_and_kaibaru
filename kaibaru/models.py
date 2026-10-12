@@ -1737,13 +1737,24 @@ class Event(models.Model):
         validators=[_hex_color],
     )
 
+    archive_visibility = models.CharField(
+        max_length=16,
+        null=True,
+        blank=True,
+        choices=[
+            ("owner", "Owner"),
+            ("members", "Members"),
+            ("public", "Public"),
+        ],
+    )
+    live_section_id = models.PositiveIntegerField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=["club", "section_id"],
-                name="unique_event_per_section",
+                fields=["club", "live_section_id"],
+                name="unique_live_event_per_section",
             )
         ]
 

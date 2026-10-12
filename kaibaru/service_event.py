@@ -1,7 +1,9 @@
 import hashlib
+import json
 import logging
 import re
 import secrets
+import unicodedata
 from datetime import datetime, timedelta
 
 import stripe
@@ -13,6 +15,7 @@ from django.utils.dateparse import parse_datetime
 
 from .models import (
     Bracket,
+    Club,
     Competition,
     Division,
     Duel,
@@ -154,6 +157,8 @@ def visitor_reservation_key(event, email):
 
 
 def _require_upcoming(event):
+    if event.archive_visibility:
+        raise ValueError("このイベントは終了しています。")
     if event.starts_at <= timezone.now():
         raise ValueError("このイベントの予約受付は終了しています。")
 
@@ -1836,6 +1841,7 @@ def save_section_event(*, club, section_id, title, payload):
         "detail_color": _color(payload.get("detail_color"), "#44403c"),
         "button_color": _color(payload.get("button_color"), "#1c1917"),
         "button_text_color": _color(payload.get("button_text_color"), "#faf6f1"),
+        "live_section_id": section_id,
     }
 
     event, _created = Event.objects.update_or_create(
@@ -1931,3 +1937,120 @@ def _event_prices(payload):
     if len(cleaned) > 20:
         raise ValueError("料金は20件までです。")
     return cleaned
+
+
+ARCHIVE_VISIBILITIES = {"owner", "members", "public"}
+ARCHIVE_TITLES = {
+    "event": "過去のイベント",
+    "competition": "過去の試合",
+    "test": "過去の試験",
+}
+
+
+def _event_bucket(event):
+    event_id = event.id
+    if Test.objects.filter(event_id=event_id).exists():
+        return "test"
+    if (
+        Competition.objects.filter(event_id=event_id).exists()
+        or Duel.objects.filter(event_id=event_id).exists()
+        or Tournament.objects.filter(event_id=event_id).exists()
+        or TeamBattle.objects.filter(event_id=event_id).exists()
+        or TeamTournament.objects.filter(event_id=event_id).exists()
+    ):
+        return "competition"
+    return "event"
+
+
+def _archive_slug(value):
+    text = unicodedata.normalize("NFKC", str(value or "").strip())
+    text = re.sub(r"[^\w\s\-ぁ-んァ-ン一-龯]", "", text)
+    text = re.sub(r"[\s\-]+", "-", text).strip("-").lower()
+    return text or "section"
+
+
+def _ensure_archive_section(club, bucket):
+    raw = club.page_content
+    try:
+        if not raw:
+            page = {
+                "version": 1,
+                "next_section_id": 1,
+                "sections": {},
+            }
+        elif isinstance(raw, dict):
+            page = raw
+        else:
+            page = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("ページの内容を読み取れません。") from exc
+    sections = page.setdefault("sections", {})
+    for section in sections.values():
+        if section.get("type") == "past" and section.get("bucket") == bucket:
+            return section["id"]
+
+    title = ARCHIVE_TITLES[bucket]
+    highest = max(
+        [int(section.get("id") or 0) for section in sections.values()] or [0]
+    )
+    section_id = max(int(page.get("next_section_id") or 1), highest + 1)
+    orders = [int(section.get("order") or 0) for section in sections.values()]
+    order = (max(orders) if orders else 0) + 1
+    used = set()
+    for section in sections.values():
+        if section.get("slug"):
+            used.add(section["slug"])
+        used.update(section.get("previous_slugs") or [])
+    slug = _archive_slug(title)
+    base = slug
+    suffix = 2
+    while slug in used:
+        slug = f"{base}-{suffix}"
+        suffix += 1
+    sections[str(section_id)] = {
+        "id": section_id,
+        "order": order,
+        "title": title,
+        "type": "past",
+        "bucket": bucket,
+        "slug": slug,
+    }
+    page["next_section_id"] = section_id + 1
+    club.page_content = json.dumps(page)
+    club.save(update_fields=["page_content"])
+    return section_id
+
+
+def finish_section_event(*, club, event_id, visibility):
+    if visibility not in ARCHIVE_VISIBILITIES:
+        raise ValueError("公開範囲を選んでください。")
+    with transaction.atomic():
+        locked = Club.objects.select_for_update().get(pk=club.pk)
+        event = (
+            Event.objects
+            .select_for_update()
+            .filter(id=event_id, club=locked)
+            .first()
+        )
+        if event is None:
+            raise ValueError("イベントが見つかりません。")
+        if event.archive_visibility:
+            raise ValueError("このイベントはすでに終了しています。")
+        event.section_id = _ensure_archive_section(locked, _event_bucket(event))
+        event.live_section_id = None
+        event.archive_visibility = visibility
+        event.save(update_fields=["section_id", "live_section_id", "archive_visibility"])
+    return event
+
+
+def set_event_archive_visibility(*, club, event_id, visibility):
+    if visibility not in ARCHIVE_VISIBILITIES:
+        raise ValueError("公開範囲を選んでください。")
+    event = Event.objects.filter(id=event_id, club=club).first()
+    if event is None:
+        raise ValueError("イベントが見つかりません。")
+    if not event.archive_visibility:
+        raise ValueError("終了したイベントだけ公開範囲を変更できます。")
+    event.archive_visibility = visibility
+    event.save(update_fields=["archive_visibility"])
+    return event
