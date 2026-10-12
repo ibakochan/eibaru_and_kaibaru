@@ -157,8 +157,12 @@ def visitor_reservation_key(event, email):
 
 
 def _require_upcoming(event):
+    if event.canceled_at:
+        raise ValueError("このイベントは中止になりました。")
     if event.archive_visibility:
         raise ValueError("このイベントは終了しています。")
+    if event.reservations_paused:
+        raise ValueError("このイベントは一時停止中のため、予約できません。")
     if event.starts_at <= timezone.now():
         raise ValueError("このイベントの予約受付は終了しています。")
 
@@ -982,6 +986,11 @@ def complete_paid_event_checkout(
             )
             return
 
+        if reservation.canceled:
+            reservation.canceled = False
+            update_fields = ["canceled"]
+            reservation.save(update_fields=update_fields)
+
         if reservation.status == EventReservation.Status.PAID:
             if reservation.is_deleted:
                 reservation.is_deleted = False
@@ -1138,6 +1147,9 @@ def _public_start_result(prepared):
 def _start_unusable_reason(reservation):
     now = timezone.now()
     event = reservation.event
+
+    if event.canceled_at:
+        return "このイベントは中止になりました。"
 
     if event.starts_at <= now:
         return "このイベントの予約受付は終了しています。"
@@ -1478,10 +1490,12 @@ class EventReservationPaymentReconciler:
 
     @classmethod
     def _mark_paid(cls, reservation, *, session_id=None, payment_intent_id=None):
+        if reservation.canceled:
+            reservation.canceled = False
         reservation.status = EventReservation.Status.PAID
         reservation.paid_at = timezone.now()
         reservation.is_deleted = False
-        update_fields = ["status", "paid_at", "is_deleted"]
+        update_fields = ["status", "paid_at", "is_deleted", "canceled"]
         if session_id:
             reservation.stripe_checkout_session_id = session_id
             update_fields.append("stripe_checkout_session_id")
@@ -2038,12 +2052,15 @@ def _save_page(club, page):
     club.save(update_fields=["page_content"])
 
 
-def _drop_empty_event_section(club, section_id):
-    if Event.objects.filter(
+def _drop_empty_event_section(club, section_id, *, ignore_ids=()):
+    remaining = Event.objects.filter(
         club=club,
         section_id=section_id,
         archive_visibility__isnull=True,
-    ).exists():
+    )
+    if ignore_ids:
+        remaining = remaining.exclude(id__in=ignore_ids)
+    if remaining.exists():
         return
     try:
         page = _load_page(club)
@@ -2070,6 +2087,149 @@ def _drop_empty_event_section(club, section_id):
     _save_page(club, page)
 
 
+def _open_event_reservations(event):
+    return EventReservation.objects.filter(
+        event=event,
+        is_deleted=False,
+        canceled=False,
+    )
+
+
+def _clean_cancel_reason(reason):
+    text = str(reason or "").strip()
+    if not text:
+        raise ValueError("中止の理由を入力してください。")
+    if len(text) > 500:
+        raise ValueError("中止の理由は500文字以内にしてください。")
+    return text
+
+
+def _future_visible_until(value):
+    until = _parse_when(value, "表示期限")
+    if until <= timezone.now():
+        raise ValueError("表示期限は今より後にしてください。")
+    return until
+
+
+def set_event_reservations_paused(*, club, event_id, paused):
+    event = Event.objects.filter(id=event_id, club=club).first()
+    if event is None:
+        raise ValueError("イベントが見つかりません。")
+    if event.canceled_at or event.archive_visibility:
+        raise ValueError("このイベントの予約受付は変更できません。")
+    event.reservations_paused = bool(paused)
+    event.save(update_fields=["reservations_paused"])
+    return event
+
+
+def cancel_section_event(*, club, event_id, reason, visible_until):
+    with transaction.atomic():
+        event = (
+            Event.objects
+            .select_for_update()
+            .filter(id=event_id, club=club)
+            .first()
+        )
+        if event is None:
+            raise ValueError("イベントが見つかりません。")
+        if event.archive_visibility:
+            raise ValueError("終了したイベントは中止できません。")
+        if event.canceled_at:
+            raise ValueError("このイベントはすでに中止しています。")
+        if _open_event_reservations(event).exists():
+            raise ValueError(
+                "未キャンセルの予約が残っています。"
+                "予約をすべてキャンセルしてから中止してください。"
+            )
+        event.cancel_reason = _clean_cancel_reason(reason)
+        event.cancel_visible_until = _future_visible_until(visible_until)
+        event.canceled_at = timezone.now()
+        event.reservations_paused = True
+        event.save(update_fields=[
+            "cancel_reason",
+            "cancel_visible_until",
+            "canceled_at",
+            "reservations_paused",
+        ])
+        from .models import MemberRecord
+        MemberRecord.objects.filter(event=event).delete()
+    return event
+
+
+def update_event_cancellation(*, club, event_id, reason, visible_until):
+    with transaction.atomic():
+        event = (
+            Event.objects
+            .select_for_update()
+            .filter(id=event_id, club=club)
+            .first()
+        )
+        if event is None:
+            raise ValueError("イベントが見つかりません。")
+        if not event.canceled_at or event.cancel_visible_until is None:
+            raise ValueError("中止したイベントだけ変更できます。")
+        if event.cancel_visible_until <= timezone.now():
+            raise ValueError("表示期限を過ぎたため、このイベントは変更できません。")
+        event.cancel_reason = _clean_cancel_reason(reason)
+        event.cancel_visible_until = _future_visible_until(visible_until)
+        event.save(update_fields=["cancel_reason", "cancel_visible_until"])
+    return event
+
+
+def expire_canceled_events(club):
+    now = timezone.now()
+    expired = list(
+        Event.objects.filter(
+            club=club,
+            canceled_at__isnull=False,
+            cancel_visible_until__lte=now,
+        )
+    )
+    if not expired:
+        return
+    ids = [event.id for event in expired]
+    Event.objects.filter(id__in=ids, live_section_id__isnull=False).update(
+        live_section_id=None
+    )
+    for section_id in {event.section_id for event in expired}:
+        _drop_empty_event_section(club, section_id, ignore_ids=ids)
+
+
+def dismiss_open_event_reservation(*, reservation_id, user):
+    with transaction.atomic():
+        reservation = (
+            EventReservation.objects
+            .select_for_update()
+            .select_related("club", "event")
+            .filter(id=reservation_id, is_deleted=False)
+            .first()
+        )
+        if reservation is None:
+            raise ValueError("予約が見つかりません。")
+        if reservation.club.owner_id != getattr(user, "id", None):
+            raise PermissionError("この予約をキャンセルする権限がありません。")
+        if reservation.canceled:
+            return reservation
+        if reservation.status == EventReservation.Status.PAID:
+            raise ValueError("支払い済みの予約は、返金してからキャンセルしてください。")
+        if reservation.stripe_payment_intent_id or reservation.paid_at:
+            raise ValueError("支払いが完了しているため、返金してください。")
+        club = reservation.club
+        session_id = reservation.stripe_checkout_session_id
+        reservation.canceled = True
+        reservation.save(update_fields=["canceled"])
+
+    if session_id and club.stripe_account_id:
+        try:
+            stripe.checkout.Session.expire(
+                session_id,
+                stripe_account=club.stripe_account_id,
+            )
+        except Exception:
+            logger.exception("Failed to expire event checkout session %s", session_id)
+    return reservation
+
+
 def finish_section_event(*, club, event_id, visibility):
     if visibility not in ARCHIVE_VISIBILITIES:
         raise ValueError("公開範囲を選んでください。")
@@ -2085,6 +2245,8 @@ def finish_section_event(*, club, event_id, visibility):
             raise ValueError("イベントが見つかりません。")
         if event.archive_visibility:
             raise ValueError("このイベントはすでに終了しています。")
+        if event.canceled_at:
+            raise ValueError("中止したイベントは終了できません。")
         previous_section_id = event.section_id
         event.section_id = _ensure_archive_section(locked, _event_bucket(event))
         event.live_section_id = None

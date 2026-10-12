@@ -38,9 +38,13 @@ from .pricing import (
 
 from .serializers import TicketTypeSerializer, TicketPackageSerializer, ReservationSerializer, PaymentHistoryInvoiceSerializer, MemberPricingAdjustmentSerializer, DiscountConditionSerializer, DiscountSerializer, MembershipPlanSerializer, MemberSerializer, MemberRecordSerializer, ClubSerializer, LessonSerializer, ParticipationSerializer, SlateImageSerializer, JoinRequestSerializer
 from .service_event import (
+    cancel_section_event,
+    dismiss_open_event_reservation,
     finish_section_event,
     save_section_event,
     set_event_archive_visibility,
+    set_event_reservations_paused,
+    update_event_cancellation,
 )
 from django.conf import settings
 from datetime import timedelta
@@ -2269,6 +2273,30 @@ class EventReservationViewSet(viewsets.ViewSet):
     @action(
         detail=False,
         methods=["post"],
+        url_path=r"dismiss/(?P<reservation_id>\d+)",
+    )
+    def dismiss(self, request, reservation_id=None):
+        try:
+            reservation_id = int(reservation_id)
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "予約が見つかりません。"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        try:
+            dismiss_open_event_reservation(
+                reservation_id=reservation_id,
+                user=request.user,
+            )
+        except PermissionError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"ok": True})
+
+    @action(
+        detail=False,
+        methods=["post"],
         url_path=r"result/(?P<reservation_id>\d+)",
     )
     def result(self, request, reservation_id=None):
@@ -3703,6 +3731,62 @@ class ClubViewSet(viewsets.ModelViewSet):
                 club=club,
                 event_id=request.data.get("event_id"),
                 visibility=request.data.get("visibility"),
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"ok": True})
+
+    @action(detail=True, methods=["post"], url_path="pause-event")
+    def pause_event(self, request, pk=None):
+        club = self.get_object()
+        if not request.user.is_authenticated or club.owner_id != request.user.id:
+            return Response(
+                {"detail": "予約受付を変更する権限がありません。"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        try:
+            set_event_reservations_paused(
+                club=club,
+                event_id=request.data.get("event_id"),
+                paused=bool(request.data.get("paused")),
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"ok": True})
+
+    @action(detail=True, methods=["post"], url_path="cancel-event")
+    def cancel_event(self, request, pk=None):
+        club = self.get_object()
+        if not request.user.is_authenticated or club.owner_id != request.user.id:
+            return Response(
+                {"detail": "このイベントを中止する権限がありません。"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        try:
+            cancel_section_event(
+                club=club,
+                event_id=request.data.get("event_id"),
+                reason=request.data.get("reason"),
+                visible_until=request.data.get("visible_until"),
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"ok": True})
+
+    @action(detail=True, methods=["post"], url_path="update-cancellation")
+    def update_cancellation(self, request, pk=None):
+        club = self.get_object()
+        if not request.user.is_authenticated or club.owner_id != request.user.id:
+            return Response(
+                {"detail": "中止の内容を変更する権限がありません。"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        try:
+            update_event_cancellation(
+                club=club,
+                event_id=request.data.get("event_id"),
+                reason=request.data.get("reason"),
+                visible_until=request.data.get("visible_until"),
             )
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)

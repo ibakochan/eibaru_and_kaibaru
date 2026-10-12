@@ -2238,6 +2238,10 @@ class EventSerializer(serializers.ModelSerializer):
             "guests",
             "results",
             "archive_visibility",
+            "reservations_paused",
+            "canceled_at",
+            "cancel_reason",
+            "cancel_visible_until",
         ]
 
     def _held_count(self, event):
@@ -2391,8 +2395,10 @@ class EventSerializer(serializers.ModelSerializer):
         return allowed
 
     def get_guests(self, event):
-        if not self._viewer_can_manage(event) or _event_is_past(event):
-            return None if not self._viewer_can_manage(event) else []
+        if not self._viewer_can_manage(event):
+            return None
+        if event.archive_visibility or event.canceled_at:
+            return []
 
         request = self.context.get("request")
         user = getattr(request, "user", None)
@@ -2420,6 +2426,16 @@ class EventSerializer(serializers.ModelSerializer):
                 elif owner_may_restore_free(row, user):
                     restore = restore_url(row.club, "event", row.id)
                 detail["can_refund"] = event_reservation_is_refundable(row, user)
+                detail["can_dismiss"] = (
+                    not row.canceled
+                    and not row.refunded_at
+                    and row.status in {
+                        EventReservation.Status.UNPAID,
+                        EventReservation.Status.NOT_STARTED,
+                    }
+                    and not row.stripe_payment_intent_id
+                    and not row.paid_at
+                )
             detail["cancel_url"] = cancel
             detail["restore_url"] = restore
             details.append(detail)
@@ -2457,8 +2473,17 @@ class ClubSerializer(serializers.ModelSerializer):
                 row.user_id == user.id or row.owner_id == user.id
                 for row in club.members.all()
             )
+        now = timezone.now()
+        from .service_event import expire_canceled_events
+        expire_canceled_events(club)
         visible = []
         for event in club.events.all():
+            if (
+                event.canceled_at
+                and event.cancel_visible_until
+                and event.cancel_visible_until <= now
+            ):
+                continue
             visibility = event.archive_visibility
             if not visibility or is_owner or visibility == "public":
                 visible.append(event)

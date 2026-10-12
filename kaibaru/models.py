@@ -1747,6 +1747,10 @@ class Event(models.Model):
             ("public", "Public"),
         ],
     )
+    reservations_paused = models.BooleanField(default=False)
+    canceled_at = models.DateTimeField(null=True, blank=True)
+    cancel_reason = models.TextField(blank=True, default="")
+    cancel_visible_until = models.DateTimeField(null=True, blank=True)
     live_section_id = models.PositiveIntegerField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
