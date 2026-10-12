@@ -2016,9 +2016,58 @@ def _ensure_archive_section(club, bucket):
         "slug": slug,
     }
     page["next_section_id"] = section_id + 1
+    _save_page(club, page)
+    return section_id
+
+
+def _load_page(club):
+    raw = club.page_content
+    if not raw:
+        return {
+            "version": 1,
+            "next_section_id": 1,
+            "sections": {},
+        }
+    if isinstance(raw, dict):
+        return raw
+    return json.loads(raw)
+
+
+def _save_page(club, page):
     club.page_content = json.dumps(page)
     club.save(update_fields=["page_content"])
-    return section_id
+
+
+def _drop_empty_event_section(club, section_id):
+    if Event.objects.filter(
+        club=club,
+        section_id=section_id,
+        archive_visibility__isnull=True,
+    ).exists():
+        return
+    try:
+        page = _load_page(club)
+    except json.JSONDecodeError:
+        return
+    sections = page.setdefault("sections", {})
+    removed = None
+    removed_key = None
+    for key, section in sections.items():
+        if (
+            int(section.get("id") or 0) == int(section_id)
+            and section.get("type") == "event"
+        ):
+            removed = section
+            removed_key = key
+            break
+    if removed is None or removed_key is None:
+        return
+    removed_order = int(removed.get("order") or 0)
+    sections.pop(removed_key)
+    for section in sections.values():
+        if int(section.get("order") or 0) > removed_order:
+            section["order"] -= 1
+    _save_page(club, page)
 
 
 def finish_section_event(*, club, event_id, visibility):
@@ -2036,10 +2085,12 @@ def finish_section_event(*, club, event_id, visibility):
             raise ValueError("イベントが見つかりません。")
         if event.archive_visibility:
             raise ValueError("このイベントはすでに終了しています。")
+        previous_section_id = event.section_id
         event.section_id = _ensure_archive_section(locked, _event_bucket(event))
         event.live_section_id = None
         event.archive_visibility = visibility
         event.save(update_fields=["section_id", "live_section_id", "archive_visibility"])
+        _drop_empty_event_section(locked, previous_section_id)
     return event
 
 
