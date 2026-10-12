@@ -1489,7 +1489,6 @@ class ParticipationSerializer(serializers.ModelSerializer):
 
 
 class MemberSerializer(serializers.ModelSerializer):
-    participations = ParticipationMiniSerializer(many=True, read_only=True)
     total_participation = serializers.SerializerMethodField()
     this_month_participation = serializers.SerializerMethodField()
     level_participation = serializers.SerializerMethodField()
@@ -1512,7 +1511,6 @@ class MemberSerializer(serializers.ModelSerializer):
             "emergency_number",
             "other_information",
             "picture",
-            "participations",
             "total_participation",
             "this_month_participation",
             "level_participation",
@@ -1680,6 +1678,7 @@ class MemberSerializer(serializers.ModelSerializer):
     
     def to_representation(self, instance):
         data = super().to_representation(instance)
+        data.pop("participations", None)
         request = self.context.get("request")
         user = getattr(request, "user", None)
 
@@ -1740,7 +1739,28 @@ class MemberSerializer(serializers.ModelSerializer):
         return data
 
     def _participations(self, obj):
-        return getattr(obj, "_prefetched_objects_cache", {}).get("participations", obj.participations.all())
+        prefetched = getattr(obj, "_prefetched_objects_cache", {}).get("participations")
+        if prefetched is not None:
+            return prefetched
+
+        club_id = getattr(obj, "club_id", None)
+        if not club_id:
+            return obj.participations.all()
+
+        grouped = self.context.get("_participation_by_member")
+        if grouped is None:
+            grouped = defaultdict(list)
+            rows = Participation.objects.filter(member__club_id=club_id).only(
+                "id",
+                "member_id",
+                "total_count",
+                "monthly_count",
+                "level_counts",
+            )
+            for row in rows:
+                grouped[row.member_id].append(row)
+            self.context["_participation_by_member"] = grouped
+        return grouped.get(obj.id, [])
 
     def get_total_participation(self, obj):
         parts = self._participations(obj)
@@ -1999,9 +2019,15 @@ class LessonSerializer(serializers.ModelSerializer):
         return None
     
     def get_total_participation(self, obj):
+        annotated = getattr(obj, "annotated_total_participation", None)
+        if annotated is not None:
+            return annotated
         return obj.participations.aggregate(total=Sum("total_count"))["total"] or 0
 
     def get_monthly_participation(self, obj):
+        annotated = getattr(obj, "annotated_monthly_participation", None)
+        if annotated is not None:
+            return annotated
         return obj.participations.aggregate(total=Sum("monthly_count"))["total"] or 0
 
 

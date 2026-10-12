@@ -383,7 +383,7 @@ def _find_stripe_refund(reservation, *, metadata_key="reservation_id"):
 
 
 def _payload(reservation, *, already_refunded):
-    return {
+    payload = {
         "reservation_id": reservation.id,
         "already_refunded": already_refunded,
         "payment_method": reservation.payment_method,
@@ -395,6 +395,49 @@ def _payload(reservation, *, already_refunded):
         ),
         "explanation": _explanation(reservation, already_refunded),
     }
+    if (
+        reservation.payment_method == Reservation.PaymentMethod.TICKET
+        and reservation.member_id
+    ):
+        member = getattr(reservation, "member", None)
+        if member is not None:
+            payload["member_id"] = reservation.member_id
+            payload["tickets"] = _remaining_tickets(member)
+    return payload
+
+
+def _remaining_tickets(member):
+    now = timezone.now()
+    grants = (
+        member.ticket_grants
+        .select_related("ticket_type")
+        .prefetch_related("usages", "ticket_type__eligible_plans")
+    )
+    result = []
+    for grant in grants:
+        if not grant.ticket_type.active:
+            continue
+        if grant.expires_at is not None and grant.expires_at < now:
+            continue
+        used_quantity = sum(
+            usage.quantity
+            for usage in grant.usages.all()
+            if usage.refunded_at is None
+        )
+        remaining_quantity = grant.quantity - used_quantity
+        if remaining_quantity <= 0:
+            continue
+        result.append({
+            "id": grant.id,
+            "ticket_type_id": grant.ticket_type_id,
+            "ticket_type_name": grant.ticket_type.name,
+            "eligible_plan_ids": list(
+                grant.ticket_type.eligible_plans.values_list("id", flat=True)
+            ),
+            "remaining_quantity": remaining_quantity,
+            "expires_at": grant.expires_at,
+        })
+    return result
 
 
 def _explanation(reservation, already_refunded):

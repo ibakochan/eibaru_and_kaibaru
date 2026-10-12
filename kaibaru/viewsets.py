@@ -12,7 +12,7 @@ import json
 import logging
 from django.db.models import Q, F
 from datetime import date
-from django.db.models import Sum
+from django.db.models import IntegerField, Sum, Value
 from .service_legacy_subscription import LegacySubscriptionService
 
 
@@ -21,6 +21,7 @@ from collections import defaultdict
 import stripe
 from django.conf import settings
 from django.db.models import Prefetch
+from django.db.models.functions import Coalesce
 from django.core.exceptions import ValidationError
 from .user_errors import format_validation_error
 stripe.api_key = settings.STRIPE_SECRET_KEY
@@ -2296,6 +2297,35 @@ class EventReservationViewSet(viewsets.ViewSet):
 
     @action(
         detail=False,
+        methods=["get"],
+        url_path=r"event/(?P<event_id>\d+)",
+    )
+    def for_event(self, request, event_id=None):
+        from .serializers import EventSerializer
+
+        event = (
+            Event.objects
+            .select_related("club")
+            .filter(id=event_id)
+            .first()
+        )
+        if event is None:
+            return Response(
+                {"detail": "イベントが見つかりません。"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = EventSerializer(event, context={"request": request})
+        return Response({
+            "guests": serializer.get_guests(event),
+            "my_reservations": serializer.get_my_reservations(event),
+            "my_reservation": serializer.get_my_reservation(event),
+            "spots_taken": serializer.get_spots_taken(event),
+            "spots_left": serializer.get_spots_left(event),
+        })
+
+    @action(
+        detail=False,
         methods=["post"],
         url_path=r"result/(?P<reservation_id>\d+)",
     )
@@ -3369,6 +3399,60 @@ class ParticipationViewSet(viewsets.ModelViewSet):
     queryset = Participation.objects.all()
     serializer_class = ParticipationSerializer
 
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path=r"lesson/(?P<lesson_id>\d+)",
+    )
+    def by_lesson(self, request, lesson_id=None):
+        if not request.user.is_authenticated:
+            return Response(
+                {"detail": "許可されていません"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        lesson = (
+            Lesson.objects
+            .select_related("club")
+            .filter(id=lesson_id)
+            .first()
+        )
+        if lesson is None:
+            return Response(
+                {"detail": "レッスンが存在しません"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        club = lesson.club
+        allowed = club.owner_id == request.user.id or Member.objects.filter(
+            club=club,
+        ).filter(
+            Q(user=request.user) | Q(owner=request.user),
+        ).filter(
+            Q(is_instructor=True) | Q(is_manager=True),
+        ).exists()
+        if not allowed:
+            return Response(
+                {"detail": "許可されていません"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        rows = Participation.objects.filter(lesson=lesson).values(
+            "id",
+            "member_id",
+            "lesson_id",
+            "last_participation_date",
+        )
+        return Response([
+            {
+                "id": row["id"],
+                "member": row["member_id"],
+                "lesson": row["lesson_id"],
+                "last_participation_date": row["last_participation_date"],
+            }
+            for row in rows
+        ])
+
     def get_member_stats(self, member):
         participations = member.participations.all()
 
@@ -3550,7 +3634,6 @@ class ClubViewSet(viewsets.ModelViewSet):
                 Prefetch(
                     "members",
                     queryset=Member.objects.prefetch_related(
-                        "participations",
                         Prefetch(
                            "subscription_items",
                             queryset=SubscriptionItem.objects
@@ -3577,7 +3660,18 @@ class ClubViewSet(viewsets.ModelViewSet):
 
                 Prefetch(
                     "lessons",
-                    queryset=Lesson.objects.prefetch_related("participations"),
+                    queryset=Lesson.objects.annotate(
+                        annotated_total_participation=Coalesce(
+                            Sum("participations__total_count"),
+                            Value(0),
+                            output_field=IntegerField(),
+                        ),
+                        annotated_monthly_participation=Coalesce(
+                            Sum("participations__monthly_count"),
+                            Value(0),
+                            output_field=IntegerField(),
+                        ),
+                    ),
                 ),
                 "events__prices",
                 "events__prices__divisions",

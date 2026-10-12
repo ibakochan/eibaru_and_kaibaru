@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.http import JsonResponse
 from django.shortcuts import render
 from django.views.decorators.http import require_http_methods
 
@@ -215,6 +216,15 @@ def _page_context(kind, reservation):
 def _render(request, context, status=200):
     if context.get("mode") == "invalid":
         status = 404
+    if "application/json" in request.headers.get("Accept", ""):
+        return JsonResponse(
+            {
+                "ok": context.get("mode") in {"done", "restored", "already"},
+                "mode": context.get("mode"),
+                "message": context.get("message", ""),
+            },
+            status=status,
+        )
     response = render(
         request,
         "kaibaru/reservation_cancel.html",
