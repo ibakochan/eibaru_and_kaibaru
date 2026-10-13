@@ -23,7 +23,7 @@ from .rules_reservations import (
     resolve_max_days_ahead,
 )
 from .stripe_service import get_or_create_stripe_customer
-from .charge_amounts import persisted_charge_amount
+from .charge_amounts import persisted_charge_amount, platform_fee_yen
 from .tasks_emails import (
     send_visitor_reservation_confirmation_email,
 )
@@ -428,6 +428,15 @@ def _open_new_checkout(prepared):
             "customer": stripe_customer.stripe_customer_id,
         }
 
+    charge_amounts = [
+        persisted_charge_amount(reservation)
+        for reservation in reservations
+    ]
+    platform_fee = platform_fee_yen(sum(charge_amounts))
+    payment_intent_data = {}
+    if platform_fee:
+        payment_intent_data["application_fee_amount"] = platform_fee
+
     session = stripe.checkout.Session.create(
         mode="payment",
         payment_method_types=["card"],
@@ -447,12 +456,17 @@ def _open_new_checkout(prepared):
                             f"{lesson.title}（{reservation.full_name}）"
                         )[:250],
                     },
-                    "unit_amount": persisted_charge_amount(reservation),
+                    "unit_amount": amount,
                 },
                 "quantity": 1,
             }
-            for reservation in reservations
+            for reservation, amount in zip(reservations, charge_amounts)
         ],
+        **(
+            {"payment_intent_data": payment_intent_data}
+            if payment_intent_data
+            else {}
+        ),
         metadata={
             "reservation_ids": ",".join(
                 str(reservation.id) for reservation in reservations

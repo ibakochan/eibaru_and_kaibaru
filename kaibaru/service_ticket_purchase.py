@@ -4,7 +4,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from .pricing import calculate_ticket_expiration
-from .charge_amounts import normalize_paid_amount
+from .charge_amounts import normalize_paid_amount, platform_fee_kwargs
 
 from .models import (
     TicketPackage,
@@ -260,6 +260,7 @@ class TicketPurchaseService:
                         stripe.PaymentIntent.create(
                             amount=purchase.amount,
                             currency=purchase.currency,
+                            **platform_fee_kwargs(purchase.amount),
                             customer=(
                                 stripe_customer
                                 .stripe_customer_id
@@ -421,7 +422,8 @@ class TicketPurchaseService:
                             str(package.id),
                         "ticket_type_id":
                             str(ticket_type.id),
-                    }
+                    },
+                    **platform_fee_kwargs(purchase.amount),
                 },
 
                 "success_url": (

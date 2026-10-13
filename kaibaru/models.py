@@ -817,6 +817,8 @@ class Invoice(models.Model):
         blank=True,
     )
 
+    platform_fee_applied = models.BooleanField(default=False)
+
     class Meta:
         constraints = [
             models.UniqueConstraint(

@@ -20,7 +20,10 @@ from .pricing import (
 from .discounts import (
     calculate_discounted_amount,
 )
-from .stripe_service import get_or_create_stripe_customer
+from .stripe_service import (
+    apply_platform_fee_to_draft_invoice,
+    get_or_create_stripe_customer,
+)
 
 from .service_mutations import (
     assert_mutation_not_locked,
@@ -394,6 +397,15 @@ class SubscriptionAddPlanService:
             update_fields=[
                 "payload",
             ]
+        )
+
+        invoice = stripe.Invoice.retrieve(
+            invoice.id,
+            stripe_account=club.stripe_account_id,
+        )
+        invoice = apply_platform_fee_to_draft_invoice(
+            invoice,
+            stripe_account=club.stripe_account_id,
         )
 
         invoice = stripe.Invoice.finalize_invoice(

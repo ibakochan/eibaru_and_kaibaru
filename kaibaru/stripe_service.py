@@ -2,11 +2,34 @@ import stripe
 from django.conf import settings
 from django.db import transaction
 
+from .charge_amounts import platform_fee_yen
 from .models import StripeCustomer
 import logging
 logger = logging.getLogger(__name__)
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
+
+
+def apply_platform_fee_to_draft_invoice(invoice, *, stripe_account):
+    """Take 1% of a connected-account invoice before it is finalized.
+
+    Stripe only accepts application_fee_amount on a draft invoice, and
+    rejects an explicit fee of 0. A fee already copied onto a finalized
+    invoice is left alone.
+    """
+    status = getattr(invoice, "status", None)
+    if status != "draft":
+        return invoice
+
+    fee = platform_fee_yen(getattr(invoice, "amount_due", 0))
+    if fee <= 0:
+        return invoice
+
+    return stripe.Invoice.modify(
+        invoice.id,
+        application_fee_amount=fee,
+        stripe_account=stripe_account,
+    )
 
 
 def create_customer(name, metadata, *, stripe_account):

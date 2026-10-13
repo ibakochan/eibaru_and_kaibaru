@@ -16,6 +16,7 @@ from django.utils.dateparse import parse_datetime
 from .charge_amounts import (
     normalize_paid_amount,
     persisted_charge_amount,
+    platform_fee_kwargs,
 )
 
 from .models import (
@@ -832,9 +833,11 @@ def _charge_member_off_session(
             if isinstance(default_payment_method, dict)
             else default_payment_method
         )
+        charge_amount = persisted_charge_amount(reservation)
         payment_intent = stripe.PaymentIntent.create(
-            amount=persisted_charge_amount(reservation),
+            amount=charge_amount,
             currency=reservation.currency,
+            **platform_fee_kwargs(charge_amount),
             customer=stripe_customer.stripe_customer_id,
             payment_method=payment_method_id,
             off_session=True,
@@ -934,6 +937,11 @@ def _create_checkout_session(
         "stripe_account": club.stripe_account_id,
         "idempotency_key": idempotency_key[:255],
     }
+    event_fee = platform_fee_kwargs(
+        session_kwargs["line_items"][0]["price_data"]["unit_amount"]
+    )
+    if event_fee:
+        session_kwargs["payment_intent_data"] = event_fee
 
     if stripe_customer:
         session_kwargs["customer"] = stripe_customer.stripe_customer_id

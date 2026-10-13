@@ -36,6 +36,24 @@ def invalid_set_price(amount, *, allow_free=True):
     return None
 
 
+def platform_fee_yen(amount):
+    """1% of a yen charge, rounded half up. 0 when there is nothing to take."""
+    try:
+        amount = int(amount or 0)
+    except (TypeError, ValueError):
+        return 0
+    if amount <= 0:
+        return 0
+    return (amount + 50) // 100
+
+
+def platform_fee_kwargs(amount):
+    fee = platform_fee_yen(amount)
+    if fee <= 0:
+        return {}
+    return {"application_fee_amount": fee}
+
+
 def persisted_charge_amount(instance, field="amount"):
     """Round a stored charge up to the paid minimum before Stripe sees it."""
     current = getattr(instance, field)

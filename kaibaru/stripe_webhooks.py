@@ -19,7 +19,10 @@ from datetime import timedelta
 import calendar
 from django.db import IntegrityError
 
-from .stripe_service import get_or_create_stripe_customer
+from .stripe_service import (
+    apply_platform_fee_to_draft_invoice,
+    get_or_create_stripe_customer,
+)
 logger = logging.getLogger(__name__)
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
@@ -823,6 +826,10 @@ def stripe_connected_webhook(request):
                 invoice.id,
                 stripe_account=account_id,
             )
+            invoice = apply_platform_fee_to_draft_invoice(
+                invoice,
+                stripe_account=account_id,
+            )
 
             if invoice.status == "draft":
                 invoice = stripe.Invoice.finalize_invoice(
@@ -986,6 +993,10 @@ def stripe_connected_webhook(request):
 
             invoice = stripe.Invoice.retrieve(
                 invoice.id,
+                stripe_account=account_id,
+            )
+            invoice = apply_platform_fee_to_draft_invoice(
+                invoice,
                 stripe_account=account_id,
             )
             
@@ -1659,6 +1670,10 @@ def stripe_connected_webhook(request):
                 invoice = stripe.Invoice.retrieve(
                     invoice["id"],
                     expand=["lines.data"],
+                    stripe_account=account_id,
+                )
+                apply_platform_fee_to_draft_invoice(
+                    invoice,
                     stripe_account=account_id,
                 )
 

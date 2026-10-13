@@ -2,7 +2,14 @@ from types import SimpleNamespace
 from django.test import SimpleTestCase
 from datetime import date
 
-from kaibaru.charge_amounts import SUBSCRIPTION_SMALL_AMOUNT_MESSAGE
+from kaibaru.charge_amounts import (
+    SUBSCRIPTION_SMALL_AMOUNT_MESSAGE,
+    platform_fee_yen,
+)
+from kaibaru.service_cash_platform_fee import (
+    previous_month,
+    total_platform_fee,
+)
 from kaibaru.discounts import (
     apply_discounts,
     calculate_discounted_amount,
@@ -400,3 +407,25 @@ class DiscountsTests(SimpleTestCase):
         result = apply_subscription_discount(club, member, 1500)
 
         self.assertEqual(result, 1500)
+
+
+class PlatformFeeTests(SimpleTestCase):
+
+    def test_rounds_half_up_to_the_nearest_yen(self):
+        self.assertEqual(platform_fee_yen(0), 0)
+        self.assertEqual(platform_fee_yen(49), 0)
+        self.assertEqual(platform_fee_yen(50), 1)
+        self.assertEqual(platform_fee_yen(99), 1)
+        self.assertEqual(platform_fee_yen(100), 1)
+        self.assertEqual(platform_fee_yen(149), 1)
+        self.assertEqual(platform_fee_yen(150), 2)
+        self.assertEqual(platform_fee_yen(1000), 10)
+        self.assertEqual(platform_fee_yen(1050), 11)
+
+    def test_cash_fees_are_rounded_per_invoice_then_added(self):
+        self.assertEqual(total_platform_fee([1000, 1050, 0]), 21)
+        self.assertEqual(total_platform_fee([50, 50]), 2)
+
+    def test_previous_month_wraps_the_year(self):
+        self.assertEqual(previous_month(date(2026, 10, 13)), (2026, 9))
+        self.assertEqual(previous_month(date(2026, 1, 1)), (2025, 12))

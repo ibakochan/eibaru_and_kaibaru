@@ -30,6 +30,9 @@ from .locks_and_reconciliation import (
 from .service_cycle_invoice_create import (
     CashSubscriptionCycleInvoiceService,
 )
+from .service_cash_platform_fee import (
+    apply_previous_month_cash_platform_fees,
+)
 
 
 
@@ -355,6 +358,13 @@ def reconcile_stripe_subscriptions():
     today = timezone.localdate()
 
     stripe.api_key = settings.STRIPE_SECRET_KEY
+
+    try:
+        apply_previous_month_cash_platform_fees(today)
+    except Exception:
+        logger.exception(
+            "[CASH PLATFORM FEE] Monthly cash fee application failed"
+        )
 
     clubs = Club.objects.filter(is_deleted=False)
 
