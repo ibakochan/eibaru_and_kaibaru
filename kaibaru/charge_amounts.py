@@ -2,10 +2,11 @@ MIN_PAID_AMOUNT = 50
 
 FREE_OR_MIN_MESSAGE = "料金は0円、または50円以上にしてください。"
 MIN_ONLY_MESSAGE = "料金は50円以上にしてください。"
+SUBSCRIPTION_SMALL_AMOUNT_MESSAGE = "1円から49円の月額は50円に繰り上げられます。"
 
 
 def normalize_paid_amount(amount, *, allow_free=True):
-    """0 stays free. 1-49 is charged as 50. Subscription cycles pass allow_free=False."""
+    """0 or below stays free. 1-49 is charged as 50."""
     try:
         amount = int(amount or 0)
     except (TypeError, ValueError):

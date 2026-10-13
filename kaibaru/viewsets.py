@@ -493,6 +493,12 @@ def build_pricing_map(club, request_user=None, preview_member=None):
                         "final": prorated_pricing["final"] + full_pricing["final"],
                         "savings": prorated_pricing["savings"] + full_pricing["savings"],
                     }
+                    rounding_message = (
+                        prorated_pricing.get("1-49_message")
+                        or full_pricing.get("1-49_message")
+                    )
+                    if rounding_message:
+                        today_charge["1-49_message"] = rounding_message
                 else:
                     today_charge = prorated_pricing
 

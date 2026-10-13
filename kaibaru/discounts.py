@@ -5,7 +5,11 @@ from django.db.models import Q
 from .models import MemberPricingAdjustment
 
 from .models import Discount, SubscriptionItem, Member
-from .charge_amounts import normalize_paid_amount
+from .charge_amounts import (
+    MIN_PAID_AMOUNT,
+    SUBSCRIPTION_SMALL_AMOUNT_MESSAGE,
+    normalize_paid_amount,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -260,10 +264,7 @@ def calculate_discounted_amount(
             logger.exception(f"[DISCOUNT] Condition error discount={d.id}: {e}")
 
     if not applicable:
-        return normalize_paid_amount(
-            base_amount,
-            allow_free=apply_to != "subscription",
-        )
+        return normalize_paid_amount(base_amount)
 
     amount = base_amount
 
@@ -298,10 +299,7 @@ def calculate_discounted_amount(
     
     final_amount = max(0, int(amount))
     final_amount = apply_member_adjustments(member, final_amount, plan, proration_ratio, apply_to=apply_to,)
-    final_amount = normalize_paid_amount(
-        final_amount,
-        allow_free=apply_to != "subscription",
-    )
+    final_amount = normalize_paid_amount(final_amount)
 
     logger.info(
         f"[DISCOUNT] Final: {final_amount} from base={base_amount}"
@@ -393,10 +391,7 @@ def calculate_discount_breakdown(*, club, member, base_amount, apply_to, prorati
 
     return {
         "base_amount": base_amount,
-        "final_amount": normalize_paid_amount(
-            amount,
-            allow_free=apply_to != "subscription",
-        ),
+        "final_amount": normalize_paid_amount(max(0, int(amount))),
         "steps": steps,
         "applied": [d.id for d in applicable],
     }
@@ -638,12 +633,10 @@ def apply_discounts(
 
     final = max(0, int(amount))
     final = apply_member_adjustments(member, final, plan, proration_ratio, member_adjustments, pricing_map, apply_to=discount_type,)
-    final = normalize_paid_amount(
-        final,
-        allow_free=discount_type != "subscription",
-    )
+    charged = final
+    final = normalize_paid_amount(final)
 
-    return {
+    result = {
         "base": base_amount,
         "final": final,
         "savings": max(
@@ -651,3 +644,9 @@ def apply_discounts(
             base_amount - final,
         ),
     }
+    if (
+        discount_type == "subscription"
+        and 0 < charged < MIN_PAID_AMOUNT
+    ):
+        result["1-49_message"] = SUBSCRIPTION_SMALL_AMOUNT_MESSAGE
+    return result

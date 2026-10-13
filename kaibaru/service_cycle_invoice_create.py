@@ -10,6 +10,7 @@ from .models import (
     SubscriptionItem,
     Invoice,
     InvoiceItem,
+    Payment,
     TicketGrant,
 )
 from .pricing import (
@@ -250,6 +251,7 @@ class CashSubscriptionCycleInvoiceService:
                     total += amount
 
                 total = max(0, int(total))
+                is_free = total <= 0
 
                 # -----------------------------------------------------
                 # 7. Create local invoice
@@ -273,10 +275,10 @@ class CashSubscriptionCycleInvoiceService:
 
                     subscription=subscription,
 
-                    status="open",
+                    status="paid" if is_free else "open",
 
                     amount_due=total,
-                    amount_paid=0,
+                    amount_paid=total if is_free else 0,
 
                     currency="jpy",
 
@@ -308,6 +310,17 @@ class CashSubscriptionCycleInvoiceService:
                     InvoiceItem.objects.bulk_create(
                         invoice_items,
                         batch_size=500,
+                    )
+
+                if is_free:
+                    Payment.objects.create(
+                        club=subscription.club,
+                        invoice=invoice,
+                        method=subscription.billing_method,
+                        amount=0,
+                        currency="jpy",
+                        status="succeeded",
+                        paid_at=timezone.now(),
                     )
 
                 # -----------------------------------------------------
@@ -422,10 +435,11 @@ class CashSubscriptionCycleInvoiceService:
                 # 13. Email only after successful DB commit
                 # -----------------------------------------------------
 
-                transaction.on_commit(
-                    lambda invoice_id=invoice.id:
-                        send_invoice_created_email.delay(invoice_id)
-                )
+                if not is_free:
+                    transaction.on_commit(
+                        lambda invoice_id=invoice.id:
+                            send_invoice_created_email.delay(invoice_id)
+                    )
 
                 logger.info(
                     "[CASH BILLING] Created invoice and advanced "

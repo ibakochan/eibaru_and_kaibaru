@@ -2,7 +2,9 @@ from types import SimpleNamespace
 from django.test import SimpleTestCase
 from datetime import date
 
+from kaibaru.charge_amounts import SUBSCRIPTION_SMALL_AMOUNT_MESSAGE
 from kaibaru.discounts import (
+    apply_discounts,
     calculate_discounted_amount,
     calculate_discount_breakdown,
     check_conditions,
@@ -228,6 +230,23 @@ class DiscountsTests(SimpleTestCase):
             apply_to="subscription",
         )
 
+        self.assertEqual(result, 0)
+
+    def test_small_positive_remainder_floors_to_minimum(self):
+        member = SimpleNamespace(id=1, club=1, owner=1, gender="male", birth_date=date(2000, 1, 1))
+
+        discount = FakeDiscount(1, "fixed", 992, [])
+
+        from kaibaru import discounts as mod
+        mod.get_applicable_discounts = lambda *a, **k: [discount]
+
+        result = calculate_discounted_amount(
+            club=SimpleNamespace(id=1),
+            member=member,
+            base_amount=1000,
+            apply_to="subscription",
+        )
+
         self.assertEqual(result, 50)
 
     def test_no_discounts(self):
@@ -267,8 +286,43 @@ class DiscountsTests(SimpleTestCase):
                 base_amount=0,
                 apply_to="subscription",
             ),
-            50,
+            0,
         )
+
+    def test_pricing_map_explains_small_subscription_amounts(self):
+        member = SimpleNamespace(id=1)
+
+        def price(base_amount, discount_type="subscription"):
+            return apply_discounts(
+                member=member,
+                member_adjustments={},
+                member_id=member.id,
+                base_amount=base_amount,
+                discount_type=discount_type,
+                member_subscription_discounts={},
+                member_joining_discounts={},
+                subscription_discount_plan_ids={},
+                joining_discount_plan_ids={},
+            )
+
+        rounded = price(30)
+        self.assertEqual(rounded["final"], 50)
+        self.assertEqual(
+            rounded["1-49_message"],
+            SUBSCRIPTION_SMALL_AMOUNT_MESSAGE,
+        )
+
+        free = price(0)
+        self.assertEqual(free["final"], 0)
+        self.assertNotIn("1-49_message", free)
+
+        full = price(80)
+        self.assertEqual(full["final"], 80)
+        self.assertNotIn("1-49_message", full)
+
+        joining = price(30, "joining_fee")
+        self.assertEqual(joining["final"], 50)
+        self.assertNotIn("1-49_message", joining)
 
     def test_non_subscription_keeps_free_and_rounds_small_amounts(self):
         member = SimpleNamespace(id=1, club=1, owner=1, gender="male", birth_date=date(2000, 1, 1))
