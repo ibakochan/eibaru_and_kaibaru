@@ -144,8 +144,11 @@ def update_club_billing_settings(request, club_id):
     if "joining_fee" in data:
         try:
             fee = int(data["joining_fee"])
-            if fee < 0:
-                return JsonResponse({"error": "入会金は0以上で入力してください"}, status=400)
+            from .charge_amounts import invalid_set_price
+
+            fee_message = invalid_set_price(fee, allow_free=True)
+            if fee_message:
+                return JsonResponse({"error": fee_message}, status=400)
     
             club.joining_fee = fee
             updated_fields.append("joining_fee")

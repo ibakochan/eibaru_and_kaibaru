@@ -156,6 +156,10 @@ def _prepare_visitor_request(
             "このレッスンはビジター予約を受け付けていません。"
         )
 
+    from .charge_amounts import normalize_paid_amount
+
+    reservation_price = normalize_paid_amount(reservation_price)
+
     if lesson.weekday != reservation_date.weekday():
         raise ValueError(
             "選択した日付がレッスンの曜日と一致していません。"

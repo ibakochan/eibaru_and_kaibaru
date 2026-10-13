@@ -13,6 +13,11 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
+from .charge_amounts import (
+    normalize_paid_amount,
+    persisted_charge_amount,
+)
+
 from .models import (
     Bracket,
     Club,
@@ -306,7 +311,7 @@ class EventReservationService:
         _require_registration_open(event)
 
         price = selected_event_price(event, price_id)
-        amount = price.amount
+        amount = normalize_paid_amount(price.amount)
         price_name = price.name
         _require_stripe_for_price(club, amount)
 
@@ -338,7 +343,7 @@ class EventReservationService:
                 raise ValueError("このイベントは会員予約を受け付けていません。")
 
             price = selected_event_price(locked_event, price_id)
-            amount = price.amount
+            amount = normalize_paid_amount(price.amount)
             price_name = price.name
             _require_stripe_for_price(club, amount)
 
@@ -582,7 +587,7 @@ class EventReservationService:
                 raise ValueError("メールアドレスを入力してください。")
 
         price = selected_event_price(event, price_id)
-        amount = price.amount
+        amount = normalize_paid_amount(price.amount)
         price_name = price.name
         _require_stripe_for_price(club, amount)
         reservation_key = visitor_reservation_key(event, email)
@@ -638,7 +643,7 @@ def _save_visitor_reservation(
         raise ValueError("このイベントは一般予約を受け付けていません。")
 
     price = selected_event_price(locked_event, price_id)
-    amount = price.amount
+    amount = normalize_paid_amount(price.amount)
     price_name = price.name
     _require_stripe_for_price(club, amount)
 
@@ -828,7 +833,7 @@ def _charge_member_off_session(
             else default_payment_method
         )
         payment_intent = stripe.PaymentIntent.create(
-            amount=reservation.amount,
+            amount=persisted_charge_amount(reservation),
             currency=reservation.currency,
             customer=stripe_customer.stripe_customer_id,
             payment_method=payment_method_id,
@@ -904,7 +909,7 @@ def _create_checkout_session(
                             else (event.title or "イベント")
                         )[:250],
                     },
-                    "unit_amount": reservation.amount,
+                    "unit_amount": persisted_charge_amount(reservation),
                 },
                 "quantity": 1,
             }
@@ -1676,6 +1681,11 @@ def _optional_money(value, label):
         raise ValueError(f"{label}は数字で入力してください。")
     if number < 0:
         raise ValueError(f"{label}は0以上にしてください。")
+    from .charge_amounts import invalid_set_price
+
+    message = invalid_set_price(number, allow_free=True)
+    if message:
+        raise ValueError(message)
     return number
 
 

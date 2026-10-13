@@ -23,6 +23,7 @@ from .rules_reservations import (
     resolve_max_days_ahead,
 )
 from .stripe_service import get_or_create_stripe_customer
+from .charge_amounts import persisted_charge_amount
 from .tasks_emails import (
     send_visitor_reservation_confirmation_email,
 )
@@ -446,7 +447,7 @@ def _open_new_checkout(prepared):
                             f"{lesson.title}（{reservation.full_name}）"
                         )[:250],
                     },
-                    "unit_amount": reservation.amount,
+                    "unit_amount": persisted_charge_amount(reservation),
                 },
                 "quantity": 1,
             }

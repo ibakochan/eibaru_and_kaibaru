@@ -4,6 +4,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from .pricing import calculate_ticket_expiration
+from .charge_amounts import normalize_paid_amount
 
 from .models import (
     TicketPackage,
@@ -111,9 +112,17 @@ class TicketPurchaseService:
 
         # --------------------------------------------------
         # Stripe configuration
+        #
+        # A 0 yen package is granted immediately and does
+        # not need a connected Stripe account.
         # --------------------------------------------------
 
-        if not club.stripe_account_id:
+        charged_amount = normalize_paid_amount(
+            package.price,
+            allow_free=True,
+        )
+
+        if charged_amount > 0 and not club.stripe_account_id:
             raise ValueError(
                 "このクラブではオンライン決済が設定されていません。"
             )
@@ -144,10 +153,34 @@ class TicketPurchaseService:
                 member=member,
                 package=package,
                 quantity=package.quantity,
-                amount=package.price,
+                amount=charged_amount,
                 currency=package.currency,
                 status=TicketPurchase.Status.PENDING,
             )
+
+        if purchase.amount == 0:
+            paid_at = timezone.now()
+            with transaction.atomic():
+                purchase.status = TicketPurchase.Status.PAID
+                purchase.paid_at = paid_at
+                purchase.save(update_fields=["status", "paid_at"])
+                TicketGrant.objects.create(
+                    member=member,
+                    ticket_type=package.ticket_type,
+                    source=TicketGrant.Source.PURCHASE,
+                    package=package,
+                    quantity=package.quantity,
+                    expires_at=calculate_ticket_expiration(
+                        package=package,
+                        granted_at=paid_at,
+                    ),
+                )
+            return {
+                "purchase_id": purchase.id,
+                "success": True,
+                "paid": True,
+                "requires_checkout": False,
+            }
 
         # --------------------------------------------------
         # Stripe customer
@@ -349,9 +382,13 @@ class TicketPurchaseService:
 
                 "line_items": [
                     {
-                        "price": (
-                            package.stripe_price_id
-                        ),
+                        "price_data": {
+                            "currency": purchase.currency,
+                            "unit_amount": purchase.amount,
+                            "product_data": {
+                                "name": package.name or "チケット",
+                            },
+                        },
                         "quantity": 1,
                     }
                 ],
@@ -407,7 +444,7 @@ class TicketPurchaseService:
                     club.stripe_account_id,
 
                 "idempotency_key": (
-                    f"ticket_purchase_"
+                    f"ticket_purchase_checkout_"
                     f"{purchase.id}"
                 ),
 

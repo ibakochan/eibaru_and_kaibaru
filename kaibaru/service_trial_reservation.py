@@ -161,6 +161,10 @@ def _prepare_trial_request(
     if reservation_price is None:
         reservation_price = 0
 
+    from .charge_amounts import normalize_paid_amount
+
+    reservation_price = normalize_paid_amount(reservation_price)
+
     if lesson.weekday != reservation_date.weekday():
         raise ValueError(
             "選択した日付がレッスンの曜日と一致していません。"

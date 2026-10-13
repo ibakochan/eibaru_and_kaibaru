@@ -27,10 +27,26 @@ class FakeDiscount:
         self.id = id
         self.discount_type = discount_type
         self.value = value
-        self.conditions = SimpleNamespace(all=lambda: conditions)
+        self.apply_to = "subscription"
+        self.conditions = SimpleNamespace(
+            all=lambda: conditions,
+            exists=lambda: True,
+        )
+        self.plans = SimpleNamespace(exists=lambda: False)
 
 
 class DiscountsTests(SimpleTestCase):
+
+    def setUp(self):
+        from kaibaru import discounts as mod
+
+        self._adjustment_lookup = mod.get_member_pricing_adjustment
+        mod.get_member_pricing_adjustment = lambda member_id: []
+
+    def tearDown(self):
+        from kaibaru import discounts as mod
+
+        mod.get_member_pricing_adjustment = self._adjustment_lookup
 
     # -------------------------
     # AGE CALC
@@ -49,7 +65,7 @@ class DiscountsTests(SimpleTestCase):
     # -------------------------
 
     def test_gender_condition_pass(self):
-        member = SimpleNamespace(gender="male", birth_date=date(2000, 1, 1), owner=1)
+        member = SimpleNamespace(id=1, gender="male", birth_date=date(2000, 1, 1), owner=1, club=1)
 
         discount = SimpleNamespace(
             conditions=SimpleNamespace(all=lambda: [
@@ -60,7 +76,7 @@ class DiscountsTests(SimpleTestCase):
         self.assertTrue(check_conditions(discount, member))
 
     def test_gender_condition_fail(self):
-        member = SimpleNamespace(gender="female", birth_date=date(2000, 1, 1), owner=1)
+        member = SimpleNamespace(id=1, gender="female", birth_date=date(2000, 1, 1), owner=1, club=1)
 
         discount = SimpleNamespace(
             conditions=SimpleNamespace(all=lambda: [
@@ -71,7 +87,7 @@ class DiscountsTests(SimpleTestCase):
         self.assertFalse(check_conditions(discount, member))
 
     def test_age_lt_condition(self):
-        member = SimpleNamespace(gender="male", birth_date=date(2010, 1, 1), owner=1)
+        member = SimpleNamespace(id=1, gender="male", birth_date=date(2010, 1, 1), owner=1, club=1)
 
         discount = SimpleNamespace(
             conditions=SimpleNamespace(all=lambda: [
@@ -82,7 +98,7 @@ class DiscountsTests(SimpleTestCase):
         self.assertTrue(check_conditions(discount, member))
 
     def test_age_gt_condition(self):
-        member = SimpleNamespace(gender="male", birth_date=date(2000, 1, 1), owner=1)
+        member = SimpleNamespace(id=1, gender="male", birth_date=date(2000, 1, 1), owner=1, club=1)
 
         discount = SimpleNamespace(
             conditions=SimpleNamespace(all=lambda: [
@@ -98,9 +114,11 @@ class DiscountsTests(SimpleTestCase):
 
     def test_family_condition_pass(self):
         member = SimpleNamespace(
+            id=1,
             gender="male",
             birth_date=date(2000, 1, 1),
-            owner=1
+            owner=1,
+            club=1,
         )
 
         discount = SimpleNamespace(
@@ -113,6 +131,9 @@ class DiscountsTests(SimpleTestCase):
         from kaibaru import discounts as mod
 
         class FakeQuery:
+            def exclude(self, **kwargs):
+                return self
+
             def count(self):
                 return 3  # meets requirement (>=2)
 
@@ -124,9 +145,11 @@ class DiscountsTests(SimpleTestCase):
 
     def test_family_condition_fail(self):
         member = SimpleNamespace(
+            id=1,
             gender="male",
             birth_date=date(2000, 1, 1),
-            owner=1
+            owner=1,
+            club=1,
         )
 
         discount = SimpleNamespace(
@@ -138,6 +161,9 @@ class DiscountsTests(SimpleTestCase):
         from kaibaru import discounts as mod
 
         class FakeQuery:
+            def exclude(self, **kwargs):
+                return self
+
             def count(self):
                 return 2  # not enough (<5)
 
@@ -152,7 +178,7 @@ class DiscountsTests(SimpleTestCase):
     # -------------------------
 
     def test_percentage_then_fixed_stack(self):
-        member = SimpleNamespace(id=1, owner=1, gender="male", birth_date=date(2000, 1, 1))
+        member = SimpleNamespace(id=1, club=1, owner=1, gender="male", birth_date=date(2000, 1, 1))
 
         discount1 = FakeDiscount(1, "percentage", 10, [])
         discount2 = FakeDiscount(2, "fixed", 100, [])
@@ -170,7 +196,7 @@ class DiscountsTests(SimpleTestCase):
         self.assertEqual(result, 800)
 
     def test_multiple_percentage_stack(self):
-        member = SimpleNamespace(id=1, owner=1, gender="male", birth_date=date(2000, 1, 1))
+        member = SimpleNamespace(id=1, club=1, owner=1, gender="male", birth_date=date(2000, 1, 1))
 
         d1 = FakeDiscount(1, "percentage", 10, [])
         d2 = FakeDiscount(2, "percentage", 10, [])
@@ -188,7 +214,7 @@ class DiscountsTests(SimpleTestCase):
         self.assertEqual(result, 810)
 
     def test_clamp_to_zero(self):
-        member = SimpleNamespace(id=1, owner=1, gender="male", birth_date=date(2000, 1, 1))
+        member = SimpleNamespace(id=1, club=1, owner=1, gender="male", birth_date=date(2000, 1, 1))
 
         discount = FakeDiscount(1, "fixed", 5000, [])
 
@@ -202,10 +228,10 @@ class DiscountsTests(SimpleTestCase):
             apply_to="subscription",
         )
 
-        self.assertEqual(result, 0)
+        self.assertEqual(result, 50)
 
     def test_no_discounts(self):
-        member = SimpleNamespace(id=1, owner=1, gender="male", birth_date=date(2000, 1, 1))
+        member = SimpleNamespace(id=1, club=1, owner=1, gender="male", birth_date=date(2000, 1, 1))
 
         from kaibaru import discounts as mod
         mod.get_applicable_discounts = lambda *a, **k: []
@@ -219,12 +245,62 @@ class DiscountsTests(SimpleTestCase):
 
         self.assertEqual(result, 1000)
 
+    def test_subscription_floor_without_discounts(self):
+        member = SimpleNamespace(id=1, club=1, owner=1, gender="male", birth_date=date(2000, 1, 1))
+
+        from kaibaru import discounts as mod
+        mod.get_applicable_discounts = lambda *a, **k: []
+
+        self.assertEqual(
+            calculate_discounted_amount(
+                club=SimpleNamespace(id=1),
+                member=member,
+                base_amount=30,
+                apply_to="subscription",
+            ),
+            50,
+        )
+        self.assertEqual(
+            calculate_discounted_amount(
+                club=SimpleNamespace(id=1),
+                member=member,
+                base_amount=0,
+                apply_to="subscription",
+            ),
+            50,
+        )
+
+    def test_non_subscription_keeps_free_and_rounds_small_amounts(self):
+        member = SimpleNamespace(id=1, club=1, owner=1, gender="male", birth_date=date(2000, 1, 1))
+
+        from kaibaru import discounts as mod
+        mod.get_applicable_discounts = lambda *a, **k: []
+
+        self.assertEqual(
+            calculate_discounted_amount(
+                club=SimpleNamespace(id=1),
+                member=member,
+                base_amount=0,
+                apply_to="joining_fee",
+            ),
+            0,
+        )
+        self.assertEqual(
+            calculate_discounted_amount(
+                club=SimpleNamespace(id=1),
+                member=member,
+                base_amount=30,
+                apply_to="joining_fee",
+            ),
+            50,
+        )
+
     # -------------------------
     # BREAKDOWN TEST
     # -------------------------
 
     def test_breakdown_structure(self):
-        member = SimpleNamespace(id=1, owner=1, gender="male", birth_date=date(2000, 1, 1))
+        member = SimpleNamespace(id=1, club=1, owner=1, gender="male", birth_date=date(2000, 1, 1))
 
         d1 = FakeDiscount(1, "percentage", 10, [])
         d2 = FakeDiscount(2, "fixed", 100, [])

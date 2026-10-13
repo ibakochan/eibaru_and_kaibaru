@@ -5,6 +5,7 @@ from django.db.models import Q
 from .models import MemberPricingAdjustment
 
 from .models import Discount, SubscriptionItem, Member
+from .charge_amounts import normalize_paid_amount
 
 logger = logging.getLogger(__name__)
 
@@ -259,7 +260,10 @@ def calculate_discounted_amount(
             logger.exception(f"[DISCOUNT] Condition error discount={d.id}: {e}")
 
     if not applicable:
-        return max(0, int(base_amount))
+        return normalize_paid_amount(
+            base_amount,
+            allow_free=apply_to != "subscription",
+        )
 
     amount = base_amount
 
@@ -294,6 +298,10 @@ def calculate_discounted_amount(
     
     final_amount = max(0, int(amount))
     final_amount = apply_member_adjustments(member, final_amount, plan, proration_ratio, apply_to=apply_to,)
+    final_amount = normalize_paid_amount(
+        final_amount,
+        allow_free=apply_to != "subscription",
+    )
 
     logger.info(
         f"[DISCOUNT] Final: {final_amount} from base={base_amount}"
@@ -385,7 +393,10 @@ def calculate_discount_breakdown(*, club, member, base_amount, apply_to, prorati
 
     return {
         "base_amount": base_amount,
-        "final_amount": max(0, int(amount)),
+        "final_amount": normalize_paid_amount(
+            amount,
+            allow_free=apply_to != "subscription",
+        ),
         "steps": steps,
         "applied": [d.id for d in applicable],
     }
@@ -627,6 +638,10 @@ def apply_discounts(
 
     final = max(0, int(amount))
     final = apply_member_adjustments(member, final, plan, proration_ratio, member_adjustments, pricing_map, apply_to=discount_type,)
+    final = normalize_paid_amount(
+        final,
+        allow_free=discount_type != "subscription",
+    )
 
     return {
         "base": base_amount,

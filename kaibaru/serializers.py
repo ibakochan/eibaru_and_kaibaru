@@ -535,6 +535,13 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
 
         validate_age_range_attrs(attrs, self.instance)
 
+        if "price" in attrs:
+            from .charge_amounts import invalid_set_price
+
+            message = invalid_set_price(attrs.get("price"), allow_free=False)
+            if message:
+                raise serializers.ValidationError({"price": message})
+
         bundled = attrs.get("bundled_plans")
 
         # =========================================================
@@ -1896,6 +1903,19 @@ class LessonSerializer(serializers.ModelSerializer):
         validate_age_range_attrs(attrs, self.instance)
         validate_reservation_cap_attrs(attrs, self.instance)
 
+        from .charge_amounts import invalid_set_price
+
+        for field in (
+            "trial_price",
+            "visitor_reservation_price",
+            "member_reservation_price",
+        ):
+            if field not in attrs or attrs.get(field) is None:
+                continue
+            message = invalid_set_price(attrs.get(field), allow_free=True)
+            if message:
+                raise serializers.ValidationError({field: message})
+
         allowed_plans = attrs.get(
             "allowed_plans",
             list(self.instance.allowed_plans.all())
@@ -2618,6 +2638,21 @@ class ClubSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         validate_reservation_cap_attrs(attrs, self.instance)
+
+        from .charge_amounts import invalid_set_price
+
+        for field in (
+            "joining_fee",
+            "trial_price",
+            "visitor_reservation_price",
+            "member_reservation_price",
+        ):
+            if field not in attrs or attrs.get(field) is None:
+                continue
+            message = invalid_set_price(attrs.get(field), allow_free=True)
+            if message:
+                raise serializers.ValidationError({field: message})
+
         return attrs
 
     def get_membership_plans(self, club):
@@ -3019,10 +3054,11 @@ class TicketPackageSerializer(serializers.ModelSerializer):
         return value
 
     def validate_price(self, value):
-        if value <= 0:
-            raise serializers.ValidationError(
-                "価格は1円以上にしてください。"
-            )
+        from .charge_amounts import invalid_set_price
+
+        message = invalid_set_price(value, allow_free=True)
+        if message:
+            raise serializers.ValidationError(message)
 
         return value
 

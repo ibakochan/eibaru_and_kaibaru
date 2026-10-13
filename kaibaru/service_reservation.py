@@ -16,6 +16,7 @@ from .models import (
     TicketUsage,
 )
 from .stripe_service import get_or_create_stripe_customer
+from .charge_amounts import persisted_charge_amount
 from .discounts import calculate_age
 from .rules_eligibility import assert_member_eligible_for_lesson
 from .reservation_checkout_recovery import (
@@ -275,6 +276,10 @@ class MemberReservationService:
                 "このレッスンでは会員予約を"
                 "受け付けていません。"
             )
+
+        from .charge_amounts import normalize_paid_amount
+
+        reservation_price = normalize_paid_amount(reservation_price)
 
         # --------------------------------------------------
         # Determine whether the member already has access
@@ -927,7 +932,7 @@ class MemberReservationService:
 
                     payment_intent = (
                         stripe.PaymentIntent.create(
-                            amount=reservation.amount,
+                            amount=persisted_charge_amount(reservation),
                             currency=reservation.currency,
                             customer=(
                                 stripe_customer
@@ -1038,7 +1043,7 @@ class MemberReservationService:
                                     locked_lesson.title,
                             },
                             "unit_amount":
-                                reservation.amount,
+                                persisted_charge_amount(reservation),
                         },
                         "quantity": 1,
                     }

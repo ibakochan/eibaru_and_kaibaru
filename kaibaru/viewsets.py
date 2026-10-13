@@ -1023,11 +1023,12 @@ class MembershipPlanViewSet(viewsets.ModelViewSet):
                 "name": "プラン名を入力してください。"
             })
 
-        if price is None or price <= 0:
+        from .charge_amounts import invalid_set_price
+
+        price_message = invalid_set_price(price, allow_free=False)
+        if price is None or price_message:
             raise serializers.ValidationError({
-                "price": (
-                    "料金は1円以上にしてください。"
-                )
+                "price": price_message or "料金は50円以上にしてください。"
             })
 
         # ---------------------------------------------------------
@@ -1738,17 +1739,21 @@ class TicketPackageViewSet(viewsets.ModelViewSet):
                 "detail": "チケットパッケージを作成できるのはオーナーのみです。"
             })
 
+        package = serializer.save(
+            club=club,
+            currency="jpy",
+        )
+
+        if int(package.price or 0) <= 0:
+            return
+
         if not club.stripe_account_id:
+            package.delete()
             raise serializers.ValidationError({
                 "detail": (
                     "このクラブではオンライン決済が設定されていません。"
                 )
             })
-
-        package = serializer.save(
-            club=club,
-            currency="jpy",
-        )
 
         try:
             product_data = {
@@ -1808,6 +1813,17 @@ class TicketPackageViewSet(viewsets.ModelViewSet):
         )
 
         club = package.club
+
+        if int(updated_package.price or 0) <= 0:
+            if old_stripe_price_id and club.stripe_account_id:
+                stripe.Price.modify(
+                    old_stripe_price_id,
+                    active=False,
+                    stripe_account=club.stripe_account_id,
+                )
+                updated_package.stripe_price_id = ""
+                updated_package.save(update_fields=["stripe_price_id"])
+            return
 
         if not club.stripe_account_id:
             raise serializers.ValidationError({
