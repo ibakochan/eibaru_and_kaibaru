@@ -36,6 +36,7 @@ from .service_add_plan_cash import CashAddPlanService
 from .service_reservation import MemberReservationService
 
 from .models import TicketType, TicketPackage, Club, Member, MembershipPlan, SubscriptionItem, Subscription, StripeCustomer, Lesson
+from .club_access import CONNECT_REQUIRES_SUBSCRIPTION, FIRST_OF_MONTH_BLOCKED, club_has_platform_subscription
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
@@ -198,7 +199,10 @@ def create_checkout_session(request, club_id):
 
     if club.owner != request.user:
         return HttpResponseForbidden("You do not own this club")
-    
+
+    if timezone.localdate().day == 1:
+        return JsonResponse({"error": FIRST_OF_MONTH_BLOCKED}, status=400)
+
     if club.stripe_subscription_id:
         sub = stripe.Subscription.retrieve(club.stripe_subscription_id)
 
@@ -1202,7 +1206,8 @@ def create_stripe_account_link(request, club_id):
     if club.owner != request.user:
         return JsonResponse({"error": "この操作を行う権限がありません。"}, status=403)
 
-    
+    if not club_has_platform_subscription(club):
+        return JsonResponse({"error": CONNECT_REQUIRES_SUBSCRIPTION}, status=400)
 
     if club.stripe_onboarding_completed:
         return JsonResponse({"message": "Stripe already connected"})

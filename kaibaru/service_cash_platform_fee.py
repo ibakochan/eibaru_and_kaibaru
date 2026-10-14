@@ -7,11 +7,13 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
-from .charge_amounts import platform_fee_yen
 from .models import Invoice
 
 
 logger = logging.getLogger(__name__)
+
+CASH_FEE_STATUSES = ("open", "paid")
+CASH_FEE_PAYMENT_METHODS = ("cash", "bank_transfer")
 
 
 def previous_month(today):
@@ -31,27 +33,45 @@ def month_bounds(year, month):
 
 
 def total_platform_fee(amounts):
-    return sum(platform_fee_yen(amount) for amount in amounts)
+    """1% of the summed invoice amounts, rounded half up to the nearest yen.
+
+    Cash and bank-transfer invoices are added first. The Stripe fee still
+    rounds each charge on its own.
+    """
+    total = 0
+    for amount in amounts:
+        try:
+            amount = int(amount or 0)
+        except (TypeError, ValueError):
+            continue
+        total += amount
+    if total <= 0:
+        return 0
+    return (total + 50) // 100
+
+
+def _unbilled_cash_invoices(queryset, start, end):
+    return queryset.filter(
+        issued_at__gte=start,
+        issued_at__lt=end,
+        platform_fee_applied=False,
+        status__in=CASH_FEE_STATUSES,
+        payment_method__in=CASH_FEE_PAYMENT_METHODS,
+    )
 
 
 def apply_cash_platform_fees_for_month(year, month):
-    """Add 1% of one month's non-Stripe invoices to each club's Kaibaru bill.
+    """Add 1% of one month's cash and bank-transfer invoices to each club bill.
 
-    Each invoice is rounded on its own, then the yen fees are summed.
-    Invoices stay unmarked when the club cannot be billed yet.
+    Open and paid invoices that have not been billed yet are summed, then
+    1% of that total is rounded to the nearest yen. Invoices stay unmarked
+    when the club cannot be billed yet.
     """
     stripe.api_key = settings.STRIPE_SECRET_KEY
     start, end = month_bounds(year, month)
 
     club_ids = (
-        Invoice.objects
-        .filter(
-            issued_at__gte=start,
-            issued_at__lt=end,
-            platform_fee_applied=False,
-        )
-        .exclude(payment_method="stripe")
-        .exclude(status__in=["void", "draft"])
+        _unbilled_cash_invoices(Invoice.objects, start, end)
         .values_list("club_id", flat=True)
         .distinct()
     )
@@ -86,17 +106,12 @@ def apply_previous_month_cash_platform_fees(today=None):
 def _apply_club_month(club_id, year, month, start, end):
     with transaction.atomic():
         invoices = list(
-            Invoice.objects
-            .select_for_update()
-            .select_related("club")
-            .filter(
-                club_id=club_id,
-                issued_at__gte=start,
-                issued_at__lt=end,
-                platform_fee_applied=False,
+            _unbilled_cash_invoices(
+                Invoice.objects.select_for_update().select_related("club"),
+                start,
+                end,
             )
-            .exclude(payment_method="stripe")
-            .exclude(status__in=["void", "draft"])
+            .filter(club_id=club_id)
             .order_by("id")
         )
         if not invoices:

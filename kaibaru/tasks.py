@@ -33,6 +33,7 @@ from .service_cycle_invoice_create import (
 from .service_cash_platform_fee import (
     apply_previous_month_cash_platform_fees,
 )
+from .club_access import UNSUBSCRIBED_DELETE_DAYS, unsubscribed_open_days
 
 
 
@@ -473,11 +474,12 @@ def reconcile_stripe_subscriptions():
                     expiration_date = timezone.localtime(club.expiration_date).date()
                     days_expired = max((today - expiration_date).days, 0)
 
-                    if days_expired >= 1 and club.subscription_active:
+                    open_days = unsubscribed_open_days(expiration_date)
+                    if days_expired >= open_days and club.subscription_active:
                         club.subscription_active = False
                         club.save()
- 
-                    if days_expired >= 7:
+
+                    if days_expired >= UNSUBSCRIBED_DELETE_DAYS:
                         logger.warning(
                             f"[CELERY] Deleting expired club={club.id}"
                         )

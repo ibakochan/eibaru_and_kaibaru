@@ -16,6 +16,8 @@ from django.db.models import Sum
 from django.db import models
 from datetime import date
 
+from .club_access import UNSUBSCRIBED_DELETE_DAYS, unsubscribed_open_days
+
 
 
 from .models import MembershipPlan
@@ -2712,7 +2714,7 @@ class ClubSerializer(serializers.ModelSerializer):
  
 
         if not club.stripe_subscription_id:
-            return days_after_exp >= 1
+            return days_after_exp >= unsubscribed_open_days(expiration_date)
 
         return 7 < days_after_exp <= 28
 
@@ -2730,32 +2732,31 @@ class ClubSerializer(serializers.ModelSerializer):
 
  
 
-        if not club.stripe_subscription_id and days_after_exp >= 7:
-            return None
-
-        if club.stripe_subscription_id and days_after_exp > 28:
-            return None
-        
         if not club.stripe_subscription_id:
             if request.user != club.owner:
                 return None
 
-            if days_after_exp == 0:
+            open_days = unsubscribed_open_days(expiration_date)
+            if days_after_exp >= UNSUBSCRIBED_DELETE_DAYS:
+                return None
+
+            if days_after_exp < open_days:
+                days_left = open_days - days_after_exp
                 return (
                     "このクラブはまだサブスクリプションに登録されていません。"
-                    "本日中に支払いが完了しない場合、明日からクラブは凍結され、"
-                    "編集や他のユーザーからの閲覧ができなくなります。"
+                    f"あと {days_left} 日以内に登録しないとクラブは凍結されます。"
+                    "登録がないまま30日が過ぎると、クラブは削除されます。"
                 )
-     
-            if days_after_exp >= 1:
-                days_left = max(0, 7 - days_after_exp)
-                return (
-                    "このクラブは現在凍結されています。"
-                    "サブスクリプションが未登録のため、編集および表示が制限されています。"
-                    f"あと {days_left} 日以内に支払いが完了しない場合、"
-                    "クラブと所属メンバーのデータは完全に削除されます。"
-                )
-    
+
+            days_left = UNSUBSCRIBED_DELETE_DAYS - days_after_exp
+            return (
+                "このクラブは現在凍結されています。"
+                "サブスクリプションが未登録のため、編集および表示が制限されています。"
+                f"あと {days_left} 日以内に登録が完了しない場合、"
+                "クラブと所属メンバーのデータは完全に削除されます。"
+            )
+
+        if days_after_exp > 28:
             return None
      
         if 7 < days_after_exp <= 28:

@@ -14,6 +14,7 @@ from django.db.models import Q, F
 from datetime import date
 from django.db.models import IntegerField, Sum, Value
 from .service_legacy_subscription import LegacySubscriptionService
+from .club_access import MEMBERS_REQUIRE_SUBSCRIPTION, club_has_platform_subscription
 
 
 from collections import defaultdict
@@ -1338,6 +1339,11 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
             raise serializers.ValidationError(
                 {"club_subdomain": "クラブが見つかりません。"}
             )
+
+        if not club_has_platform_subscription(club):
+            raise serializers.ValidationError(
+                {"detail": MEMBERS_REQUIRE_SUBSCRIPTION}
+            )
     
         if not is_family:
             # Only restrict normal users
@@ -1440,6 +1446,12 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
         created_member_ids = []
 
         club = join_requests.first().club
+
+        if not club_has_platform_subscription(club):
+            return Response(
+                {"detail": MEMBERS_REQUIRE_SUBSCRIPTION},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
     
         with transaction.atomic():
             for jr in join_requests:
@@ -1536,6 +1548,21 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
 class MemberViewSet(viewsets.ModelViewSet):
     queryset = Member.objects.all()
     serializer_class = MemberSerializer
+
+    def create(self, request, *args, **kwargs):
+        subdomain = request.data.get("club_subdomain")
+        club = None
+        if subdomain:
+            club = Club.objects.filter(
+                subdomain=subdomain,
+                is_deleted=False,
+            ).first()
+        if club and not club_has_platform_subscription(club):
+            return Response(
+                {"detail": MEMBERS_REQUIRE_SUBSCRIPTION},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return super().create(request, *args, **kwargs)
 
 
     @action(detail=True, methods=["delete"])

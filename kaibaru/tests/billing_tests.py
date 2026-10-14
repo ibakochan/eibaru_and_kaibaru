@@ -3,6 +3,7 @@ from django.test import SimpleTestCase
 from datetime import date, datetime, timezone as dt_timezone
 
 
+from kaibaru.club_access import unsubscribed_open_days
 from kaibaru.billing import (
     get_next_month_start,
     get_next_billing_cycle_anchor,
@@ -514,6 +515,14 @@ class BillingRulesTests(SimpleTestCase):
             get_resume_charge_amount(item),
             7000
         )
+
+    def test_unsubscribed_open_days_stay_seven_when_the_first_is_outside(self):
+        self.assertEqual(unsubscribed_open_days(date(2026, 10, 14)), 7)
+        self.assertEqual(unsubscribed_open_days(date(2026, 10, 25)), 7)
+
+    def test_unsubscribed_open_days_become_eight_when_the_first_is_inside(self):
+        self.assertEqual(unsubscribed_open_days(date(2026, 10, 26)), 8)
+        self.assertEqual(unsubscribed_open_days(date(2026, 11, 1)), 8)
 
     def test_get_resume_success_message(self):
         self.assertEqual(

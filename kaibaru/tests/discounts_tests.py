@@ -422,9 +422,13 @@ class PlatformFeeTests(SimpleTestCase):
         self.assertEqual(platform_fee_yen(1000), 10)
         self.assertEqual(platform_fee_yen(1050), 11)
 
-    def test_cash_fees_are_rounded_per_invoice_then_added(self):
+    def test_cash_fees_are_one_percent_of_the_sum(self):
         self.assertEqual(total_platform_fee([1000, 1050, 0]), 21)
-        self.assertEqual(total_platform_fee([50, 50]), 2)
+        self.assertEqual(total_platform_fee([50, 50]), 1)
+        self.assertEqual(total_platform_fee([40, 40]), 1)
+        self.assertEqual(total_platform_fee([24, 25]), 0)
+        self.assertEqual(total_platform_fee([49]), 0)
+        self.assertEqual(total_platform_fee([150]), 2)
 
     def test_previous_month_wraps_the_year(self):
         self.assertEqual(previous_month(date(2026, 10, 13)), (2026, 9))
