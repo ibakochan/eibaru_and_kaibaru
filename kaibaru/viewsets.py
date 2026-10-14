@@ -3254,6 +3254,20 @@ class TeamTournamentViewSet(viewsets.ViewSet):
             ),
         )
 
+    @action(detail=True, methods=["post"], url_path="enter-many")
+    def enter_many(self, request, pk=None):
+        from .service_team_tournament import enter_many
+
+        return self._run(
+            request,
+            pk,
+            lambda tournament: enter_many(
+                tournament,
+                request.data.get("bracket_id"),
+                request.data.get("team_ids"),
+            ),
+        )
+
     @action(detail=True, methods=["post"])
     def leave(self, request, pk=None):
         from .service_team_tournament import leave_bracket

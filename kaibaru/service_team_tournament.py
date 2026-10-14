@@ -302,6 +302,27 @@ def _reservation_ids(values):
     return ids
 
 
+def _team_ids(values):
+    if isinstance(values, (str, int)):
+        values = [values]
+    if not isinstance(values, (list, tuple)):
+        raise ValueError("チームを選んでください。")
+    ids = []
+    seen = set()
+    for value in values:
+        try:
+            key = int(value)
+        except (TypeError, ValueError):
+            raise ValueError("チームが見つかりません。")
+        if key in seen:
+            continue
+        seen.add(key)
+        ids.append(key)
+    if not ids:
+        raise ValueError("チームを選んでください。")
+    return ids
+
+
 def _person_label(reservation):
     name = str(reservation.full_name or "").strip()
     return f"{name}さん" if name else "この人"
@@ -636,6 +657,47 @@ def enter_bracket(tournament, bracket_id, team_id):
         team=team,
         position=_next_position(bracket.entries),
     )
+    _materialize(bracket)
+    _refresh_all(bracket)
+
+
+@transaction.atomic
+def enter_many(tournament, bracket_id, team_ids):
+    bracket = _bracket(tournament, bracket_id)
+    if _locked(bracket):
+        raise ValueError("勝敗が決まっているので、チームの入れ替えはできません。")
+    ids = _team_ids(team_ids)
+    already = set(
+        TeamBracketEntry.objects.filter(bracket=bracket, team_id__in=ids).values_list(
+            "team_id",
+            flat=True,
+        )
+    )
+    teams = []
+    for team_id in ids:
+        if team_id in already:
+            continue
+        team = _team(tournament, team_id)
+        label = str(team.name or "").strip() or "このチーム"
+        if not team.members.exists():
+            raise ValueError(f"{label}に人を入れてからブラケットに入れてください。")
+        if TeamBracketEntry.objects.filter(team=team).exists():
+            raise ValueError(f"{label}はすでにブラケットに入っています。")
+        teams.append(team)
+    if not teams:
+        return
+    position = _next_position(bracket.entries)
+    for team in teams:
+        label = str(team.name or "").strip() or "このチーム"
+        try:
+            TeamBracketEntry.objects.create(
+                bracket=bracket,
+                team=team,
+                position=position,
+            )
+        except IntegrityError:
+            raise ValueError(f"{label}はすでにブラケットに入っています。")
+        position += 1
     _materialize(bracket)
     _refresh_all(bracket)
 
