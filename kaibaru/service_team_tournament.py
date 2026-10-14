@@ -281,6 +281,50 @@ def _paid(event, reservation_id):
     return row
 
 
+def _reservation_ids(values):
+    if isinstance(values, (str, int)):
+        values = [values]
+    if not isinstance(values, (list, tuple)):
+        raise ValueError("参加者を選んでください。")
+    ids = []
+    seen = set()
+    for value in values:
+        try:
+            key = int(value)
+        except (TypeError, ValueError):
+            raise ValueError("参加者が見つかりません。")
+        if key in seen:
+            continue
+        seen.add(key)
+        ids.append(key)
+    if not ids:
+        raise ValueError("参加者を選んでください。")
+    return ids
+
+
+def _person_label(reservation):
+    name = str(reservation.full_name or "").strip()
+    return f"{name}さん" if name else "この人"
+
+
+def _paid_named(event, reservation_id):
+    try:
+        key = int(reservation_id)
+    except (TypeError, ValueError):
+        raise ValueError("参加者が見つかりません。")
+    row = EventReservation.objects.select_for_update().filter(id=key).first()
+    if row is None:
+        raise ValueError("参加者が見つかりません。")
+    if (
+        row.event_id != event.id
+        or row.is_deleted
+        or row.canceled
+        or row.status != EventReservation.Status.PAID
+    ):
+        raise ValueError(f"{_person_label(row)}は支払い済みの予約だけチームに入れられます。")
+    return row
+
+
 def _clear_reservation_record(reservation_id):
     MemberRecord.objects.filter(
         reservation_id=reservation_id,
@@ -474,6 +518,45 @@ def add_member(tournament, team_id, reservation_id):
         )
     except IntegrityError:
         raise ValueError("この人はすでにチームに入っています。")
+    entry = _entry_for(team)
+    if entry is not None:
+        _refresh_all(entry.bracket)
+
+
+@transaction.atomic
+def add_members(tournament, team_id, reservation_ids):
+    team = _team(tournament, team_id)
+    ids = _reservation_ids(reservation_ids)
+    already = set(
+        TournamentTeamMember.objects.filter(team=team, reservation_id__in=ids).values_list(
+            "reservation_id",
+            flat=True,
+        )
+    )
+    reservations = []
+    for reservation_id in ids:
+        if reservation_id in already:
+            continue
+        reservation = _paid_named(tournament.event, reservation_id)
+        if TournamentTeamMember.objects.filter(
+            reservation=reservation,
+            team__tournament=tournament,
+        ).exists():
+            raise ValueError(f"{_person_label(reservation)}はすでに別のチームに入っています。")
+        reservations.append(reservation)
+    if not reservations:
+        return
+    position = _next_position(team.members)
+    for reservation in reservations:
+        try:
+            TournamentTeamMember.objects.create(
+                team=team,
+                reservation=reservation,
+                position=position,
+            )
+        except IntegrityError:
+            raise ValueError(f"{_person_label(reservation)}はすでにチームに入っています。")
+        position += 1
     entry = _entry_for(team)
     if entry is not None:
         _refresh_all(entry.bracket)

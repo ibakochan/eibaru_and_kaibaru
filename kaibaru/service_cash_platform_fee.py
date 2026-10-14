@@ -5,6 +5,7 @@ from datetime import datetime
 import stripe
 from django.conf import settings
 from django.db import transaction
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from .models import Invoice
@@ -51,9 +52,16 @@ def total_platform_fee(amounts):
 
 
 def _unbilled_cash_invoices(queryset, start, end):
-    return queryset.filter(
-        issued_at__gte=start,
-        issued_at__lt=end,
+    """Cash invoices whose fee month is [start, end).
+
+    A Stripe invoice switched to cash belongs to the month of converted_at.
+    Invoices that were cash from the start use issued_at.
+    """
+    return queryset.annotate(
+        fee_effective_at=Coalesce("converted_at", "issued_at"),
+    ).filter(
+        fee_effective_at__gte=start,
+        fee_effective_at__lt=end,
         platform_fee_applied=False,
         status__in=CASH_FEE_STATUSES,
         payment_method__in=CASH_FEE_PAYMENT_METHODS,
@@ -64,8 +72,9 @@ def apply_cash_platform_fees_for_month(year, month):
     """Add 1% of one month's cash and bank-transfer invoices to each club bill.
 
     Open and paid invoices that have not been billed yet are summed, then
-    1% of that total is rounded to the nearest yen. Invoices stay unmarked
-    when the club cannot be billed yet.
+    1% of that total is rounded to the nearest yen. Converted Stripe invoices
+    use converted_at for the month. If Stripe already has this month's fee,
+    the invoices are marked and no second item is created.
     """
     stripe.api_key = settings.STRIPE_SECRET_KEY
     start, end = month_bounds(year, month)
@@ -140,24 +149,38 @@ def _apply_club_month(club_id, year, month, start, end):
             }
 
         if fee > 0:
-            stripe.InvoiceItem.create(
-                customer=club.stripe_customer_id,
-                amount=fee,
-                currency="jpy",
-                description=f"現金・振込の手数料（{year}年{month}月）",
-                metadata={
-                    "type": "cash_platform_fee",
-                    "club_id": str(club_id),
-                    "year": str(year),
-                    "month": str(month),
-                },
-                idempotency_key=_idempotency_key(
+            if _cash_platform_fee_item_exists(
+                club.stripe_customer_id,
+                club_id,
+                year,
+                month,
+            ):
+                logger.info(
+                    "[CASH PLATFORM FEE] Club=%s %s-%s already billed. "
+                    "Marking %s invoices.",
                     club_id,
                     year,
                     month,
-                    invoice_ids,
-                ),
-            )
+                    len(invoice_ids),
+                )
+            else:
+                stripe.InvoiceItem.create(
+                    customer=club.stripe_customer_id,
+                    amount=fee,
+                    currency="jpy",
+                    description=f"現金・振込の手数料（{year}年{month}月）",
+                    metadata=_cash_platform_fee_metadata(
+                        club_id,
+                        year,
+                        month,
+                    ),
+                    idempotency_key=_idempotency_key(
+                        club_id,
+                        year,
+                        month,
+                        invoice_ids,
+                    ),
+                )
 
         Invoice.objects.filter(id__in=invoice_ids).update(
             platform_fee_applied=True,
@@ -177,6 +200,47 @@ def _apply_club_month(club_id, year, month, start, end):
         "fee": fee,
         "invoice_count": len(invoice_ids),
     }
+
+
+def _cash_platform_fee_metadata(club_id, year, month):
+    return {
+        "type": "cash_platform_fee",
+        "club_id": str(club_id),
+        "year": str(year),
+        "month": str(month),
+    }
+
+
+def _item_metadata(item):
+    metadata = item.get("metadata") if hasattr(item, "get") else None
+    if metadata is None:
+        metadata = getattr(item, "metadata", None)
+    return metadata or {}
+
+
+def _is_cash_platform_fee_item(item, club_id, year, month):
+    metadata = _item_metadata(item)
+    expected = _cash_platform_fee_metadata(club_id, year, month)
+    return all(
+        str(metadata.get(key, "")) == value
+        for key, value in expected.items()
+    )
+
+
+def _cash_platform_fee_item_exists(customer_id, club_id, year, month):
+    """True when this club already has a platform fee item for that month."""
+    starting_after = None
+    while True:
+        params = {"customer": customer_id, "limit": 100}
+        if starting_after:
+            params["starting_after"] = starting_after
+        page = stripe.InvoiceItem.list(**params)
+        for item in page.data:
+            if _is_cash_platform_fee_item(item, club_id, year, month):
+                return True
+        if not page.has_more or not page.data:
+            return False
+        starting_after = page.data[-1].id
 
 
 def _idempotency_key(club_id, year, month, invoice_ids):

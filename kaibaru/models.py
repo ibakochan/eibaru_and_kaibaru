@@ -800,6 +800,12 @@ class Invoice(models.Model):
 
     issued_at = models.DateTimeField(auto_now_add=True)
 
+    converted_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When a Stripe invoice was switched to cash. The platform fee uses this month instead of issued_at.",
+    )
+
     billing_reason = models.CharField(
         max_length=50,
         choices=[

@@ -7,6 +7,7 @@ from kaibaru.charge_amounts import (
     platform_fee_yen,
 )
 from kaibaru.service_cash_platform_fee import (
+    _is_cash_platform_fee_item,
     previous_month,
     total_platform_fee,
 )
@@ -429,6 +430,19 @@ class PlatformFeeTests(SimpleTestCase):
         self.assertEqual(total_platform_fee([24, 25]), 0)
         self.assertEqual(total_platform_fee([49]), 0)
         self.assertEqual(total_platform_fee([150]), 2)
+
+    def test_month_match_requires_the_cash_fee_metadata(self):
+        item = {
+            "metadata": {
+                "type": "cash_platform_fee",
+                "club_id": "4",
+                "year": "2026",
+                "month": "11",
+            }
+        }
+        self.assertTrue(_is_cash_platform_fee_item(item, 4, 2026, 11))
+        self.assertFalse(_is_cash_platform_fee_item(item, 4, 2026, 10))
+        self.assertFalse(_is_cash_platform_fee_item({"metadata": {}}, 4, 2026, 11))
 
     def test_previous_month_wraps_the_year(self):
         self.assertEqual(previous_month(date(2026, 10, 13)), (2026, 9))

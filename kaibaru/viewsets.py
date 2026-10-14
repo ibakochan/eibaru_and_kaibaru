@@ -2672,6 +2672,20 @@ class TournamentViewSet(viewsets.ViewSet):
             ),
         )
 
+    @action(detail=True, methods=["post"], url_path="enter-many")
+    def enter_many(self, request, pk=None):
+        from .service_tournament import enter_many
+
+        return self._run(
+            request,
+            pk,
+            lambda tournament: enter_many(
+                tournament,
+                request.data.get("bracket_id"),
+                request.data.get("reservation_ids"),
+            ),
+        )
+
     @action(detail=True, methods=["post"])
     def leave(self, request, pk=None):
         from .service_tournament import leave_bracket
@@ -2999,6 +3013,20 @@ class TeamBattleViewSet(viewsets.ViewSet):
             ),
         )
 
+    @action(detail=True, methods=["post"], url_path="add-members")
+    def add_members(self, request, pk=None):
+        from .service_team_battle import add_members
+
+        return self._run(
+            request,
+            pk,
+            lambda battle: add_members(
+                battle,
+                request.data.get("team_id"),
+                request.data.get("reservation_ids"),
+            ),
+        )
+
     @action(detail=True, methods=["post"], url_path="remove-member")
     def remove_member(self, request, pk=None):
         from .service_team_battle import remove_member
@@ -3147,6 +3175,20 @@ class TeamTournamentViewSet(viewsets.ViewSet):
                 tournament,
                 request.data.get("team_id"),
                 request.data.get("reservation_id"),
+            ),
+        )
+
+    @action(detail=True, methods=["post"], url_path="add-members")
+    def add_members(self, request, pk=None):
+        from .service_team_tournament import add_members
+
+        return self._run(
+            request,
+            pk,
+            lambda tournament: add_members(
+                tournament,
+                request.data.get("team_id"),
+                request.data.get("reservation_ids"),
             ),
         )
 

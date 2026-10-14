@@ -1,4 +1,4 @@
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Q
 
 from .models import Bracket, BracketEntry, EventPrice, EventReservation, MemberRecord, Tournament, TournamentMatch
@@ -333,6 +333,50 @@ def _paid(event, reservation_id):
     return row
 
 
+def _reservation_ids(values):
+    if isinstance(values, (str, int)):
+        values = [values]
+    if not isinstance(values, (list, tuple)):
+        raise ValueError("参加者を選んでください。")
+    ids = []
+    seen = set()
+    for value in values:
+        try:
+            key = int(value)
+        except (TypeError, ValueError):
+            raise ValueError("参加者が見つかりません。")
+        if key in seen:
+            continue
+        seen.add(key)
+        ids.append(key)
+    if not ids:
+        raise ValueError("参加者を選んでください。")
+    return ids
+
+
+def _person_label(reservation):
+    name = str(reservation.full_name or "").strip()
+    return f"{name}さん" if name else "この人"
+
+
+def _paid_named(event, reservation_id):
+    try:
+        key = int(reservation_id)
+    except (TypeError, ValueError):
+        raise ValueError("参加者が見つかりません。")
+    row = EventReservation.objects.select_for_update().filter(id=key).first()
+    if row is None:
+        raise ValueError("参加者が見つかりません。")
+    if (
+        row.event_id != event.id
+        or row.is_deleted
+        or row.canceled
+        or row.status != EventReservation.Status.PAID
+    ):
+        raise ValueError(f"{_person_label(row)}は支払い済みの予約だけ入れられます。")
+    return row
+
+
 def _next_position(manager):
     current = manager.order_by("-position").values_list("position", flat=True).first()
     return (current or 0) + 1
@@ -577,6 +621,40 @@ def enter_bracket(tournament, bracket_id, reservation_id):
         reservation=reservation,
         position=_next_position(bracket.entries),
     )
+    _materialize(bracket)
+    _refresh_all(bracket)
+
+
+@transaction.atomic
+def enter_many(tournament, bracket_id, reservation_ids):
+    bracket = _bracket(tournament, bracket_id)
+    if _locked(bracket):
+        raise ValueError("勝敗が決まっているので、人の入れ替えはできません。")
+    ids = _reservation_ids(reservation_ids)
+    already = set(
+        BracketEntry.objects.filter(bracket=bracket, reservation_id__in=ids).values_list(
+            "reservation_id",
+            flat=True,
+        )
+    )
+    reservations = []
+    for reservation_id in ids:
+        if reservation_id in already:
+            continue
+        reservations.append(_paid_named(tournament.event, reservation_id))
+    if not reservations:
+        return
+    position = _next_position(bracket.entries)
+    for reservation in reservations:
+        try:
+            BracketEntry.objects.create(
+                bracket=bracket,
+                reservation=reservation,
+                position=position,
+            )
+        except IntegrityError:
+            raise ValueError(f"{_person_label(reservation)}はすでにこのブラケットに入っています。")
+        position += 1
     _materialize(bracket)
     _refresh_all(bracket)
 

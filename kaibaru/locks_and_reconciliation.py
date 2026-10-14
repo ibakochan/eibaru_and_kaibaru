@@ -26,6 +26,22 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
+def convert_invoices_to_cash(queryset):
+    """Switch invoices to cash and remember when a Stripe invoice was converted.
+
+    converted_at is set only on Stripe invoices that do not already have one,
+    so a retry does not move them into a later platform-fee month. Invoices
+    that were already cash keep a null converted_at and stay on issued_at.
+    """
+    now = timezone.now()
+    queryset.filter(
+        payment_method="stripe",
+        converted_at__isnull=True,
+    ).update(converted_at=now)
+    return queryset.update(payment_method="cash")
+
+
 class StripeSubscriptionReconciler:
     """
     DB is source of truth.
@@ -1360,15 +1376,11 @@ class StripeToCashInvoiceReconciler:
                     # Existing cash invoices remain unchanged.
                     # -------------------------------------------------
 
-                    updated_invoice_count = (
-                        Invoice.objects
-                        .filter(
+                    updated_invoice_count = convert_invoices_to_cash(
+                        Invoice.objects.filter(
                             subscription=subscription,
                             status="open",
                             payment_method="stripe",
-                        )
-                        .update(
-                            payment_method="cash",
                         )
                     )
 
@@ -1599,15 +1611,11 @@ class StripeToCashInvoiceReconciler:
                             # Void invoices remain void.
                             # -------------------------------------------------
 
-                            updated_invoice_count = (
-                                Invoice.objects
-                                .filter(
+                            updated_invoice_count = convert_invoices_to_cash(
+                                Invoice.objects.filter(
                                     subscription=subscription,
                                     status="open",
                                     payment_method="stripe",
-                                )
-                                .update(
-                                    payment_method="cash",
                                 )
                             )
 
@@ -2234,6 +2242,11 @@ class StripeToCashInvoiceReconciler:
             # Only collection method changes.
             # -----------------------------------------------------
 
+            if (
+                local_invoice.payment_method == "stripe"
+                and local_invoice.converted_at is None
+            ):
+                local_invoice.converted_at = timezone.now()
             local_invoice.payment_method = "cash"
             local_invoice.stripe_cash_transition_status = "succeeded"
 
@@ -2241,6 +2254,7 @@ class StripeToCashInvoiceReconciler:
                 update_fields=[
                     "payment_method",
                     "stripe_cash_transition_status",
+                    "converted_at",
                 ]
             )
 
@@ -2417,14 +2431,10 @@ class StripeToCashInvoiceReconciler:
                 .get(id=subscription.id)
             )
 
-            updated_invoice_count = (
-                Invoice.objects
-                .filter(
+            updated_invoice_count = convert_invoices_to_cash(
+                Invoice.objects.filter(
                     subscription=subscription,
                     status="open",
-                )
-                .update(
-                    payment_method="cash",
                 )
             )
 
