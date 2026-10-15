@@ -13,7 +13,6 @@ from collections import defaultdict
 
 import json
 from django.db.models import Sum
-from django.db import models
 from datetime import date
 
 from .club_access import UNSUBSCRIBED_DELETE_DAYS, unsubscribed_open_days
@@ -1707,11 +1706,18 @@ class MemberSerializer(serializers.ModelSerializer):
 
         club = getattr(instance, "club", None)
 
+        if "viewer_is_manager" in self.context:
+            viewer_is_manager = bool(self.context["viewer_is_manager"])
+        elif club is not None:
+            viewer_is_manager = club.members.filter(user=user, is_manager=True).exists()
+        else:
+            viewer_is_manager = False
+
         can_see_financials = (
             user.id == instance.user_id           # self
             or user.id == instance.owner_id       # owns this member
             or (club and club.owner_id == user.id)  # club owner
-            or (club and club.members.filter(user=user, is_manager=True).exists())  # manager
+            or viewer_is_manager
         )
 
         if not can_see_financials:
@@ -2560,7 +2566,7 @@ def visible_club_events(club, request):
 
 
 class ClubSerializer(serializers.ModelSerializer):
-    members = MemberSerializer(many=True, read_only=True)
+    members = serializers.SerializerMethodField()
     lessons = LessonSerializer(many=True, read_only=True)
     events = serializers.SerializerMethodField()
     current_user = serializers.SerializerMethodField()
@@ -2578,6 +2584,43 @@ class ClubSerializer(serializers.ModelSerializer):
     membership_plan_groups = MembershipPlanGroupSerializer(many=True, read_only=True, source="membershipplangroup_set")
     invoices = serializers.SerializerMethodField()
     has_member_subscription = serializers.SerializerMethodField()
+
+    def get_members(self, club):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        members = list(club.members.all())
+
+        if not user or not user.is_authenticated:
+            visible = [
+                member for member in members
+                if member.is_instructor or member.is_manager or member.user_id == club.owner_id
+            ]
+            return self._member_data(visible, viewer_is_manager=False)
+
+        if club.owner_id == user.id:
+            return self._member_data(members, viewer_is_manager=False)
+
+        user_member = next((member for member in members if member.user_id == user.id), None)
+        viewer_is_manager = any(
+            member.user_id == user.id and member.is_manager
+            for member in members
+        )
+        if user_member and (user_member.is_instructor or user_member.is_manager):
+            return self._member_data(members, viewer_is_manager=viewer_is_manager)
+
+        visible = [
+            member for member in members
+            if member.is_instructor
+            or member.is_manager
+            or member.user_id == club.owner_id
+            or member.user_id == user.id
+            or member.owner_id == user.id
+        ]
+        return self._member_data(visible, viewer_is_manager=viewer_is_manager)
+
+    def _member_data(self, members, *, viewer_is_manager):
+        context = {**self.context, "viewer_is_manager": viewer_is_manager}
+        return MemberSerializer(members, many=True, context=context).data
 
     def get_events(self, club):
         request = self.context.get("request")
@@ -2826,54 +2869,6 @@ class ClubSerializer(serializers.ModelSerializer):
                 )
 
         return None
-
-    def to_representation(self, instance):
-        data = super().to_representation(instance)
-
-        request = self.context.get("request")
-
-
-
-        user = getattr(request, "user", None)
-
-        
-
-
-
-        if not user or not user.is_authenticated:
-            members_qs = instance.members.filter(
-                models.Q(is_instructor=True) |
-                models.Q(is_manager=True) |
-                models.Q(user=instance.owner)
-            )
-            data["members"] = MemberSerializer(members_qs, many=True, context=self.context).data
-            return data
-
- 
-        
-        if instance.owner_id == user.id:
-            return data
-
-        members = getattr(instance, "_prefetched_objects_cache", {}).get("members", instance.members.all())
-        user_member = next((m for m in members if m.user_id == user.id), None)
-
-        if user_member and (user_member.is_instructor or user_member.is_manager):
-            return data
-
-
-        filtered = [
-            m for m in members
-            if m.is_instructor
-            or m.is_manager
-            or m.user_id == instance.owner_id
-            or m.user_id == user.id
-            or m.owner_id == user.id
-        ]
-        data["members"] = MemberSerializer(filtered, many=True, context=self.context).data
-
-        return data
-
-
 
     def get_current_user(self, obj):
         request = self.context.get("request")
