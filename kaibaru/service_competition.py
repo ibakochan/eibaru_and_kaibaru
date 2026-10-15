@@ -281,19 +281,69 @@ def set_division_place(competition, division_id, reservation_id, place_value):
         key = int(reservation_id)
     except (TypeError, ValueError):
         raise ValueError("参加者が見つかりません。")
-    entry = (
+    place = _parse_place(place_value)
+    entries = list(
         DivisionEntry.objects.select_for_update()
-        .filter(division=division, reservation_id=key)
-        .first()
+        .filter(division=division)
+        .order_by("id")
     )
+    entry = next((item for item in entries if item.reservation_id == key), None)
     if entry is None:
         raise ValueError("この人はこの種目に入っていません。")
-    place = _parse_place(place_value)
-    total = division.entries.count()
+    total = len(entries)
     if place is not None and place > total:
         raise ValueError(f"順位は1から{total}までです。")
-    if place is not None and division.entries.filter(place=place).exclude(id=entry.id).exists():
-        raise ValueError("その順位はすでに使われています。")
+    old = entry.place
+    if place == old:
+        return
+    if place is None:
+        entry.place = None
+        entry.save(update_fields=["place"])
+        _refresh_division(division)
+        return
+    _insert_place(entries, entry, old, place, total)
+    _refresh_division(division)
+
+
+def _insert_place(entries, entry, old, place, total):
+    """Put this person at place, moving whoever already has it one rank back."""
+    taken = any(item.id != entry.id and item.place == place for item in entries)
+    if not taken:
+        entry.place = place
+        entry.save(update_fields=["place"])
+        return
+    if old is None:
+        shifting = [
+            item for item in entries
+            if item.place is not None and item.place >= place
+        ]
+        if shifting and max(item.place for item in shifting) + 1 > total:
+            raise ValueError(f"後ろの順位をずらすと{total}位を超えます。")
+        shifting.sort(key=lambda item: item.place, reverse=True)
+        for item in shifting:
+            item.place += 1
+            item.save(update_fields=["place"])
+    elif place < old:
+        entry.place = None
+        entry.save(update_fields=["place"])
+        shifting = [
+            item for item in entries
+            if item.id != entry.id and item.place is not None and place <= item.place < old
+        ]
+        shifting.sort(key=lambda item: item.place, reverse=True)
+        for item in shifting:
+            item.place += 1
+            item.save(update_fields=["place"])
+    else:
+        entry.place = None
+        entry.save(update_fields=["place"])
+        shifting = [
+            item for item in entries
+            if item.id != entry.id and item.place is not None and old < item.place <= place
+        ]
+        shifting.sort(key=lambda item: item.place)
+        for item in shifting:
+            item.place -= 1
+            item.save(update_fields=["place"])
     entry.place = place
     entry.save(update_fields=["place"])
-    _refresh_division(division)
