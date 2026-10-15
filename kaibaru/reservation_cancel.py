@@ -1,7 +1,25 @@
 from django.core.signing import BadSignature, Signer
 from django.utils import timezone
 
-from .models import EventReservation, Reservation
+from .models import (
+    BattleMember,
+    BracketEntry,
+    DivisionEntry,
+    EventReservation,
+    Pairing,
+    Reservation,
+    TournamentTeamMember,
+)
+
+
+OWNER_PLACEMENT_MESSAGE = (
+    "この人はすでに大会の組み合わせに入っています。"
+    "先にチーム、ブラケット、種目、または対戦から外してください。"
+)
+PARTICIPANT_PLACEMENT_MESSAGE = (
+    "すでに大会の組み合わせに入っています。"
+    "キャンセルするには、大会の担当者に連絡してください。"
+)
 
 
 _signer = Signer(salt="kaibaru-reservation-cancel")
@@ -99,6 +117,51 @@ def read_cancel_token(token):
         return {"kind": kind, "reservation": None}
 
     return {"kind": kind, "reservation": reservation}
+
+
+def placed_event_reservation_ids(reservation_ids):
+    ids = [item for item in reservation_ids if item]
+    if not ids:
+        return set()
+    placed = set(
+        BracketEntry.objects.filter(reservation_id__in=ids).values_list(
+            "reservation_id",
+            flat=True,
+        )
+    )
+    placed.update(
+        DivisionEntry.objects.filter(reservation_id__in=ids).values_list(
+            "reservation_id",
+            flat=True,
+        )
+    )
+    placed.update(
+        Pairing.objects.filter(first_id__in=ids).values_list("first_id", flat=True)
+    )
+    placed.update(
+        Pairing.objects.filter(second_id__in=ids).values_list("second_id", flat=True)
+    )
+    placed.update(
+        TournamentTeamMember.objects.filter(reservation_id__in=ids).values_list(
+            "reservation_id",
+            flat=True,
+        )
+    )
+    placed.update(
+        BattleMember.objects.filter(reservation_id__in=ids).values_list(
+            "reservation_id",
+            flat=True,
+        )
+    )
+    return placed
+
+
+def placement_cancel_message(reservation, *, owner):
+    if reservation.id not in placed_event_reservation_ids([reservation.id]):
+        return None
+    if owner:
+        return OWNER_PLACEMENT_MESSAGE
+    return PARTICIPANT_PLACEMENT_MESSAGE
 
 
 def cancel_is_closed(kind, reservation):

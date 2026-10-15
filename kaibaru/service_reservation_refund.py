@@ -95,7 +95,19 @@ def refund_reservation(*, reservation_id, user):
     return _payload(reservation, already_refunded=False)
 
 
+def _assert_event_not_placed(reservation):
+    from .reservation_cancel import placement_cancel_message
+
+    placed = placement_cancel_message(reservation, owner=True)
+    if placed:
+        raise RefundError(placed)
+
+
 def event_reservation_is_refundable(reservation, user):
+    from .reservation_cancel import placed_event_reservation_ids
+
+    if reservation.id in placed_event_reservation_ids([reservation.id]):
+        return False
     if user is None or not getattr(user, "is_authenticated", False):
         return False
     if reservation.club.owner_id != user.id:
@@ -117,6 +129,7 @@ def refund_event_preview(*, reservation_id, user):
     _assert_owner(reservation, user)
     if reservation.refunded_at:
         return _event_payload(reservation, already_refunded=True)
+    _assert_event_not_placed(reservation)
     _assert_event_refundable(reservation)
     return _event_payload(reservation, already_refunded=False)
 
@@ -127,6 +140,7 @@ def refund_event_reservation(*, reservation_id, user):
         _assert_owner(reservation, user)
         if reservation.refunded_at and reservation.canceled:
             return _event_payload(reservation, already_refunded=True)
+        _assert_event_not_placed(reservation)
         _assert_event_refundable(reservation)
         reservation.refund_started_at = timezone.now()
         reservation.save(update_fields=["refund_started_at"])

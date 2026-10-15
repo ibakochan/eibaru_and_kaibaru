@@ -42,6 +42,12 @@ def cancel_reservation(request, token):
         context["message"] = "この予約はすでに終了しているため、キャンセルできません。"
         return _render(request, context)
 
+    placed = _placement_block(request, kind, reservation)
+    if placed:
+        context["mode"] = "closed"
+        context["message"] = placed
+        return _render(request, context)
+
     if request.method == "GET":
         context["mode"] = "confirm"
         return _render(request, context)
@@ -66,6 +72,12 @@ def cancel_reservation(request, token):
         if cancel_is_closed(kind, locked):
             context["mode"] = "closed"
             context["message"] = "この予約はすでに終了しているため、キャンセルできません。"
+            return _render(request, context)
+
+        placed = _placement_block(request, kind, locked)
+        if placed:
+            context["mode"] = "closed"
+            context["message"] = placed
             return _render(request, context)
 
         locked.canceled = True
@@ -132,6 +144,20 @@ def restore_reservation(request, token):
 
     context["mode"] = "restored"
     return _render(request, context)
+
+
+def _placement_block(request, kind, reservation):
+    if kind != "event":
+        return None
+    from .reservation_cancel import placement_cancel_message
+
+    user = getattr(request, "user", None)
+    owner = (
+        user is not None
+        and getattr(user, "is_authenticated", False)
+        and reservation.club.owner_id == user.id
+    )
+    return placement_cancel_message(reservation, owner=owner)
 
 
 def _paid_status(kind):

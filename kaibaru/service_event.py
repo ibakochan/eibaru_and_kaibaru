@@ -2228,6 +2228,11 @@ def dismiss_open_event_reservation(*, reservation_id, user):
             raise PermissionError("この予約をキャンセルする権限がありません。")
         if reservation.canceled:
             return reservation
+        from .reservation_cancel import placement_cancel_message
+
+        placed = placement_cancel_message(reservation, owner=True)
+        if placed:
+            raise ValueError(placed)
         if reservation.status == EventReservation.Status.PAID:
             raise ValueError("支払い済みの予約は、返金してからキャンセルしてください。")
         if reservation.stripe_payment_intent_id or reservation.paid_at:

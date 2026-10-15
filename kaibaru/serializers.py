@@ -2412,10 +2412,20 @@ class EventSerializer(serializers.ModelSerializer):
                 return []
             rows = rows.filter(email__iexact=email)
 
+        ordered = list(rows.order_by("-created_at", "-id"))
+        from .reservation_cancel import (
+            PARTICIPANT_PLACEMENT_MESSAGE,
+            placed_event_reservation_ids,
+        )
+
+        placed_ids = placed_event_reservation_ids(row.id for row in ordered)
         cached = []
-        for row in rows.order_by("-created_at", "-id"):
+        for row in ordered:
             detail = _event_reservation_detail(row)
             cancel, restore = _event_reservation_urls(row, user)
+            if row.id in placed_ids and cancel:
+                cancel = None
+                detail["cancel_block"] = PARTICIPANT_PLACEMENT_MESSAGE
             detail["cancel_url"] = cancel
             detail["restore_url"] = restore
             cached.append(detail)
@@ -2456,10 +2466,18 @@ class EventSerializer(serializers.ModelSerializer):
             .select_related("member", "club")
             .order_by("-created_at", "-id")
         )
+        from .reservation_cancel import (
+            OWNER_PLACEMENT_MESSAGE,
+            PARTICIPANT_PLACEMENT_MESSAGE,
+            placed_event_reservation_ids,
+        )
+
+        placed_ids = placed_event_reservation_ids(row.id for row in rows)
         details = []
         for row in rows:
             detail = _event_reservation_detail(row)
             cancel, restore = _event_reservation_urls(row, user)
+            placed = row.id in placed_ids
             if self._viewer_can_manage(event):
                 from .reservation_cancel import (
                     cancel_url,
@@ -2469,13 +2487,19 @@ class EventSerializer(serializers.ModelSerializer):
                 )
                 from .service_reservation_refund import event_reservation_is_refundable
 
-                if owner_may_cancel_free(row, user):
+                if placed:
+                    cancel = None
+                    detail["cancel_block"] = OWNER_PLACEMENT_MESSAGE
+                elif owner_may_cancel_free(row, user):
                     cancel = cancel_url(row.club, "event", row.id)
                 elif owner_may_restore_free(row, user):
                     restore = restore_url(row.club, "event", row.id)
-                detail["can_refund"] = event_reservation_is_refundable(row, user)
+                detail["can_refund"] = (
+                    False if placed else event_reservation_is_refundable(row, user)
+                )
                 detail["can_dismiss"] = (
-                    not row.canceled
+                    not placed
+                    and not row.canceled
                     and not row.refunded_at
                     and row.status in {
                         EventReservation.Status.UNPAID,
@@ -2484,6 +2508,9 @@ class EventSerializer(serializers.ModelSerializer):
                     and not row.stripe_payment_intent_id
                     and not row.paid_at
                 )
+            elif placed and cancel:
+                cancel = None
+                detail["cancel_block"] = PARTICIPANT_PLACEMENT_MESSAGE
             detail["cancel_url"] = cancel
             detail["restore_url"] = restore
             details.append(detail)
