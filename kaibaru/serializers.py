@@ -2305,58 +2305,68 @@ class EventSerializer(serializers.ModelSerializer):
             return None
         return test_payload(test)
 
+    def _viewer(self):
+        request = self.context.get("request")
+        return getattr(request, "user", None)
+
+    def _draw_value(self, sheet, payload):
+        if sheet is None:
+            return None
+        if not self.context.get("include_event_boards"):
+            from .service_member_record import test_payload
+
+            return test_payload(sheet)
+        return payload()
+
     def get_competition(self, event):
         from .service_competition import competition_payload
         from .service_member_record import event_competition
 
         competition = event_competition(event)
-        if competition is None:
-            return None
-        request = self.context.get("request")
-        user = getattr(request, "user", None)
-        return competition_payload(competition, user)
+        return self._draw_value(
+            competition,
+            lambda: competition_payload(competition, self._viewer()),
+        )
 
     def get_duel(self, event):
         from .service_member_record import duel_payload, event_duel
 
         duel = event_duel(event)
-        if duel is None:
-            return None
-        request = self.context.get("request")
-        user = getattr(request, "user", None)
-        return duel_payload(duel, user)
+        return self._draw_value(
+            duel,
+            lambda: duel_payload(duel, self._viewer()),
+        )
 
     def get_tournament(self, event):
         from .service_tournament import event_tournament, tournament_payload
 
         tournament = event_tournament(event)
-        if tournament is None:
-            return None
-        request = self.context.get("request")
-        user = getattr(request, "user", None)
-        return tournament_payload(tournament, user)
+        return self._draw_value(
+            tournament,
+            lambda: tournament_payload(tournament, self._viewer()),
+        )
 
     def get_team_battle(self, event):
         from .service_team_battle import event_team_battle, team_battle_payload
 
         battle = event_team_battle(event)
-        if battle is None:
-            return None
-        request = self.context.get("request")
-        user = getattr(request, "user", None)
-        return team_battle_payload(battle, user)
+        return self._draw_value(
+            battle,
+            lambda: team_battle_payload(battle, self._viewer()),
+        )
 
     def get_team_tournament(self, event):
         from .service_team_tournament import event_team_tournament, team_tournament_payload
 
         tournament = event_team_tournament(event)
-        if tournament is None:
-            return None
-        request = self.context.get("request")
-        user = getattr(request, "user", None)
-        return team_tournament_payload(tournament, user)
+        return self._draw_value(
+            tournament,
+            lambda: team_tournament_payload(tournament, self._viewer()),
+        )
 
     def get_results(self, event):
+        if not self.context.get("include_event_boards"):
+            return None
         if event.archive_visibility:
             return None
         from .service_member_record import (
@@ -2504,6 +2514,51 @@ class EventSerializer(serializers.ModelSerializer):
         return details
 
 
+class EventBoardsSerializer(EventSerializer):
+    class Meta(EventSerializer.Meta):
+        fields = [
+            "id",
+            "competition",
+            "duel",
+            "tournament",
+            "team_battle",
+            "team_tournament",
+            "results",
+        ]
+
+
+def visible_club_events(club, request):
+    user = getattr(request, "user", None)
+    authenticated = user is not None and user.is_authenticated
+    is_owner = authenticated and club.owner_id == user.id
+    is_member = False
+    if authenticated and not is_owner:
+        is_member = any(
+            row.user_id == user.id or row.owner_id == user.id
+            for row in club.members.all()
+        )
+    now = timezone.now()
+    from .service_event import expire_canceled_events
+
+    expire_canceled_events(club)
+    visible = []
+    for event in club.events.all():
+        if (
+            event.canceled_at
+            and event.cancel_visible_until
+            and event.cancel_visible_until <= now
+        ):
+            continue
+        visibility = event.archive_visibility
+        if not visibility or is_owner or visibility == "public":
+            visible.append(event)
+        elif visibility == "members" and is_member:
+            visible.append(event)
+    for event in visible:
+        event.club = club
+    return visible
+
+
 class ClubSerializer(serializers.ModelSerializer):
     members = MemberSerializer(many=True, read_only=True)
     lessons = LessonSerializer(many=True, read_only=True)
@@ -2526,34 +2581,7 @@ class ClubSerializer(serializers.ModelSerializer):
 
     def get_events(self, club):
         request = self.context.get("request")
-        user = getattr(request, "user", None)
-        authenticated = user is not None and user.is_authenticated
-        is_owner = authenticated and club.owner_id == user.id
-        is_member = False
-        if authenticated and not is_owner:
-            is_member = any(
-                row.user_id == user.id or row.owner_id == user.id
-                for row in club.members.all()
-            )
-        now = timezone.now()
-        from .service_event import expire_canceled_events
-        expire_canceled_events(club)
-        visible = []
-        for event in club.events.all():
-            if (
-                event.canceled_at
-                and event.cancel_visible_until
-                and event.cancel_visible_until <= now
-            ):
-                continue
-            visibility = event.archive_visibility
-            if not visibility or is_owner or visibility == "public":
-                visible.append(event)
-            elif visibility == "members" and is_member:
-                visible.append(event)
-        for event in visible:
-            event.club = club
-            event._draw_prefetched = True
+        visible = visible_club_events(club, request)
         return EventSerializer(visible, many=True, context=self.context).data
 
     class Meta:

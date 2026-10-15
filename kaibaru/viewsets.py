@@ -3746,8 +3746,28 @@ class ClubViewSet(viewsets.ModelViewSet):
     queryset = Club.objects.all()
 
     def get_queryset(self):
-        from .service_event_read import event_draw_prefetches
+        return self._club_queryset(boards=False)
 
+    def _club_queryset(self, *, boards):
+        from .service_event_read import event_draw_prefetches, event_reservation_prefetch
+
+        event_lookups = (
+            [
+                "events__test",
+                event_reservation_prefetch(),
+                *event_draw_prefetches(),
+            ]
+            if boards
+            else [
+                "events__test",
+                "events__competition",
+                "events__duel",
+                "events__tournament",
+                "events__team_battle",
+                "events__team_tournament",
+                event_reservation_prefetch(),
+            ]
+        )
         return (
             Club.objects.filter(is_deleted=False)
             .prefetch_related(
@@ -3797,8 +3817,7 @@ class ClubViewSet(viewsets.ModelViewSet):
                 "events__prices",
                 "events__prices__divisions",
                 "events__prices__brackets",
-                "events__test",
-                *event_draw_prefetches(),
+                *event_lookups,
                 "slate_images",
                 "join_requests",
                 "membership_plans",
@@ -3813,6 +3832,29 @@ class ClubViewSet(viewsets.ModelViewSet):
 
         serializer = self.get_serializer(club, context={"request": request})
         return Response(serializer.data)
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/events",
+    )
+    def event_boards(self, request, subdomain=None):
+        from .serializers import EventBoardsSerializer, visible_club_events
+
+        club = self._club_queryset(boards=True).filter(subdomain=subdomain).first()
+        if not club:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        visible = visible_club_events(club, request)
+        for event in visible:
+            event._draw_prefetched = True
+        return Response({
+            "events": EventBoardsSerializer(
+                visible,
+                many=True,
+                context={"request": request, "include_event_boards": True},
+            ).data,
+        })
 
     @action(detail=True, methods=["post"], url_path="pricing_preview")
     def pricing_preview(self, request, pk=None):

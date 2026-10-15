@@ -205,17 +205,20 @@ def _tournament_team_with_members():
     )
 
 
+def event_reservation_prefetch():
+    return Prefetch(
+        "events__reservations",
+        queryset=(
+            EventReservation.objects.filter(is_deleted=False)
+            .select_related("member", "club")
+            .order_by("-created_at", "-id")
+        ),
+        to_attr="cached_reservations",
+    )
+
+
 def event_draw_prefetches():
     return [
-        Prefetch(
-            "events__reservations",
-            queryset=(
-                EventReservation.objects.filter(is_deleted=False)
-                .select_related("member", "club")
-                .order_by("-created_at", "-id")
-            ),
-            to_attr="cached_reservations",
-        ),
         Prefetch(
             "events__competition",
             queryset=Competition.objects.prefetch_related(
