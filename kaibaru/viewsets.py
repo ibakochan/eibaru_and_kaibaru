@@ -2909,6 +2909,20 @@ class CompetitionViewSet(viewsets.ViewSet):
             ),
         )
 
+    @action(detail=True, methods=["post"], url_path="enter-many")
+    def enter_many(self, request, pk=None):
+        from .service_competition import enter_many
+
+        return self._run(
+            request,
+            pk,
+            lambda competition: enter_many(
+                competition,
+                request.data.get("division_id"),
+                request.data.get("reservation_ids"),
+            ),
+        )
+
     @action(detail=True, methods=["post"])
     def leave(self, request, pk=None):
         from .service_competition import leave_division

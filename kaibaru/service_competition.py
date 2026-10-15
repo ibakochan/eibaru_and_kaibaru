@@ -1,4 +1,4 @@
-from django.db import transaction
+from django.db import IntegrityError, transaction
 
 from .models import Division, DivisionEntry, EventPrice, MemberRecord
 from .service_member_record import (
@@ -191,6 +191,65 @@ def enter_division(competition, division_id, reservation_id):
         reservation=reservation,
         position=position,
     )
+    _refresh_division(division)
+
+
+def _reservation_ids(values):
+    if isinstance(values, (str, int)):
+        values = [values]
+    if not isinstance(values, (list, tuple)):
+        raise ValueError("参加者を選んでください。")
+    ids = []
+    seen = set()
+    for value in values:
+        try:
+            key = int(value)
+        except (TypeError, ValueError):
+            raise ValueError("参加者が見つかりません。")
+        if key in seen:
+            continue
+        seen.add(key)
+        ids.append(key)
+    if not ids:
+        raise ValueError("参加者を選んでください。")
+    return ids
+
+
+def _person_label(reservation):
+    name = str(reservation.full_name or "").strip()
+    return f"{name}さん" if name else "この人"
+
+
+@transaction.atomic
+def enter_many(competition, division_id, reservation_ids):
+    division = _division(competition, division_id)
+    ids = _reservation_ids(reservation_ids)
+    already = set(
+        division.entries.filter(reservation_id__in=ids).values_list("reservation_id", flat=True)
+    )
+    reservations = []
+    for reservation_id in ids:
+        if reservation_id in already:
+            continue
+        reservation = _paid_rows(competition.event).filter(id=reservation_id).first()
+        if reservation is None:
+            row = competition.event.reservations.filter(id=reservation_id).first()
+            label = _person_label(row) if row is not None else "この人"
+            raise ValueError(f"{label}は支払い済みの予約だけ種目に入れられます。")
+        reservations.append(reservation)
+    if not reservations:
+        return
+    position = (division.entries.order_by("-position").values_list("position", flat=True).first() or 0) + 1
+    for reservation in reservations:
+        try:
+            DivisionEntry.objects.create(
+                division=division,
+                reservation=reservation,
+                position=position,
+            )
+        except IntegrityError:
+            raise ValueError(f"{_person_label(reservation)}はすでにこの種目に入っています。")
+        position += 1
     _refresh_division(division)
 
 
