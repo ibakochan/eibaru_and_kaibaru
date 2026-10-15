@@ -1,6 +1,8 @@
 from django.db import IntegrityError, transaction
+from django.db.models import Prefetch
 
 from .models import Division, DivisionEntry, EventPrice, MemberRecord
+from .service_event_read import load_related, paid_reservations
 from .service_member_record import (
     _is_owner,
     _paid_rows,
@@ -77,14 +79,21 @@ def competition_payload(competition, user):
     payload = test_payload(competition)
     owner = _is_owner(competition.event, user)
     event = competition.event
-    divisions = list(
-        competition.divisions.prefetch_related("entries__reservation").order_by("position", "id")
+    divisions = load_related(
+        competition,
+        "divisions",
+        competition.divisions.prefetch_related(
+            Prefetch(
+                "entries",
+                queryset=DivisionEntry.objects.select_related("reservation").order_by(
+                    "position", "id"
+                ),
+            )
+        ).order_by("position", "id"),
     )
     visible_ids = set()
     if not owner and not competition.results_public and not event.archive_visibility:
-        visible_ids = set(
-            _visible_paid_rows(event, False, user).values_list("id", flat=True)
-        )
+        visible_ids = {row.id for row in _visible_paid_rows(event, False, user)}
         divisions = [
             division
             for division in divisions
@@ -114,16 +123,18 @@ def competition_payload(competition, user):
     payload["prices"] = []
     payload["pool"] = []
     if owner:
-        for price in event.prices.prefetch_related("divisions").order_by("position", "id"):
+        for price in load_related(
+            event,
+            "prices",
+            event.prices.prefetch_related("divisions").order_by("position", "id"),
+        ):
             payload["prices"].append({
                 "id": price.id,
                 "name": price.name,
                 "amount": price.amount,
                 "division_ids": [item.id for item in price.divisions.all()],
             })
-        payload["pool"] = [
-            _person(row) for row in _paid_rows(event).order_by("full_name", "id")
-        ]
+        payload["pool"] = [_person(row) for row in paid_reservations(event)]
     return payload
 
 

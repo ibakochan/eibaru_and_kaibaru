@@ -3746,6 +3746,8 @@ class ClubViewSet(viewsets.ModelViewSet):
     queryset = Club.objects.all()
 
     def get_queryset(self):
+        from .service_event_read import event_draw_prefetches
+
         return (
             Club.objects.filter(is_deleted=False)
             .prefetch_related(
@@ -3796,14 +3798,7 @@ class ClubViewSet(viewsets.ModelViewSet):
                 "events__prices__divisions",
                 "events__prices__brackets",
                 "events__test",
-                "events__competition",
-                "events__duel",
-                "events__duel__pairings",
-                "events__duel__pairings__first",
-                "events__duel__pairings__second",
-                "events__tournament",
-                "events__team_battle",
-                "events__team_tournament",
+                *event_draw_prefetches(),
                 "slate_images",
                 "join_requests",
                 "membership_plans",

@@ -2112,15 +2112,15 @@ def _event_reservation_detail(row):
     }
 
 
-def _event_reservation_urls(row, user):
+def _event_reservation_urls(row, user, event):
     if user is None or not getattr(user, "is_authenticated", False):
         return None, None
 
-    owned_member_ids = list(
-        row.club.members.filter(owner=user).values_list("id", flat=True)
-    )
-    if owned_member_ids:
-        is_own = row.member_id in owned_member_ids
+    from .service_event_read import owned_member_ids
+
+    owned = owned_member_ids(event.club, user)
+    if owned:
+        is_own = row.member_id in owned
     else:
         email = (user.email or "").strip().lower()
         is_own = bool(email) and (row.email or "").strip().lower() == email
@@ -2293,13 +2293,9 @@ class EventSerializer(serializers.ModelSerializer):
         ]
 
     def _held_count(self, event):
-        from .service_event import held_reservations, hold_cutoff_at
+        from .service_event_read import held_count
 
-        cached = getattr(event, "_held_count", None)
-        if cached is None:
-            cached = held_reservations(event, hold_cutoff_at()).count()
-            event._held_count = cached
-        return cached
+        return held_count(event)
 
     def get_test(self, event):
         from .service_member_record import event_test, test_payload
@@ -2394,35 +2390,30 @@ class EventSerializer(serializers.ModelSerializer):
             event._my_reservations = []
             return []
 
-        owned_member_ids = list(
-            event.club.members
-            .filter(owner=user)
-            .values_list("id", flat=True)
-        )
-        rows = EventReservation.objects.filter(
-            event=event,
-            is_deleted=False,
-        ).select_related("member", "club")
-        if owned_member_ids:
-            rows = rows.filter(member_id__in=owned_member_ids)
+        from .service_event_read import event_reservations, owned_member_ids, placed_ids_for_event
+
+        owned = owned_member_ids(event.club, user)
+        rows = event_reservations(event)
+        if owned:
+            ordered = [row for row in rows if row.member_id in owned]
         else:
-            email = (user.email or "").strip()
+            email = (user.email or "").strip().lower()
             if not email:
                 event._my_reservations = []
                 return []
-            rows = rows.filter(email__iexact=email)
+            ordered = [
+                row
+                for row in rows
+                if (row.email or "").strip().lower() == email
+            ]
 
-        ordered = list(rows.order_by("-created_at", "-id"))
-        from .reservation_cancel import (
-            PARTICIPANT_PLACEMENT_MESSAGE,
-            placed_event_reservation_ids,
-        )
+        from .reservation_cancel import PARTICIPANT_PLACEMENT_MESSAGE
 
-        placed_ids = placed_event_reservation_ids(row.id for row in ordered)
+        placed_ids = placed_ids_for_event(event)
         cached = []
         for row in ordered:
             detail = _event_reservation_detail(row)
-            cancel, restore = _event_reservation_urls(row, user)
+            cancel, restore = _event_reservation_urls(row, user, event)
             if row.id in placed_ids and cancel:
                 cancel = None
                 detail["cancel_block"] = PARTICIPANT_PLACEMENT_MESSAGE
@@ -2460,23 +2451,19 @@ class EventSerializer(serializers.ModelSerializer):
 
         request = self.context.get("request")
         user = getattr(request, "user", None)
-        rows = (
-            EventReservation.objects
-            .filter(event=event, is_deleted=False)
-            .select_related("member", "club")
-            .order_by("-created_at", "-id")
-        )
+        from .service_event_read import event_reservations, placed_ids_for_event
+
+        rows = event_reservations(event)
         from .reservation_cancel import (
             OWNER_PLACEMENT_MESSAGE,
             PARTICIPANT_PLACEMENT_MESSAGE,
-            placed_event_reservation_ids,
         )
 
-        placed_ids = placed_event_reservation_ids(row.id for row in rows)
+        placed_ids = placed_ids_for_event(event)
         details = []
         for row in rows:
             detail = _event_reservation_detail(row)
-            cancel, restore = _event_reservation_urls(row, user)
+            cancel, restore = _event_reservation_urls(row, user, event)
             placed = row.id in placed_ids
             if self._viewer_can_manage(event):
                 from .reservation_cancel import (
@@ -2494,8 +2481,8 @@ class EventSerializer(serializers.ModelSerializer):
                     cancel = cancel_url(row.club, "event", row.id)
                 elif owner_may_restore_free(row, user):
                     restore = restore_url(row.club, "event", row.id)
-                detail["can_refund"] = (
-                    False if placed else event_reservation_is_refundable(row, user)
+                detail["can_refund"] = event_reservation_is_refundable(
+                    row, user, placed=placed
                 )
                 detail["can_dismiss"] = (
                     not placed
@@ -2564,6 +2551,9 @@ class ClubSerializer(serializers.ModelSerializer):
                 visible.append(event)
             elif visibility == "members" and is_member:
                 visible.append(event)
+        for event in visible:
+            event.club = club
+            event._draw_prefetched = True
         return EventSerializer(visible, many=True, context=self.context).data
 
     class Meta:

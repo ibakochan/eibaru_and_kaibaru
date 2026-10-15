@@ -49,21 +49,34 @@ def _paid_rows(event):
 
 
 def _visible_paid_rows(event, public, user):
-    rows = _paid_rows(event).order_by("full_name", "id")
-    if public:
-        return rows
-    if user is None or not getattr(user, "is_authenticated", False):
-        return rows.none()
-    if event.club.owner_id == user.id:
-        return rows
-    owned_member_ids = list(
-        event.club.members.filter(owner=user).values_list("id", flat=True)
-    )
-    query = Q(member_id__in=owned_member_ids) | Q(user=user)
-    email = (getattr(user, "email", "") or "").strip()
-    if email:
-        query |= Q(email__iexact=email)
-    return rows.filter(query)
+    from .service_event_read import owned_member_ids, paid_reservations
+
+    user_id = user.id if user is not None and getattr(user, "is_authenticated", False) else None
+    key = (bool(public), user_id)
+    cache = getattr(event, "_visible_paid_cache", None)
+    if cache is None:
+        cache = {}
+        event._visible_paid_cache = cache
+    if key in cache:
+        return cache[key]
+
+    rows = paid_reservations(event)
+    if public or (user_id is not None and event.club.owner_id == user.id):
+        visible = rows
+    elif user_id is None:
+        visible = []
+    else:
+        owned = owned_member_ids(event.club, user)
+        email = (getattr(user, "email", "") or "").strip().lower()
+        visible = [
+            row
+            for row in rows
+            if row.member_id in owned
+            or row.user_id == user.id
+            or (email and (row.email or "").strip().lower() == email)
+        ]
+    cache[key] = visible
+    return visible
 
 
 def visible_test_results(event, user):
@@ -97,14 +110,16 @@ def visible_competition_results(event, user):
     if competition is None:
         return None
 
-    rows = list(_visible_paid_rows(event, competition.results_public, user))
+    from .service_event_read import paid_reservations
+
+    rows = _visible_paid_rows(event, competition.results_public, user)
     places = dict(
         Placement.objects.filter(
             competition=competition,
             reservation__in=rows,
         ).values_list("reservation_id", "place")
     )
-    total = _paid_rows(event).count()
+    total = len(paid_reservations(event))
     placed = []
     unplaced = []
     for row in rows:
@@ -336,13 +351,26 @@ def _is_owner(event, user):
     )
 
 
+def _duel_pairings(duel):
+    cached = getattr(duel, "_pairing_rows", None)
+    if cached is not None:
+        return cached
+    from .service_event_read import load_related
+
+    cached = load_related(
+        duel,
+        "pairings",
+        duel.pairings.select_related("first", "second").order_by("position", "id"),
+    )
+    duel._pairing_rows = cached
+    return cached
+
+
 def visible_duel_matches(duel, user):
-    pairings = duel.pairings.select_related("first", "second").order_by("position", "id")
+    pairings = _duel_pairings(duel)
     if duel.results_public or duel.event.archive_visibility or _is_owner(duel.event, user):
         return [_match_payload(pairing) for pairing in pairings]
-    visible_ids = set(
-        _visible_paid_rows(duel.event, False, user).values_list("id", flat=True)
-    )
+    visible_ids = {row.id for row in _visible_paid_rows(duel.event, False, user)}
     return [
         _match_payload(pairing)
         for pairing in pairings
@@ -351,12 +379,17 @@ def visible_duel_matches(duel, user):
 
 
 def unpaired_pool(duel):
+    from .service_event_read import paid_reservations
+
     paired_ids = set()
-    for first_id, second_id in duel.pairings.values_list("first_id", "second_id"):
-        paired_ids.add(first_id)
-        paired_ids.add(second_id)
-    rows = _paid_rows(duel.event).exclude(id__in=paired_ids).order_by("full_name", "id")
-    return [_person(row) for row in rows]
+    for pairing in _duel_pairings(duel):
+        paired_ids.add(pairing.first_id)
+        paired_ids.add(pairing.second_id)
+    return [
+        _person(row)
+        for row in paid_reservations(duel.event)
+        if row.id not in paired_ids
+    ]
 
 
 def duel_payload(duel, user):

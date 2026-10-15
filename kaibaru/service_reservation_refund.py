@@ -103,10 +103,12 @@ def _assert_event_not_placed(reservation):
         raise RefundError(placed)
 
 
-def event_reservation_is_refundable(reservation, user):
-    from .reservation_cancel import placed_event_reservation_ids
+def event_reservation_is_refundable(reservation, user, *, placed=None):
+    if placed is None:
+        from .reservation_cancel import placed_event_reservation_ids
 
-    if reservation.id in placed_event_reservation_ids([reservation.id]):
+        placed = reservation.id in placed_event_reservation_ids([reservation.id])
+    if placed:
         return False
     if user is None or not getattr(user, "is_authenticated", False):
         return False

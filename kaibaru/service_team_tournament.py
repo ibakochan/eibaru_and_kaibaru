@@ -1,5 +1,5 @@
 from django.db import IntegrityError, transaction
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 
 from .models import (
     EventReservation,
@@ -11,9 +11,9 @@ from .models import (
     TournamentTeam,
     TournamentTeamMember,
 )
+from .service_event_read import cached_related, load_related, paid_reservations
 from .service_member_record import (
     _is_owner,
-    _paid_rows,
     _sync_member_record,
     _visible_paid_rows,
     test_payload,
@@ -64,15 +64,22 @@ def _member_prefetch():
 
 
 def _load(bracket):
-    entries = list(
-        bracket.entries.select_related("team")
-        .prefetch_related("team__members__reservation")
-        .order_by("position", "id")
+    entries = load_related(
+        bracket,
+        "entries",
+        bracket.entries.prefetch_related(
+            Prefetch(
+                "team",
+                queryset=TournamentTeam.objects.prefetch_related("members__reservation"),
+            )
+        ).order_by("position", "id"),
     )
-    matches = list(
+    matches = load_related(
+        bracket,
+        "matches",
         bracket.matches.select_related("first", "second", "winner")
         .prefetch_related("first__members__reservation", "second__members__reservation")
-        .order_by("round", "position", "id")
+        .order_by("round", "position", "id"),
     )
     return entries, matches
 
@@ -155,44 +162,95 @@ def _tree_view(entries, matches):
     return rounds, champion, complete, locked
 
 
+def _bracket_visible(bracket, visible_ids):
+    entries = cached_related(bracket, "entries")
+    if entries is None:
+        return None
+    visible = False
+    for entry in entries:
+        members = cached_related(entry.team, "members")
+        if members is None:
+            return None
+        if any(member.reservation_id in visible_ids for member in members):
+            visible = True
+    return visible
+
+
 def _visible_brackets(tournament, user):
-    brackets = list(tournament.brackets.all())
+    brackets = load_related(
+        tournament,
+        "brackets",
+        tournament.brackets.order_by("position", "id"),
+    )
     if tournament.results_public or tournament.event.archive_visibility or _is_owner(tournament.event, user):
         return brackets
-    visible_ids = set(
-        _visible_paid_rows(tournament.event, False, user).values_list("id", flat=True)
-    )
+    visible_ids = {row.id for row in _visible_paid_rows(tournament.event, False, user)}
     if not visible_ids:
         return []
-    entered = set(
-        TeamBracketEntry.objects.filter(
-            bracket__tournament=tournament,
-            team__members__reservation_id__in=visible_ids,
-        ).values_list("bracket_id", flat=True)
-    )
-    return [bracket for bracket in brackets if bracket.id in entered]
+    chosen = []
+    for bracket in brackets:
+        visible = _bracket_visible(bracket, visible_ids)
+        if visible is None:
+            entered = set(
+                TeamBracketEntry.objects.filter(
+                    bracket__tournament=tournament,
+                    team__members__reservation_id__in=visible_ids,
+                ).values_list("bracket_id", flat=True)
+            )
+            return [item for item in brackets if item.id in entered]
+        if visible:
+            chosen.append(bracket)
+    return chosen
 
 
-def team_tournament_payload(tournament, user):
-    payload = test_payload(tournament)
-    owner = _is_owner(tournament.event, user)
-    assigned = set(
+def _assigned_reservation_ids(tournament):
+    teams = cached_related(tournament, "teams")
+    if teams is not None and all(cached_related(team, "members") is not None for team in teams):
+        return {
+            member.reservation_id
+            for team in teams
+            for member in cached_related(team, "members")
+        }
+    return set(
         TournamentTeamMember.objects.filter(team__tournament=tournament).values_list(
             "reservation_id",
             flat=True,
         )
     )
-    payload["pool"] = [
-        _person(row)
-        for row in _paid_rows(tournament.event).exclude(id__in=assigned).order_by("full_name", "id")
-    ] if owner else []
-    entry_by_team = {
+
+
+def _entry_by_team(tournament):
+    brackets = cached_related(tournament, "brackets")
+    if brackets is not None and all(cached_related(bracket, "entries") is not None for bracket in brackets):
+        return {
+            entry.team_id: entry.bracket_id
+            for bracket in brackets
+            for entry in cached_related(bracket, "entries")
+        }
+    return {
         entry.team_id: entry.bracket_id
         for entry in TeamBracketEntry.objects.filter(bracket__tournament=tournament)
     }
+
+
+def team_tournament_payload(tournament, user):
+    payload = test_payload(tournament)
+    owner = _is_owner(tournament.event, user)
+    assigned = _assigned_reservation_ids(tournament) if owner else set()
+    payload["pool"] = [
+        _person(row)
+        for row in paid_reservations(tournament.event)
+        if row.id not in assigned
+    ] if owner else []
+    entry_by_team = _entry_by_team(tournament) if owner else {}
     payload["teams"] = []
     if owner:
-        for team in tournament.teams.prefetch_related(_member_prefetch()).order_by("position", "id"):
+        teams = load_related(
+            tournament,
+            "teams",
+            tournament.teams.prefetch_related(_member_prefetch()).order_by("position", "id"),
+        )
+        for team in teams:
             payload["teams"].append(
                 _squad(team) | {"bracket_id": entry_by_team.get(team.id)}
             )

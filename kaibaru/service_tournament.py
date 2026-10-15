@@ -2,9 +2,9 @@ from django.db import IntegrityError, transaction
 from django.db.models import Q
 
 from .models import Bracket, BracketEntry, EventPrice, EventReservation, MemberRecord, Tournament, TournamentMatch
+from .service_event_read import cached_related, load_related, paid_reservations
 from .service_member_record import (
     _is_owner,
-    _paid_rows,
     _sync_member_record,
     _visible_paid_rows,
     test_payload,
@@ -31,13 +31,17 @@ def _person(reservation):
 
 
 def _load(bracket):
-    entries = list(
-        bracket.entries.select_related("reservation").order_by("position", "id")
+    entries = load_related(
+        bracket,
+        "entries",
+        bracket.entries.select_related("reservation").order_by("position", "id"),
     )
-    matches = list(
+    matches = load_related(
+        bracket,
+        "matches",
         bracket.matches.select_related("first", "second", "winner").order_by(
             "round", "position", "id"
-        )
+        ),
     )
     return entries, matches
 
@@ -233,14 +237,25 @@ def _open_label(rounds, complete):
 
 
 def _visible_brackets(tournament, user):
-    brackets = list(tournament.brackets.all())
+    brackets = load_related(
+        tournament,
+        "brackets",
+        tournament.brackets.order_by("position", "id"),
+    )
     if tournament.results_public or tournament.event.archive_visibility or _is_owner(tournament.event, user):
         return brackets
-    visible_ids = set(
-        _visible_paid_rows(tournament.event, False, user).values_list("id", flat=True)
-    )
+    visible_ids = {row.id for row in _visible_paid_rows(tournament.event, False, user)}
     if not visible_ids:
         return []
+    if all(cached_related(bracket, "entries") is not None for bracket in brackets):
+        return [
+            bracket
+            for bracket in brackets
+            if any(
+                entry.reservation_id in visible_ids
+                for entry in cached_related(bracket, "entries")
+            )
+        ]
     entered = set(
         BracketEntry.objects.filter(
             bracket__tournament=tournament,
@@ -254,12 +269,15 @@ def tournament_payload(tournament, user):
     payload = test_payload(tournament)
     owner = _is_owner(tournament.event, user)
     payload["pool"] = [
-        _person(row)
-        for row in _paid_rows(tournament.event).order_by("full_name", "id")
+        _person(row) for row in paid_reservations(tournament.event)
     ] if owner else []
     payload["prices"] = []
     if owner:
-        for price in tournament.event.prices.prefetch_related("brackets").order_by("position", "id"):
+        for price in load_related(
+            tournament.event,
+            "prices",
+            tournament.event.prices.prefetch_related("brackets").order_by("position", "id"),
+        ):
             payload["prices"].append({
                 "id": price.id,
                 "name": price.name,

@@ -1,7 +1,7 @@
 import random
 
 from django.db import IntegrityError, transaction
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 
 from .models import (
     BattleMatch,
@@ -11,9 +11,9 @@ from .models import (
     MemberRecord,
     TeamBattle,
 )
+from .service_event_read import cached_related, load_related, paid_reservations
 from .service_member_record import (
     _is_owner,
-    _paid_rows,
     _sync_member_record,
     _visible_paid_rows,
     test_payload,
@@ -62,22 +62,38 @@ def _match_dict(match):
 
 
 def _teams(battle):
-    return battle.teams.prefetch_related("members__reservation").order_by("position", "id")
+    return load_related(
+        battle,
+        "teams",
+        battle.teams.prefetch_related("members__reservation").order_by("position", "id"),
+    )
 
 
 def _matches(battle):
-    return (
-        battle.matches
-        .select_related("first", "second", "winner")
-        .prefetch_related(
-            "first__members__reservation",
-            "second__members__reservation",
-        )
-        .order_by("position", "id")
+    return load_related(
+        battle,
+        "matches",
+        battle.matches.prefetch_related(
+            Prefetch(
+                "first",
+                queryset=BattleTeam.objects.prefetch_related("members__reservation"),
+            ),
+            Prefetch(
+                "second",
+                queryset=BattleTeam.objects.prefetch_related("members__reservation"),
+            ),
+        ).order_by("position", "id"),
     )
 
 
 def _paired_team_ids(battle):
+    cached = cached_related(battle, "matches")
+    if cached is not None:
+        paired = set()
+        for match in cached:
+            paired.add(match.first_id)
+            paired.add(match.second_id)
+        return paired
     paired = set()
     for first_id, second_id in battle.matches.values_list("first_id", "second_id"):
         paired.add(first_id)
@@ -86,12 +102,10 @@ def _paired_team_ids(battle):
 
 
 def _visible_matches(battle, user):
-    matches = list(_matches(battle))
+    matches = _matches(battle)
     if battle.results_public or battle.event.archive_visibility or _is_owner(battle.event, user):
         return matches
-    visible_ids = set(
-        _visible_paid_rows(battle.event, False, user).values_list("id", flat=True)
-    )
+    visible_ids = {row.id for row in _visible_paid_rows(battle.event, False, user)}
     if not visible_ids:
         return []
     visible = []
@@ -114,16 +128,27 @@ def team_battle_payload(battle, user):
         payload["teams"] = []
         payload["pool"] = []
         return payload
+    teams = _teams(battle)
     payload["teams"] = [
         _team_dict(team) | {"paired": team.id in paired}
-        for team in _teams(battle)
+        for team in teams
     ]
-    assigned = set(
-        BattleMember.objects.filter(team__battle=battle).values_list("reservation_id", flat=True)
-    )
+    if all(cached_related(team, "members") is not None for team in teams):
+        assigned = {
+            member.reservation_id
+            for team in teams
+            for member in cached_related(team, "members")
+        }
+    else:
+        assigned = set(
+            BattleMember.objects.filter(team__battle=battle).values_list(
+                "reservation_id", flat=True
+            )
+        )
     payload["pool"] = [
         _person(row)
-        for row in _paid_rows(battle.event).exclude(id__in=assigned).order_by("full_name", "id")
+        for row in paid_reservations(battle.event)
+        if row.id not in assigned
     ]
     return payload
 
