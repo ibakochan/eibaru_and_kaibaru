@@ -260,12 +260,12 @@ def _idempotency_key(club_id, year, month, invoice_ids):
     return f"cash_platform_fee_{club_id}_{year}{month:02d}_{digest}"
 
 
-def _cash_invoice_amounts_for_month(club_ids, year, month):
-    """All open/paid cash invoices in that month, applied or not."""
+def _cash_invoices_for_month(club_ids, year, month):
+    """Open/paid cash invoices in that month (applied or not)."""
     if not club_ids:
-        return []
+        return Invoice.objects.none()
     start, end = month_bounds(year, month)
-    return list(
+    return (
         Invoice.objects.filter(club_id__in=club_ids)
         .annotate(fee_effective_at=Coalesce("converted_at", "issued_at"))
         .filter(
@@ -274,8 +274,128 @@ def _cash_invoice_amounts_for_month(club_ids, year, month):
             status__in=CASH_FEE_STATUSES,
             payment_method__in=CASH_FEE_PAYMENT_METHODS,
         )
-        .values_list("amount_due", flat=True)
+        .select_related("club", "subscription", "payer")
+        .prefetch_related("items")
+        .order_by("fee_effective_at", "id")
     )
+
+
+def _cash_invoice_amounts_for_month(club_ids, year, month):
+    """All open/paid cash invoices in that month, applied or not."""
+    return list(
+        _cash_invoices_for_month(club_ids, year, month).values_list(
+            "amount_due", flat=True
+        )
+    )
+
+
+def _expected_cash_subscription_rows(club_ids, exclude_subscription_ids):
+    """Active cash subs with no invoice yet this fee window, for UI listing."""
+    if not club_ids:
+        return []
+    subscriptions = (
+        Subscription.objects.filter(
+            club_id__in=club_ids,
+            billing_method__in=CASH_SUB_BILLING_METHODS,
+            status__in=CASH_SUB_ACTIVE_STATUSES,
+        )
+        .exclude(id__in=exclude_subscription_ids or [])
+        .select_related("club")
+        .prefetch_related("items__member", "items__plan")
+    )
+    rows = []
+    for subscription in subscriptions:
+        items = []
+        total = 0
+        payer_name = None
+        for item in subscription.items.all():
+            if item.deleted_at is not None or not item.member_id or not item.plan_id:
+                continue
+            base = get_effective_subscription_price(item)
+            discounted = calculate_discounted_amount(
+                club=subscription.club,
+                member=item.member,
+                plan=item.plan,
+                base_amount=base,
+                apply_to="subscription",
+            )
+            amount = max(0, int(discounted))
+            total += amount
+            if payer_name is None and item.member_id:
+                payer_name = item.member.full_name
+            plan_name = getattr(item.plan, "name", None) or "プラン"
+            items.append({"description": plan_name, "amount": amount})
+        if total <= 0:
+            continue
+        club = subscription.club
+        rows.append({
+            "id": f"expected-{subscription.id}",
+            "kind": "expected_subscription",
+            "club_id": club.id,
+            "club_subdomain": club.subdomain,
+            "billing_member_name": payer_name or "",
+            "amount_due": total,
+            "amount_paid": 0,
+            "currency": "jpy",
+            "status": "scheduled",
+            "billing_method": subscription.billing_method,
+            "due_date": None,
+            "issued_at": None,
+            "billing_reason": "subscription_cycle",
+            "items": items,
+        })
+    return rows
+
+
+def list_cash_fee_line_items_for_clubs(
+    club_ids,
+    today=None,
+    *,
+    next_invoice_uses_current_month=False,
+):
+    """Invoices (+ expected cash subs) that feed the next platform 1% fee."""
+    today = today or timezone.localdate()
+    club_ids = list(club_ids or [])
+    if not club_ids:
+        return {
+            "cash_invoices": [],
+            "cash_expected": [],
+            "source_year": None,
+            "source_month": None,
+        }
+
+    if not next_invoice_uses_current_month:
+        year, month = previous_month(today)
+        invoices = list(_cash_invoices_for_month(club_ids, year, month))
+        return {
+            "cash_invoices": invoices,
+            "cash_expected": [],
+            "source_year": year,
+            "source_month": month,
+        }
+
+    start, end = month_bounds(today.year, today.month)
+    invoices = list(
+        Invoice.objects.filter(club_id__in=club_ids)
+        .annotate(fee_effective_at=Coalesce("converted_at", "issued_at"))
+        .filter(
+            fee_effective_at__gte=start,
+            fee_effective_at__lt=end,
+            status__in=CASH_FEE_STATUSES,
+            payment_method__in=CASH_FEE_PAYMENT_METHODS,
+        )
+        .select_related("club", "subscription", "payer")
+        .prefetch_related("items")
+        .order_by("fee_effective_at", "id")
+    )
+    _, invoiced_sub_ids = _cash_subscription_invoice_total(club_ids, start, end)
+    expected = _expected_cash_subscription_rows(club_ids, invoiced_sub_ids)
+    return {
+        "cash_invoices": invoices,
+        "cash_expected": expected,
+        "source_year": today.year,
+        "source_month": today.month,
+    }
 
 
 def _cash_subscription_invoice_total(club_ids, start, end):

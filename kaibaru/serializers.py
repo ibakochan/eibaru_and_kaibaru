@@ -1321,6 +1321,26 @@ class PaymentHistoryInvoiceSerializer(serializers.ModelSerializer):
             "items",
         ]
 
+
+class PlatformBillingCashInvoiceSerializer(PaymentHistoryInvoiceSerializer):
+    """Cash/bank invoices that feed the next platform 1% fee (open + paid)."""
+
+    club_id = serializers.IntegerField(source="club.id", read_only=True)
+    club_subdomain = serializers.CharField(source="club.subdomain", read_only=True)
+    payment_method = serializers.CharField(read_only=True)
+    kind = serializers.SerializerMethodField()
+
+    class Meta(PaymentHistoryInvoiceSerializer.Meta):
+        fields = PaymentHistoryInvoiceSerializer.Meta.fields + [
+            "club_id",
+            "club_subdomain",
+            "payment_method",
+            "kind",
+        ]
+
+    def get_kind(self, obj):
+        return "invoice"
+
     def get_billing_member_name(self, obj):
         if not obj.payer:
             return obj.payer_name

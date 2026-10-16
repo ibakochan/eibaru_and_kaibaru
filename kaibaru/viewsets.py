@@ -3905,6 +3905,36 @@ class ClubViewSet(viewsets.ModelViewSet):
             "platform_bill": estimate_platform_bill_for_owner(request.user),
         })
 
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/platform-billing",
+    )
+    def platform_billing(self, request, subdomain=None):
+        from .serializers import PlatformBillingCashInvoiceSerializer
+        from .service_platform_subscription import platform_billing_detail_for_owner
+
+        club = Club.objects.filter(is_deleted=False, subdomain=subdomain).first()
+        if not club:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        if not request.user.is_authenticated or club.owner_id != request.user.id:
+            return Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
+
+        detail = platform_billing_detail_for_owner(request.user)
+        return Response({
+            "platform_bill": detail["platform_bill"],
+            "members": detail["members"],
+            "clubs": detail["clubs"],
+            "cash_source_year": detail.get("cash_source_year"),
+            "cash_source_month": detail.get("cash_source_month"),
+            "uses_current_month_cash": detail.get("uses_current_month_cash", False),
+            "cash_invoices": PlatformBillingCashInvoiceSerializer(
+                detail["cash_invoices"],
+                many=True,
+            ).data,
+            "cash_expected": detail["cash_expected"],
+        })
+
     @action(detail=True, methods=["post"], url_path="pricing_preview")
     def pricing_preview(self, request, pk=None):
     

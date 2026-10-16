@@ -84,6 +84,34 @@ def platform_cycle_received_this_month(platform_sub, today=None):
     )
 
 
+def _owner_billing_scope(user):
+    """Covered clubs (member seats) + all owned clubs (cash 1%)."""
+    platform_sub = (
+        PlatformSubscription.objects
+        .filter(user_id=user.id)
+        .prefetch_related("clubs")
+        .first()
+    )
+    if platform_sub and platform_sub.stripe_subscription_id:
+        clubs = _covered_clubs(platform_sub)
+    else:
+        clubs = list(
+            Club.objects.filter(owner_id=user.id, is_deleted=False)
+            .exclude(stripe_subscription_id__isnull=True)
+            .exclude(stripe_subscription_id="")
+        )
+        if not clubs:
+            clubs = list(
+                Club.objects.filter(owner_id=user.id, is_deleted=False)
+            )
+    cash_club_ids = list(
+        Club.objects.filter(owner_id=user.id, is_deleted=False)
+        .values_list("id", flat=True)
+    )
+    use_current = platform_cycle_received_this_month(platform_sub)
+    return platform_sub, clubs, cash_club_ids, use_current
+
+
 def estimate_platform_bill_for_owner(user):
     """Next-cycle Kaibaru fee across every covered club under this owner."""
     from .service_cash_platform_fee import estimate_cash_platform_fees_for_clubs
@@ -116,37 +144,12 @@ def estimate_platform_bill_for_owner(user):
     if not user or not getattr(user, "id", None):
         return empty
 
-    platform_sub = (
-        PlatformSubscription.objects
-        .filter(user_id=user.id)
-        .prefetch_related("clubs")
-        .first()
-    )
-    if platform_sub and platform_sub.stripe_subscription_id:
-        clubs = _covered_clubs(platform_sub)
-    else:
-        clubs = list(
-            Club.objects.filter(owner_id=user.id, is_deleted=False)
-            .exclude(stripe_subscription_id__isnull=True)
-            .exclude(stripe_subscription_id="")
-        )
-        if not clubs:
-            clubs = list(
-                Club.objects.filter(owner_id=user.id, is_deleted=False)
-            )
-
-    # Cash fee spans every club the owner runs, including ones pending removal.
-    cash_club_ids = list(
-        Club.objects.filter(owner_id=user.id, is_deleted=False)
-        .values_list("id", flat=True)
-    )
+    _platform_sub, clubs, cash_club_ids, use_current = _owner_billing_scope(user)
     # After this month's platform cycle, next invoice is next month and uses
     # this month's cash volume; before that, next invoice still bills last month.
     cash_fees = estimate_cash_platform_fees_for_clubs(
         cash_club_ids,
-        next_invoice_uses_current_month=platform_cycle_received_this_month(
-            platform_sub
-        ),
+        next_invoice_uses_current_month=use_current,
     )
 
     club_count = len(clubs)
@@ -185,6 +188,55 @@ def estimate_platform_bill_for_owner(user):
         "subscription_yen": subscription_yen,
         "total_yen": subscription_yen + cash_fee_next_yen,
         **cash_fees,
+    }
+
+
+def platform_billing_detail_for_owner(user):
+    """Bill estimate plus members and cash invoices for the next platform invoice."""
+    from .service_cash_platform_fee import list_cash_fee_line_items_for_clubs
+
+    bill = estimate_platform_bill_for_owner(user)
+    if not user or not getattr(user, "id", None):
+        return {
+            "platform_bill": bill,
+            "members": [],
+            "cash_invoices": [],
+            "cash_expected": [],
+            "clubs": [],
+        }
+
+    _platform_sub, clubs, cash_club_ids, use_current = _owner_billing_scope(user)
+    members = (
+        Member.objects.filter(club__in=clubs)
+        .select_related("club")
+        .order_by("club__subdomain", "full_name", "id")
+    )
+    member_rows = [
+        {
+            "id": member.id,
+            "full_name": member.full_name,
+            "club_id": member.club_id,
+            "club_subdomain": member.club.subdomain,
+        }
+        for member in members
+    ]
+    club_rows = [
+        {"id": club.id, "subdomain": club.subdomain}
+        for club in clubs
+    ]
+    line_items = list_cash_fee_line_items_for_clubs(
+        cash_club_ids,
+        next_invoice_uses_current_month=use_current,
+    )
+    return {
+        "platform_bill": bill,
+        "members": member_rows,
+        "cash_invoices": line_items["cash_invoices"],
+        "cash_expected": line_items["cash_expected"],
+        "clubs": club_rows,
+        "cash_source_year": line_items["source_year"],
+        "cash_source_month": line_items["source_month"],
+        "uses_current_month_cash": use_current,
     }
 
 
