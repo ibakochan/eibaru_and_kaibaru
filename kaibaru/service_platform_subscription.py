@@ -56,6 +56,19 @@ MEMBER_FULL_CAP = 100
 
 def estimate_platform_bill_for_owner(user):
     """Next-cycle Kaibaru fee across every covered club under this owner."""
+    from .service_cash_platform_fee import estimate_cash_platform_fees_for_clubs
+
+    empty_cash = {
+        "cash_fee_next_yen": 0,
+        "cash_fee_next_base_yen": 0,
+        "cash_fee_previous_year": None,
+        "cash_fee_previous_month": None,
+        "cash_fee_current_month_estimate_yen": 0,
+        "cash_fee_current_month_base_yen": 0,
+        "cash_fee_current_month_from_subscription_invoices_yen": 0,
+        "cash_fee_current_month_from_expected_subscriptions_yen": 0,
+        "cash_fee_current_month_from_other_invoices_yen": 0,
+    }
     empty = {
         "club_count": 0,
         "member_count": 0,
@@ -66,7 +79,9 @@ def estimate_platform_bill_for_owner(user):
         "club_extra_yen": 0,
         "member_full_yen": 0,
         "member_reduced_yen": 0,
+        "subscription_yen": 0,
         "total_yen": 0,
+        **empty_cash,
     }
     if not user or not getattr(user, "id", None):
         return empty
@@ -90,9 +105,20 @@ def estimate_platform_bill_for_owner(user):
                 Club.objects.filter(owner_id=user.id, is_deleted=False)
             )
 
+    # Cash fee spans every club the owner runs, including ones pending removal.
+    cash_club_ids = list(
+        Club.objects.filter(owner_id=user.id, is_deleted=False)
+        .values_list("id", flat=True)
+    )
+    cash_fees = estimate_cash_platform_fees_for_clubs(cash_club_ids)
+
     club_count = len(clubs)
     if club_count == 0:
-        return empty
+        return {
+            **empty,
+            **cash_fees,
+            "total_yen": cash_fees.get("cash_fee_next_yen", 0),
+        }
 
     member_count = Member.objects.filter(club__in=clubs).count()
     full_price_members = min(member_count, MEMBER_FULL_CAP)
@@ -102,6 +128,13 @@ def estimate_platform_bill_for_owner(user):
     club_extra_yen = extra_clubs * CLUB_EXTRA_YEN
     member_full_yen = full_price_members * MEMBER_FULL_YEN
     member_reduced_yen = reduced_members * MEMBER_REDUCED_YEN
+    subscription_yen = (
+        club_base_yen
+        + club_extra_yen
+        + member_full_yen
+        + member_reduced_yen
+    )
+    cash_fee_next_yen = cash_fees.get("cash_fee_next_yen", 0)
     return {
         "club_count": club_count,
         "member_count": member_count,
@@ -112,12 +145,9 @@ def estimate_platform_bill_for_owner(user):
         "club_extra_yen": club_extra_yen,
         "member_full_yen": member_full_yen,
         "member_reduced_yen": member_reduced_yen,
-        "total_yen": (
-            club_base_yen
-            + club_extra_yen
-            + member_full_yen
-            + member_reduced_yen
-        ),
+        "subscription_yen": subscription_yen,
+        "total_yen": subscription_yen + cash_fee_next_yen,
+        **cash_fees,
     }
 
 
