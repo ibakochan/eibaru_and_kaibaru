@@ -228,6 +228,103 @@ class Club(models.Model):
     def __str__(self):
         return self.subdomain
 
+
+class PlatformSubscription(models.Model):
+    """One Kaibaru subscription for a club owner. Not a member plan."""
+
+    user = models.OneToOneField(
+        CustomUser,
+        on_delete=models.CASCADE,
+        related_name="platform_subscription",
+    )
+    stripe_customer_id = models.CharField(max_length=255, null=True, blank=True)
+    stripe_subscription_id = models.CharField(
+        max_length=255,
+        unique=True,
+        null=True,
+        blank=True,
+    )
+    status = models.CharField(max_length=20, default="pending")
+    current_period_end = models.DateTimeField(null=True, blank=True)
+    cancel_at_period_end = models.BooleanField(default=False)
+    last_paid_invoice_id = models.CharField(max_length=255, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"platform subscription user={self.user_id}"
+
+
+class PlatformClub(models.Model):
+    """A club covered by its owner's platform subscription."""
+
+    platform_subscription = models.ForeignKey(
+        PlatformSubscription,
+        on_delete=models.CASCADE,
+        related_name="clubs",
+    )
+    club = models.OneToOneField(
+        Club,
+        on_delete=models.CASCADE,
+        related_name="platform_club",
+    )
+    awaiting_checkout = models.BooleanField(default=False)
+    pending_removal = models.BooleanField(default=False)
+    removal_kind = models.CharField(max_length=20, blank=True, default="")
+    access_until = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"platform club={self.club_id}"
+
+
+class ClubSubscriptionMutation(models.Model):
+    class MutationType(models.TextChoices):
+        ADD_CLUB = "add_club", "Add club"
+        REMOVE_CLUB = "remove_club", "Remove club"
+        RESUME_CLUB = "resume_club", "Resume club"
+        CANCEL_SUBSCRIPTION = "cancel_subscription", "Cancel subscription"
+        RESUME_SUBSCRIPTION = "resume_subscription", "Resume subscription"
+        SYNC_MEMBERS = "sync_members", "Sync members"
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        PROCESSING = "processing", "Processing"
+        SUCCEEDED = "succeeded", "Succeeded"
+        FAILED = "failed", "Failed"
+
+    platform_subscription = models.ForeignKey(
+        PlatformSubscription,
+        on_delete=models.CASCADE,
+        related_name="mutations",
+    )
+    club = models.ForeignKey(
+        Club,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="platform_mutations",
+    )
+    type = models.CharField(max_length=32, choices=MutationType.choices)
+    payload = models.JSONField(null=True, blank=True)
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+    local_state_applied = models.BooleanField(default=False)
+    stripe_finished = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    processed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["platform_subscription", "status"]),
+            models.Index(fields=["created_at"]),
+        ]
+
+
 class MembershipPlanGroup(models.Model):
     name = models.CharField(max_length=100)
     club = models.ForeignKey(Club, on_delete=models.CASCADE)

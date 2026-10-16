@@ -25,6 +25,13 @@ def add_one_month(d):
 
 
 def sync_member_quantity(club):
+    from .models import PlatformClub
+
+    if PlatformClub.objects.filter(club=club, awaiting_checkout=False).exists():
+        from .service_platform_subscription import queue_member_sync
+        queue_member_sync(club)
+        return
+
     stripe.api_key = settings.STRIPE_SECRET_KEY
 
     active_members = Member.objects.filter(

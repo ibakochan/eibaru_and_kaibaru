@@ -28,6 +28,12 @@ logger = logging.getLogger(__name__)
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
 from .locks_and_reconciliation import subscription_lock, CacheLockError, StripeToCashInvoiceReconciler, CheckoutSubscriptionReconciler
+from .service_platform_subscription import (
+    PlatformBusy,
+    handle_checkout_completed,
+    handle_invoice_paid,
+    handle_subscription_deleted,
+)
 
 from .discounts import calculate_discounted_amount
 from .billing import (
@@ -1828,6 +1834,11 @@ def stripe_platform_webhook(request):
     # ----------------- PLATFORM EVENTS -----------------
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
+        try:
+            if handle_checkout_completed(session):
+                return webhook_ok(event_record)
+        except PlatformBusy:
+            return HttpResponse(status=409)
         club_id = session["metadata"].get("club_id")
         subscription_id = session.get("subscription")
         if not subscription_id:
@@ -1851,6 +1862,11 @@ def stripe_platform_webhook(request):
 
     elif event["type"] == "invoice.payment_succeeded":
         invoice = event["data"]["object"]
+        try:
+            if handle_invoice_paid(invoice):
+                return webhook_ok(event_record)
+        except PlatformBusy:
+            return HttpResponse(status=409)
         club = Club.objects.filter(
             stripe_customer_id=invoice["customer"], is_deleted=False
         ).first()
@@ -1899,6 +1915,12 @@ def stripe_platform_webhook(request):
     elif event["type"] == "customer.subscription.deleted":
 
         sub = event["data"]["object"]
+
+        try:
+            if handle_subscription_deleted(sub):
+                return webhook_ok(event_record)
+        except PlatformBusy:
+            return HttpResponse(status=409)
 
         club = Club.all_objects.filter(
             stripe_subscription_id=sub["id"]

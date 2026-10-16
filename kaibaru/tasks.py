@@ -11,7 +11,12 @@ from .tasks_emails import send_subscription_activated_emails, send_club_deleted_
 
 logger = logging.getLogger(__name__)
 
-from .models import Participation, Club, Subscription, Invoice, MembershipPlan
+from .models import Participation, Club, Subscription, Invoice, MembershipPlan, PlatformClub
+from .service_platform_subscription import (
+    delete_overdue_platform_subscriptions,
+    reconcile_open_platform_mutations,
+    reconcile_platform_subscription,
+)
 from .utils import sync_member_quantity
 from django.db.models import Exists, OuterRef, CharField
 from django.db.models.functions import TruncDate, Cast
@@ -272,6 +277,16 @@ def reconcile_single_club_subscription(club_id):
     except Club.DoesNotExist:
         return
 
+    platform_club = (
+        PlatformClub.objects
+        .filter(club=club)
+        .select_related("platform_subscription")
+        .first()
+    )
+    if platform_club:
+        reconcile_platform_subscription(platform_club.platform_subscription_id)
+        return
+
     if not club.stripe_subscription_id:
         return
 
@@ -347,6 +362,13 @@ def reset_monthly_participation_counts():
 
 
 @shared_task
+def reconcile_platform_subscription_mutations():
+    """Safety net for platform subscription mutations. Not member plans."""
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+    reconcile_open_platform_mutations()
+
+
+@shared_task
 def reconcile_stripe_subscriptions():
     """
     Daily safety-net task:
@@ -368,9 +390,17 @@ def reconcile_stripe_subscriptions():
         )
 
     clubs = Club.objects.filter(is_deleted=False)
+    platform_club_ids = set(
+        PlatformClub.objects.filter(awaiting_checkout=False).values_list(
+            "club_id",
+            flat=True,
+        )
+    )
 
 
     for club in clubs:
+        if club.id in platform_club_ids:
+            continue
         try:
             if club.stripe_subscription_id:
                 try:
@@ -512,6 +542,16 @@ def reconcile_stripe_subscriptions():
             logger.exception(
                 f"[CELERY] Unexpected error for club={club.id}: {e}"
             )
+
+    try:
+        reconcile_open_platform_mutations()
+    except Exception:
+        logger.exception("[PLATFORM SUB] Mutation reconciliation failed")
+
+    try:
+        delete_overdue_platform_subscriptions(today)
+    except Exception:
+        logger.exception("[PLATFORM SUB] Overdue subscription cleanup failed")
 
 
 

@@ -239,7 +239,9 @@ STRIPE_CONNECTED_WEBHOOK_SECRET = env('STRIPE_CONNECTED_WEBHOOK_SECRET')
 STRIPE_CLIENT_ID = env('STRIPE_CLIENT_ID')
 
 STRIPE_BASE_PRICE_ID = "price_1SeNvyEuyKDnirof2pUdCR0v"
+STRIPE_BASE_PRICE_ID_REDUCED = "price_1UQzRZEuyKDnirofHlor1CAj"
 STRIPE_MEMBER_PRICE_ID = "price_1SeRBPEuyKDnirof40RPZZnw"
+STRIPE_MEMBER_PRICE_ID_REDUCED = "price_1UQzXIEuyKDnirofJDEOQsMr"
 
 # Password validation
 # https://docs.djangoproject.com/en/4.0/ref/settings/#auth-password-validators

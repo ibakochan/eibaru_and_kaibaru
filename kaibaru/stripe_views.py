@@ -35,7 +35,14 @@ from .service_cash_subscription import MemberCashSubscriptionService
 from .service_add_plan_cash import CashAddPlanService
 from .service_reservation import MemberReservationService
 
-from .models import TicketType, TicketPackage, Club, Member, MembershipPlan, SubscriptionItem, Subscription, StripeCustomer, Lesson
+from .models import TicketType, TicketPackage, Club, Member, MembershipPlan, SubscriptionItem, Subscription, StripeCustomer, Lesson, PlatformClub
+from .service_platform_subscription import (
+    PlatformActionError,
+    PlatformBusy,
+    resume_club_subscription as resume_platform_club,
+    start_club_subscription,
+    unsubscribe_club as unsubscribe_platform_club,
+)
 from .club_access import CONNECT_REQUIRES_SUBSCRIPTION, FIRST_OF_MONTH_BLOCKED, club_has_platform_subscription
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
@@ -191,6 +198,31 @@ def reconcile_checkout_subscriptions_manual(request):
         }
     )
 
+def _uses_platform_subscription(club):
+    if PlatformClub.objects.filter(club=club).exists():
+        return True
+    return not club.stripe_subscription_id
+
+
+def _platform_action(callback):
+    try:
+        return JsonResponse(callback())
+    except PlatformActionError as exc:
+        status = 403 if exc.message == "許可なし" else 400
+        return JsonResponse({"error": exc.message}, status=status)
+    except PlatformBusy:
+        return JsonResponse({"error": BUSY_MESSAGE}, status=409)
+    except Exception:
+        logger.exception("[PLATFORM SUB] action failed")
+        return JsonResponse(
+            {"error": "決済の更新に失敗しました。しばらくすると自動で反映されます。"},
+            status=500,
+        )
+
+
+BUSY_MESSAGE = "処理中です。しばらくしてから再度お試しください。"
+
+
 @require_POST
 @login_required
 def create_checkout_session(request, club_id):
@@ -199,6 +231,11 @@ def create_checkout_session(request, club_id):
 
     if club.owner != request.user:
         return HttpResponseForbidden("You do not own this club")
+
+    if _uses_platform_subscription(club):
+        return _platform_action(
+            lambda: start_club_subscription(club, request.user)
+        )
 
     if timezone.localdate().day == 1:
         return JsonResponse({"error": FIRST_OF_MONTH_BLOCKED}, status=400)
@@ -253,6 +290,11 @@ def unsubscribe(request, club_id):
     if club.owner != request.user:
         return HttpResponseForbidden()
 
+    if PlatformClub.objects.filter(club=club).exists():
+        return _platform_action(
+            lambda: unsubscribe_platform_club(club, request.user)
+        )
+
     if not club.stripe_subscription_id:
         return JsonResponse({"error": "契約がありません。"}, status=400)
 
@@ -288,6 +330,11 @@ def resume_club_subscription(request, club_id):
     club = get_object_or_404(Club, id=club_id, is_deleted=False)
     if club.owner != request.user:
         return HttpResponseForbidden()
+
+    if PlatformClub.objects.filter(club=club).exists():
+        return _platform_action(
+            lambda: resume_platform_club(club, request.user)
+        )
 
     sub = stripe.Subscription.modify(
         club.stripe_subscription_id,

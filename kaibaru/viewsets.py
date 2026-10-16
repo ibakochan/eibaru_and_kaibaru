@@ -15,6 +15,7 @@ from datetime import date
 from django.db.models import IntegerField, Sum, Value
 from .service_legacy_subscription import LegacySubscriptionService
 from .club_access import MEMBERS_REQUIRE_SUBSCRIPTION, club_has_platform_subscription
+from .service_platform_subscription import member_deletion_block_reason
 
 
 from collections import defaultdict
@@ -1562,7 +1563,10 @@ class MemberViewSet(viewsets.ModelViewSet):
                 {"detail": MEMBERS_REQUIRE_SUBSCRIPTION},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        return super().create(request, *args, **kwargs)
+        response = super().create(request, *args, **kwargs)
+        if response.status_code == 201 and club is not None:
+            sync_member_quantity(club)
+        return response
 
 
     @action(detail=True, methods=["delete"])
@@ -1592,6 +1596,13 @@ class MemberViewSet(viewsets.ModelViewSet):
                 {
                     "detail": "有効なサブスクリプションが存在するため、この会員を削除できません。"
                 },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        deletion_block = member_deletion_block_reason(member.club)
+        if deletion_block:
+            return Response(
+                {"detail": deletion_block},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
