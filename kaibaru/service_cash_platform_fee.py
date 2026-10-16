@@ -361,16 +361,25 @@ def _non_subscription_cash_invoice_total(club_ids, start, end):
         return 0
 
 
-def estimate_cash_platform_fees_for_clubs(club_ids, today=None):
-    """Estimate 1% cash fees for the next platform invoice and this month.
+def estimate_cash_platform_fees_for_clubs(
+    club_ids,
+    today=None,
+    *,
+    next_invoice_uses_current_month=False,
+):
+    """1% cash fee for the *next* platform invoice only (never both months).
 
-    Next invoice fee = 1% of the previous calendar month's cash/bank invoices
-    (what apply_previous_month_cash_platform_fees bills).
+    Before this month's platform cycle is paid:
+      next fee = 1% of previous calendar month's cash/bank invoices.
 
-    Current month estimate = cash subscription invoices already issued this
-    month when present, otherwise expected subscription totals for cash subs
-    that have no invoice yet, plus all non-subscription cash invoices so far
-    this month.
+    After this month's platform cycle is paid (next invoice is next month):
+      next fee = 1% of (cash invoices already issued this month
+      + expected totals for active cash subscriptions that still have no
+      invoice this month
+      + non-subscription cash invoices so far this month).
+
+    cash_fee_previous_year/month label the cash source month that feeds
+    cash_fee_next_yen (previous or current calendar month).
     """
     today = today or timezone.localdate()
     club_ids = list(club_ids or [])
@@ -388,19 +397,30 @@ def estimate_cash_platform_fees_for_clubs(club_ids, today=None):
     if not club_ids:
         return empty
 
-    prev_year, prev_month = previous_month(today)
-    previous_amounts = _cash_invoice_amounts_for_month(
-        club_ids,
-        prev_year,
-        prev_month,
-    )
-    previous_base = 0
-    for amount in previous_amounts:
-        try:
-            previous_base += int(amount or 0)
-        except (TypeError, ValueError):
-            continue
-    cash_fee_next_yen = total_platform_fee(previous_amounts)
+    if not next_invoice_uses_current_month:
+        prev_year, prev_month = previous_month(today)
+        previous_amounts = _cash_invoice_amounts_for_month(
+            club_ids,
+            prev_year,
+            prev_month,
+        )
+        previous_base = 0
+        for amount in previous_amounts:
+            try:
+                previous_base += int(amount or 0)
+            except (TypeError, ValueError):
+                continue
+        return {
+            "cash_fee_next_yen": total_platform_fee(previous_amounts),
+            "cash_fee_next_base_yen": previous_base,
+            "cash_fee_previous_year": prev_year,
+            "cash_fee_previous_month": prev_month,
+            "cash_fee_current_month_estimate_yen": 0,
+            "cash_fee_current_month_base_yen": 0,
+            "cash_fee_current_month_from_subscription_invoices_yen": 0,
+            "cash_fee_current_month_from_expected_subscriptions_yen": 0,
+            "cash_fee_current_month_from_other_invoices_yen": 0,
+        }
 
     start, end = month_bounds(today.year, today.month)
     sub_invoice_total, invoiced_sub_ids = _cash_subscription_invoice_total(
@@ -417,12 +437,14 @@ def estimate_cash_platform_fees_for_clubs(club_ids, today=None):
     current_fee = total_platform_fee([current_base]) if current_base else 0
 
     return {
-        "cash_fee_next_yen": cash_fee_next_yen,
-        "cash_fee_next_base_yen": previous_base,
-        "cash_fee_previous_year": prev_year,
-        "cash_fee_previous_month": prev_month,
-        "cash_fee_current_month_estimate_yen": current_fee,
-        "cash_fee_current_month_base_yen": current_base,
+        "cash_fee_next_yen": current_fee,
+        "cash_fee_next_base_yen": current_base,
+        "cash_fee_previous_year": today.year,
+        "cash_fee_previous_month": today.month,
+        # Kept for API compatibility; always zero — next invoice uses
+        # cash_fee_next_* only.
+        "cash_fee_current_month_estimate_yen": 0,
+        "cash_fee_current_month_base_yen": 0,
         "cash_fee_current_month_from_subscription_invoices_yen": sub_invoice_total,
         "cash_fee_current_month_from_expected_subscriptions_yen": expected_remaining,
         "cash_fee_current_month_from_other_invoices_yen": other_total,

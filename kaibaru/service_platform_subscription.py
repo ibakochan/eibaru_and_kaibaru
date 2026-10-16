@@ -54,6 +54,36 @@ MEMBER_REDUCED_YEN = 50
 MEMBER_FULL_CAP = 100
 
 
+def _subtract_one_calendar_month(day):
+    import calendar
+
+    year = day.year
+    month = day.month - 1
+    if month < 1:
+        month = 12
+        year -= 1
+    last = calendar.monthrange(year, month)[1]
+    return day.replace(year=year, month=month, day=min(day.day, last))
+
+
+def platform_cycle_received_this_month(platform_sub, today=None):
+    """True when this calendar month's platform renewal has already paid.
+
+    After a cycle payment, current_period_end moves forward, so the current
+    period starts in this calendar month. Before that payment, the period
+    still started last month (or earlier).
+    """
+    today = today or timezone.localdate()
+    if not platform_sub or not platform_sub.current_period_end:
+        return False
+    period_end = timezone.localtime(platform_sub.current_period_end).date()
+    period_start = _subtract_one_calendar_month(period_end)
+    return (
+        period_start.year == today.year
+        and period_start.month == today.month
+    )
+
+
 def estimate_platform_bill_for_owner(user):
     """Next-cycle Kaibaru fee across every covered club under this owner."""
     from .service_cash_platform_fee import estimate_cash_platform_fees_for_clubs
@@ -110,7 +140,14 @@ def estimate_platform_bill_for_owner(user):
         Club.objects.filter(owner_id=user.id, is_deleted=False)
         .values_list("id", flat=True)
     )
-    cash_fees = estimate_cash_platform_fees_for_clubs(cash_club_ids)
+    # After this month's platform cycle, next invoice is next month and uses
+    # this month's cash volume; before that, next invoice still bills last month.
+    cash_fees = estimate_cash_platform_fees_for_clubs(
+        cash_club_ids,
+        next_invoice_uses_current_month=platform_cycle_received_this_month(
+            platform_sub
+        ),
+    )
 
     club_count = len(clubs)
     if club_count == 0:
