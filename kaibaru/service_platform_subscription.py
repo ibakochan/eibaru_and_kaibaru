@@ -47,6 +47,79 @@ BUSY = "処理中です。しばらくしてから再度お試しください。
 REMOVAL_CLUB = "club"
 REMOVAL_SUBSCRIPTION = "subscription"
 
+CLUB_BASE_YEN = 2980
+CLUB_EXTRA_YEN = 1490
+MEMBER_FULL_YEN = 100
+MEMBER_REDUCED_YEN = 50
+MEMBER_FULL_CAP = 100
+
+
+def estimate_platform_bill_for_owner(user):
+    """Next-cycle Kaibaru fee across every covered club under this owner."""
+    empty = {
+        "club_count": 0,
+        "member_count": 0,
+        "full_price_members": 0,
+        "reduced_members": 0,
+        "extra_clubs": 0,
+        "club_base_yen": 0,
+        "club_extra_yen": 0,
+        "member_full_yen": 0,
+        "member_reduced_yen": 0,
+        "total_yen": 0,
+    }
+    if not user or not getattr(user, "id", None):
+        return empty
+
+    platform_sub = (
+        PlatformSubscription.objects
+        .filter(user_id=user.id)
+        .prefetch_related("clubs")
+        .first()
+    )
+    if platform_sub and platform_sub.stripe_subscription_id:
+        clubs = _covered_clubs(platform_sub)
+    else:
+        clubs = list(
+            Club.objects.filter(owner_id=user.id, is_deleted=False)
+            .exclude(stripe_subscription_id__isnull=True)
+            .exclude(stripe_subscription_id="")
+        )
+        if not clubs:
+            clubs = list(
+                Club.objects.filter(owner_id=user.id, is_deleted=False)
+            )
+
+    club_count = len(clubs)
+    if club_count == 0:
+        return empty
+
+    member_count = Member.objects.filter(club__in=clubs).count()
+    full_price_members = min(member_count, MEMBER_FULL_CAP)
+    reduced_members = max(member_count - MEMBER_FULL_CAP, 0)
+    extra_clubs = max(club_count - 1, 0)
+    club_base_yen = CLUB_BASE_YEN
+    club_extra_yen = extra_clubs * CLUB_EXTRA_YEN
+    member_full_yen = full_price_members * MEMBER_FULL_YEN
+    member_reduced_yen = reduced_members * MEMBER_REDUCED_YEN
+    return {
+        "club_count": club_count,
+        "member_count": member_count,
+        "full_price_members": full_price_members,
+        "reduced_members": reduced_members,
+        "extra_clubs": extra_clubs,
+        "club_base_yen": club_base_yen,
+        "club_extra_yen": club_extra_yen,
+        "member_full_yen": member_full_yen,
+        "member_reduced_yen": member_reduced_yen,
+        "total_yen": (
+            club_base_yen
+            + club_extra_yen
+            + member_full_yen
+            + member_reduced_yen
+        ),
+    }
+
 
 class PlatformActionError(Exception):
     def __init__(self, message):

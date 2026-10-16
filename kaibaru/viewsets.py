@@ -3875,7 +3875,8 @@ class ClubViewSet(viewsets.ModelViewSet):
         url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/members",
     )
     def club_members(self, request, subdomain=None):
-        from .serializers import MemberSerializer
+        from .serializers import MemberSerializer, other_owned_club_subdomains_map
+        from .service_platform_subscription import estimate_platform_bill_for_owner
 
         club = (
             Club.objects.filter(is_deleted=False, subdomain=subdomain)
@@ -3886,12 +3887,22 @@ class ClubViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
         if not request.user.is_authenticated or club.owner_id != request.user.id:
             return Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
+
+        members = list(club.members.all())
         return Response({
             "members": MemberSerializer(
-                list(club.members.all()),
+                members,
                 many=True,
-                context={"request": request, "viewer_is_manager": False},
+                context={
+                    "request": request,
+                    "viewer_is_manager": False,
+                    "other_owned_club_subdomains": other_owned_club_subdomains_map(
+                        club,
+                        members,
+                    ),
+                },
             ).data,
+            "platform_bill": estimate_platform_bill_for_owner(request.user),
         })
 
     @action(detail=True, methods=["post"], url_path="pricing_preview")

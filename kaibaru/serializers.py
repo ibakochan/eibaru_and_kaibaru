@@ -31,6 +31,30 @@ from django.utils.timezone import now
 NOW = now()
 
 
+def other_owned_club_subdomains_map(club, members):
+    """user_id -> subdomains of other clubs under the same owner."""
+    user_ids = {member.user_id for member in members if member.user_id}
+    if not user_ids:
+        return {}
+
+    rows = (
+        Member.objects.filter(
+            user_id__in=user_ids,
+            club__owner_id=club.owner_id,
+            club__is_deleted=False,
+        )
+        .exclude(club_id=club.id)
+        .values_list("user_id", "club__subdomain")
+        .distinct()
+    )
+    result = defaultdict(list)
+    for user_id, subdomain in rows:
+        if not subdomain or subdomain in result[user_id]:
+            continue
+        result[user_id].append(subdomain)
+    return dict(result)
+
+
 class BlankableIntegerField(serializers.IntegerField):
     def to_internal_value(self, data):
         if data in ("", None, "null"):
@@ -1504,6 +1528,7 @@ class MemberSerializer(serializers.ModelSerializer):
     subscription_state = serializers.SerializerMethodField()
     subscription_items = serializers.SerializerMethodField()
     tickets = serializers.SerializerMethodField()
+    other_owned_club_subdomains = serializers.SerializerMethodField()
 
     class Meta:
         model = Member
@@ -1536,6 +1561,7 @@ class MemberSerializer(serializers.ModelSerializer):
             "subscription_items",
             "counts_for_family_discount",
             "tickets",
+            "other_owned_club_subdomains",
         ]
         read_only_fields = ["id", "user", "is_manager", "is_instructor",]
 
@@ -1681,7 +1707,35 @@ class MemberSerializer(serializers.ModelSerializer):
             )
         )
 
+    def get_other_owned_club_subdomains(self, obj):
+        if not obj.user_id:
+            return []
 
+        cached = self.context.get("other_owned_club_subdomains")
+        if cached is not None:
+            return cached.get(obj.user_id, [])
+
+        club = getattr(obj, "club", None)
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if (
+            not club
+            or not user
+            or not user.is_authenticated
+            or club.owner_id != user.id
+        ):
+            return []
+
+        return list(
+            Member.objects.filter(
+                user_id=obj.user_id,
+                club__owner_id=club.owner_id,
+                club__is_deleted=False,
+            )
+            .exclude(club_id=club.id)
+            .values_list("club__subdomain", flat=True)
+            .distinct()
+        )
 
     
     def to_representation(self, instance):
@@ -2578,6 +2632,7 @@ class ClubSerializer(serializers.ModelSerializer):
     home = serializers.JSONField()
     warning_message = serializers.SerializerMethodField()
     frozen = serializers.SerializerMethodField()
+    platform_bill = serializers.SerializerMethodField()
     slate_images = SlateImageSerializer(many=True, read_only=True)
     join_requests = serializers.SerializerMethodField()
     my_join_requests = serializers.SerializerMethodField()
@@ -2598,7 +2653,7 @@ class ClubSerializer(serializers.ModelSerializer):
                 member for member in members
                 if member.is_instructor or member.is_manager or member.user_id == club.owner_id
             ]
-            return self._member_data(visible, viewer_is_manager=False)
+            return self._member_data(club, visible, viewer_is_manager=False)
 
         user_member = next((member for member in members if member.user_id == user.id), None)
         viewer_is_manager = any(
@@ -2610,7 +2665,11 @@ class ClubSerializer(serializers.ModelSerializer):
             and user_member
             and (user_member.is_instructor or user_member.is_manager)
         ):
-            return self._member_data(members, viewer_is_manager=viewer_is_manager)
+            return self._member_data(
+                club,
+                members,
+                viewer_is_manager=viewer_is_manager,
+            )
 
         visible = [
             member for member in members
@@ -2620,10 +2679,29 @@ class ClubSerializer(serializers.ModelSerializer):
             or member.user_id == user.id
             or member.owner_id == user.id
         ]
-        return self._member_data(visible, viewer_is_manager=viewer_is_manager)
+        return self._member_data(
+            club,
+            visible,
+            viewer_is_manager=viewer_is_manager,
+        )
 
-    def _member_data(self, members, *, viewer_is_manager):
+    def _member_data(self, club, members, *, viewer_is_manager):
         context = {**self.context, "viewer_is_manager": viewer_is_manager}
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if (
+            user
+            and user.is_authenticated
+            and (
+                club.owner_id == user.id
+                or viewer_is_manager
+            )
+        ):
+            context["other_owned_club_subdomains"] = (
+                other_owned_club_subdomains_map(club, members)
+            )
+        else:
+            context["other_owned_club_subdomains"] = {}
         return MemberSerializer(members, many=True, context=context).data
 
     def get_events(self, club):
@@ -2681,6 +2759,7 @@ class ClubSerializer(serializers.ModelSerializer):
 
             "warning_message",
             "frozen",
+            "platform_bill",
             "slate_images",
             "page_content",
             "membership_plans",
@@ -2793,6 +2872,18 @@ class ClubSerializer(serializers.ModelSerializer):
 
     def get_has_member_subscription(self, club):
         return Subscription.objects.filter(club=club).exists()
+
+    def get_platform_bill(self, club):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if (
+            not user
+            or not user.is_authenticated
+            or club.owner_id != user.id
+        ):
+            return None
+        from .service_platform_subscription import estimate_platform_bill_for_owner
+        return estimate_platform_bill_for_owner(user)
 
     def get_frozen(self, club):  
         if not club.expiration_date:
