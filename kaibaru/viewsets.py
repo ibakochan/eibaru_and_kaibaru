@@ -3771,33 +3771,7 @@ class ClubViewSet(viewsets.ModelViewSet):
         return (
             Club.objects.filter(is_deleted=False)
             .prefetch_related(
-
-                Prefetch(
-                    "members",
-                    queryset=Member.objects.prefetch_related(
-                        Prefetch(
-                           "subscription_items",
-                            queryset=SubscriptionItem.objects
-                            .select_related("subscription", "plan", "source_item")
-                            .prefetch_related("replacement_for").filter(
-                                Q(deleted_at__isnull=True) |
-                                Q(deleted_at__isnull=False, access_until__gt=now()),
-                                subscription__status__in=["active", "trialing", "pending"],
-                            ),
-                        ),
-                        Prefetch(
-                            "ticket_grants",
-                            queryset=(
-                                TicketGrant.objects
-                                .select_related("ticket_type")
-                                .prefetch_related(
-                                    "ticket_type__eligible_plans",
-                                    "usages",
-                                )
-                            ),
-                        ),
-                    ),
-                ),
+                self._members_prefetch(),
 
                 Prefetch(
                     "lessons",
@@ -3822,6 +3796,34 @@ class ClubViewSet(viewsets.ModelViewSet):
                 "join_requests",
                 "membership_plans",
             )
+        )
+
+    def _members_prefetch(self):
+        return Prefetch(
+            "members",
+            queryset=Member.objects.prefetch_related(
+                Prefetch(
+                    "subscription_items",
+                    queryset=SubscriptionItem.objects
+                    .select_related("subscription", "plan", "source_item")
+                    .prefetch_related("replacement_for").filter(
+                        Q(deleted_at__isnull=True) |
+                        Q(deleted_at__isnull=False, access_until__gt=now()),
+                        subscription__status__in=["active", "trialing", "pending"],
+                    ),
+                ),
+                Prefetch(
+                    "ticket_grants",
+                    queryset=(
+                        TicketGrant.objects
+                        .select_related("ticket_type")
+                        .prefetch_related(
+                            "ticket_type__eligible_plans",
+                            "usages",
+                        )
+                    ),
+                ),
+            ),
         )
 
     @action(detail=False, methods=["get"], url_path="by-subdomain/(?P<subdomain>[^/.]+)")
@@ -3853,6 +3855,31 @@ class ClubViewSet(viewsets.ModelViewSet):
                 visible,
                 many=True,
                 context={"request": request, "include_event_boards": True},
+            ).data,
+        })
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/members",
+    )
+    def club_members(self, request, subdomain=None):
+        from .serializers import MemberSerializer
+
+        club = (
+            Club.objects.filter(is_deleted=False, subdomain=subdomain)
+            .prefetch_related(self._members_prefetch())
+            .first()
+        )
+        if not club:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        if not request.user.is_authenticated or club.owner_id != request.user.id:
+            return Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
+        return Response({
+            "members": MemberSerializer(
+                list(club.members.all()),
+                many=True,
+                context={"request": request, "viewer_is_manager": False},
             ).data,
         })
 

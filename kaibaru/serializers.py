@@ -2460,6 +2460,8 @@ class EventSerializer(serializers.ModelSerializer):
         return allowed
 
     def get_guests(self, event):
+        if not self.context.get("include_event_boards"):
+            return None
         if not self._viewer_can_manage(event):
             return None
         if event.archive_visibility or event.canceled_at:
@@ -2530,6 +2532,7 @@ class EventBoardsSerializer(EventSerializer):
             "team_battle",
             "team_tournament",
             "results",
+            "guests",
         ]
 
 
@@ -2597,15 +2600,16 @@ class ClubSerializer(serializers.ModelSerializer):
             ]
             return self._member_data(visible, viewer_is_manager=False)
 
-        if club.owner_id == user.id:
-            return self._member_data(members, viewer_is_manager=False)
-
         user_member = next((member for member in members if member.user_id == user.id), None)
         viewer_is_manager = any(
             member.user_id == user.id and member.is_manager
             for member in members
         )
-        if user_member and (user_member.is_instructor or user_member.is_manager):
+        if (
+            club.owner_id != user.id
+            and user_member
+            and (user_member.is_instructor or user_member.is_manager)
+        ):
             return self._member_data(members, viewer_is_manager=viewer_is_manager)
 
         visible = [
