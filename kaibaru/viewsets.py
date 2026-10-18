@@ -3973,6 +3973,35 @@ class ClubViewSet(viewsets.ModelViewSet):
 
         return Response(platform_billing_history_for_owner(request.user))
 
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/member-income",
+    )
+    def member_income(self, request, subdomain=None):
+        from .serializers import MemberIncomeInvoiceSerializer
+        from .service_member_income import member_income_for_club
+
+        club = Club.objects.filter(is_deleted=False, subdomain=subdomain).first()
+        if not club:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        if not request.user.is_authenticated or club.owner_id != request.user.id:
+            return Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
+
+        entries = []
+        for month in member_income_for_club(club):
+            entries.append({
+                "year": month["year"],
+                "month": month["month"],
+                "invoice_count": month["invoice_count"],
+                "total_yen": month["total_yen"],
+                "invoices": MemberIncomeInvoiceSerializer(
+                    month["invoices"],
+                    many=True,
+                ).data,
+            })
+        return Response({"entries": entries})
+
     @action(detail=True, methods=["post"], url_path="pricing_preview")
     def pricing_preview(self, request, pk=None):
     

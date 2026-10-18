@@ -1377,6 +1377,22 @@ class PlatformBillingCashInvoiceSerializer(PaymentHistoryInvoiceSerializer):
 
         return obj.subscription.billing_method
 
+
+class MemberIncomeInvoiceSerializer(PlatformBillingCashInvoiceSerializer):
+    """A paid member invoice on the club income history."""
+
+    paid_on = serializers.SerializerMethodField()
+
+    class Meta(PlatformBillingCashInvoiceSerializer.Meta):
+        fields = PlatformBillingCashInvoiceSerializer.Meta.fields + ["paid_on"]
+
+    def get_paid_on(self, obj):
+        paid_at = getattr(obj, "income_at", None)
+        if not paid_at:
+            return None
+        return timezone.localtime(paid_at).date().isoformat()
+
+
 class InvoiceSerializer(serializers.ModelSerializer):
     billing_member_name = serializers.SerializerMethodField()
     billing_member_furigana = serializers.SerializerMethodField()
