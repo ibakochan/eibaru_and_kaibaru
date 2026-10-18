@@ -8,6 +8,7 @@ row fall back to issued_at.
 from django.utils import timezone
 
 from .models import Invoice
+from .service_paid_reservations import paid_reservations_for_clubs
 
 MONTH_LIMIT = 36
 
@@ -47,18 +48,37 @@ def member_income_for_club(club):
             continue
         months.setdefault((local.year, local.month), []).append(invoice)
 
+    reservation_months = {}
+    for reservation in paid_reservations_for_clubs([club.id]):
+        income_at = reservation.get("income_at")
+        local = timezone.localtime(income_at) if income_at else None
+        if not local:
+            continue
+        reservation.pop("income_at", None)
+        reservation.pop("payment_intent_id", None)
+        reservation_months.setdefault((local.year, local.month), []).append(reservation)
+
     entries = []
-    for year, month in sorted(months, reverse=True)[:MONTH_LIMIT]:
-        rows = months[(year, month)]
+    keys = sorted(set(months) | set(reservation_months), reverse=True)[:MONTH_LIMIT]
+    for year, month in keys:
+        rows = months.get((year, month), [])
+        reservations = reservation_months.get((year, month), [])
         rows.sort(
             key=lambda invoice: (invoice.income_at or invoice.issued_at, invoice.id),
             reverse=True,
         )
+        reservations.sort(key=lambda row: (row.get("paid_on") or "", row["id"]), reverse=True)
+        invoice_total = sum(_amount(invoice) for invoice in rows)
+        reservation_total = sum(int(row.get("amount") or 0) for row in reservations)
         entries.append({
             "year": year,
             "month": month,
             "invoice_count": len(rows),
-            "total_yen": sum(_amount(invoice) for invoice in rows),
+            "reservation_count": len(reservations),
+            "invoice_total_yen": invoice_total,
+            "reservation_total_yen": reservation_total,
+            "total_yen": invoice_total + reservation_total,
             "invoices": rows,
+            "reservations": reservations,
         })
     return entries

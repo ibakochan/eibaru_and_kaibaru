@@ -112,6 +112,21 @@ def _owner_billing_scope(user):
     return platform_sub, clubs, cash_club_ids, use_current
 
 
+def _stripe_take_yen(club_ids, cash_fees):
+    """1% already collected on Stripe charges for the cash-fee source month.
+
+    This is not added to the next platform invoice. Stripe took it when the
+    member invoice or reservation was paid.
+    """
+    from .service_paid_reservations import kaibaru_stripe_application_fee_yen
+
+    year = cash_fees.get("cash_fee_previous_year")
+    month = cash_fees.get("cash_fee_previous_month")
+    if not year or not month:
+        return 0
+    return kaibaru_stripe_application_fee_yen(club_ids, year, month)
+
+
 def estimate_platform_bill_for_owner(user):
     """Next-cycle Kaibaru fee across every covered club under this owner."""
     from .service_cash_platform_fee import estimate_cash_platform_fees_for_clubs
@@ -139,6 +154,7 @@ def estimate_platform_bill_for_owner(user):
         "member_reduced_yen": 0,
         "subscription_yen": 0,
         "total_yen": 0,
+        "stripe_application_fee_yen": 0,
         **empty_cash,
     }
     if not user or not getattr(user, "id", None):
@@ -158,6 +174,7 @@ def estimate_platform_bill_for_owner(user):
             **empty,
             **cash_fees,
             "total_yen": cash_fees.get("cash_fee_next_yen", 0),
+            "stripe_application_fee_yen": _stripe_take_yen(cash_club_ids, cash_fees),
         }
 
     member_count = Member.objects.filter(club__in=clubs).count()
@@ -175,6 +192,7 @@ def estimate_platform_bill_for_owner(user):
         + member_reduced_yen
     )
     cash_fee_next_yen = cash_fees.get("cash_fee_next_yen", 0)
+    stripe_fee_yen = _stripe_take_yen(cash_club_ids, cash_fees)
     return {
         "club_count": club_count,
         "member_count": member_count,
@@ -187,6 +205,7 @@ def estimate_platform_bill_for_owner(user):
         "member_reduced_yen": member_reduced_yen,
         "subscription_yen": subscription_yen,
         "total_yen": subscription_yen + cash_fee_next_yen,
+        "stripe_application_fee_yen": stripe_fee_yen,
         **cash_fees,
     }
 

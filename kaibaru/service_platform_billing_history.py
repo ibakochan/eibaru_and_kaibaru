@@ -17,6 +17,10 @@ from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from .charge_amounts import platform_fee_yen
+from .service_paid_reservations import (
+    paid_reservations_for_clubs,
+    reservation_application_fee_yen,
+)
 from .models import Club, Invoice, PlatformSubscription
 from .service_cash_platform_fee import (
     month_bounds,
@@ -121,6 +125,10 @@ def _stripe_member_fee_totals(club_ids, year, month):
         if fee is not None:
             stripe_fee += fee
             stripe_fee_known += 1
+
+    kaibaru_fee += reservation_application_fee_yen(
+        paid_reservations_for_clubs(club_ids, year, month)
+    )
 
     return {
         "stripe_member_invoice_base_yen": base,
@@ -415,6 +423,9 @@ def _stripe_member_fee_totals_local_only(club_ids, year, month):
             continue
         base += amount
         kaibaru_fee += platform_fee_yen(amount)
+    kaibaru_fee += reservation_application_fee_yen(
+        paid_reservations_for_clubs(club_ids, year, month)
+    )
     return {
         "stripe_member_invoice_base_yen": base,
         "stripe_member_invoice_count": len(invoices),

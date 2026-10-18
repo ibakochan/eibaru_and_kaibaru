@@ -3994,11 +3994,15 @@ class ClubViewSet(viewsets.ModelViewSet):
                 "year": month["year"],
                 "month": month["month"],
                 "invoice_count": month["invoice_count"],
+                "reservation_count": month["reservation_count"],
+                "invoice_total_yen": month["invoice_total_yen"],
+                "reservation_total_yen": month["reservation_total_yen"],
                 "total_yen": month["total_yen"],
                 "invoices": MemberIncomeInvoiceSerializer(
                     month["invoices"],
                     many=True,
                 ).data,
+                "reservations": month["reservations"],
             })
         return Response({"entries": entries})
 
