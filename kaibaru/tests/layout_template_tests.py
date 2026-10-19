@@ -16,7 +16,7 @@ from kaibaru.layout_templates import (
 from kaibaru.models import Club
 from kaibaru.signals import club_created_signal
 
-EXAMPLE_PIC = "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png"
+EXAMPLE_PIC_PREFIX = "https://storage.googleapis.com/sitepicsforkaibaru/layouts/"
 CANVAS_WIDTH = 1205
 ALLOWED_TYPES = {
     "custom", "schedule", "join", "member", "teacher",
@@ -86,7 +86,7 @@ class LayoutTemplateFileTests(SimpleTestCase):
         slide_ids = [slide["id"] for slide in slideshow["slides"]]
         self.assertEqual(len(slide_ids), len(set(slide_ids)))
         for slide in slideshow["slides"]:
-            self.assertEqual(slide["image"], EXAMPLE_PIC)
+            self.assertTrue(slide["image"].startswith(EXAMPLE_PIC_PREFIX))
             self.assertIn(str(slide["buttonSectionId"]), sections)
 
         customs = [s for s in ordered if s["type"] == "custom"]
@@ -111,7 +111,7 @@ class LayoutTemplateFileTests(SimpleTestCase):
             for node in walk(box["content"]):
                 if node.get("type") == "image":
                     images += 1
-                    self.assertEqual(node["url"], EXAMPLE_PIC)
+                    self.assertTrue(node["url"].startswith(EXAMPLE_PIC_PREFIX))
                 elif node.get("type") == "button":
                     self.assertIn(str(node["sectionId"]), sections)
                 for child in node.get("children", []):

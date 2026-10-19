@@ -26,7 +26,7 @@
       "slides": [
         {
           "id": "b4238128-7a53-557b-a338-deb87f838e36",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/eikaiwa/slide-conversation.jpg",
           "heading": "英語で、世界とつながる",
           "subheading": "初心者からビジネスまで英会話レッスン（背景写真を変更：講師と生徒が楽しく英会話をしている写真）",
           "buttonText": "体験・入会はこちら",
@@ -37,7 +37,7 @@
         },
         {
           "id": "050a2310-c875-5701-9961-7e89df79866c",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/eikaiwa/slide-small-group.jpg",
           "heading": "楽しく話して身につく",
           "subheading": "少人数・マンツーマンで会話中心（背景写真を変更：少人数のレッスン風景）",
           "buttonText": "スケジュールを見る",
@@ -48,7 +48,7 @@
         },
         {
           "id": "0b748f1b-0f5d-5baf-abf6-d9f2b7843491",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/eikaiwa/slide-exterior.jpg",
           "heading": "まずは無料体験レッスン",
           "subheading": "あなたに合ったコースをご提案します（背景写真を変更：教室の外観や入口の写真）",
           "buttonText": "料金を見る",
@@ -79,7 +79,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/eikaiwa/smiling-lesson.jpg",
                 "width": 492,
                 "height": 277,
                 "x": 2,
@@ -391,7 +391,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/eikaiwa/kids.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -548,7 +548,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/eikaiwa/adults.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -705,7 +705,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/eikaiwa/business.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -1076,7 +1076,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/eikaiwa/group.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -1203,7 +1203,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/eikaiwa/one-on-one.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -1330,7 +1330,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/eikaiwa/event.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,

@@ -26,7 +26,7 @@
       "slides": [
         {
           "id": "8c4346bc-f77f-592b-b979-96de96b74d25",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/dance/slide-lesson.jpg",
           "heading": "踊ろう、もっと自由に。",
           "subheading": "初心者歓迎のダンススタジオ（背景写真を変更：ダンスレッスン中の、躍動感のある写真）",
           "buttonText": "体験・入会はこちら",
@@ -37,7 +37,7 @@
         },
         {
           "id": "3547ae41-10e4-5939-a1d1-4355e101ae9f",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/dance/slide-group.jpg",
           "heading": "ジャンルいろいろ",
           "subheading": "ヒップホップ・ジャズ・K-POPほか（背景写真を変更：スタジオで踊るグループの写真）",
           "buttonText": "スケジュールを見る",
@@ -48,7 +48,7 @@
         },
         {
           "id": "125a879f-147e-5760-a741-93f75f9c96d3",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/dance/slide-stage.jpg",
           "heading": "発表会・イベントも",
           "subheading": "ステージで輝く経験を（背景写真を変更：発表会・ステージでの写真）",
           "buttonText": "料金を見る",
@@ -79,7 +79,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/dance/mirror-studio.jpg",
                 "width": 492,
                 "height": 277,
                 "x": 2,
@@ -391,7 +391,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/dance/hiphop.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -548,7 +548,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/dance/jazz.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -705,7 +705,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/dance/kids.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -1076,7 +1076,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/dance/mirror-studio.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -1203,7 +1203,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/dance/lockers.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -1330,7 +1330,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/dance/lobby.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -1525,7 +1525,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/dance/recital.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -1652,7 +1652,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/dance/event-group.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -1779,7 +1779,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/dance/contest.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,

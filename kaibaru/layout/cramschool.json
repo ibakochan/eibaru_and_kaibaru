@@ -26,7 +26,7 @@
       "slides": [
         {
           "id": "e8c513b5-4c9a-5e38-a34b-2852639896d9",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/cram/slide-study.jpg",
           "heading": "「わかる」から「できる」へ",
           "subheading": "一人ひとりに寄り添う学習塾（背景写真を変更：教室で生徒が集中して勉強している写真）",
           "buttonText": "体験・入会はこちら",
@@ -37,7 +37,7 @@
         },
         {
           "id": "aac0a6f5-7fd3-58f2-8162-d6a60aa8eb95",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/cram/slide-teaching.jpg",
           "heading": "志望校合格をサポート",
           "subheading": "目標に合わせた学習計画（背景写真を変更：講師が生徒に説明している写真）",
           "buttonText": "スケジュールを見る",
@@ -48,7 +48,7 @@
         },
         {
           "id": "a3b6716a-975e-595b-a61b-d795c5c1026e",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/cram/slide-exterior.jpg",
           "heading": "まずは無料体験から",
           "subheading": "学習のお悩みもご相談ください（背景写真を変更：教室の外観や入口の写真）",
           "buttonText": "料金を見る",
@@ -79,7 +79,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/cram/classroom.jpg",
                 "width": 492,
                 "height": 277,
                 "x": 2,
@@ -391,7 +391,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/cram/elementary.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -548,7 +548,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/cram/junior-high.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -705,7 +705,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/cram/high-school.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,

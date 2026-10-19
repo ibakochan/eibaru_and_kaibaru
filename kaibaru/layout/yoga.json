@@ -26,7 +26,7 @@
       "slides": [
         {
           "id": "d4156a95-c2cb-526a-ae88-0c474cce4c92",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/yoga/slide-class.jpg",
           "heading": "心と体を、ゆっくりほどく",
           "subheading": "呼吸とともに、自分に戻る時間を（背景写真を変更：明るく穏やかなスタジオでヨガをしている写真）",
           "buttonText": "体験・入会はこちら",
@@ -37,7 +37,7 @@
         },
         {
           "id": "ed169acd-03be-5b01-9aed-7f6abcf1808c",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/yoga/slide-beginner.jpg",
           "heading": "初めてのヨガも安心",
           "subheading": "少人数制で一人ひとりに丁寧にご案内します（背景写真を変更：初心者クラスでインストラクターが指導している写真）",
           "buttonText": "スケジュールを見る",
@@ -48,7 +48,7 @@
         },
         {
           "id": "eeb36b83-8f00-5387-bf70-a5c4c53617f0",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/yoga/slide-morning.jpg",
           "heading": "あなたに合ったクラスを",
           "subheading": "朝ヨガからナイトクラスまで（背景写真を変更：朝日が差し込むスタジオの写真）",
           "buttonText": "料金を見る",
@@ -79,7 +79,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/yoga/about-interior.jpg",
                 "width": 492,
                 "height": 277,
                 "x": 2,
@@ -391,7 +391,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/yoga/pose-basic.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -548,7 +548,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/yoga/pose-flow.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -705,7 +705,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/yoga/pose-restorative.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -906,7 +906,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/yoga/studio-wide.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -1033,7 +1033,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/yoga/changing-room.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -1160,7 +1160,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/yoga/props.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,

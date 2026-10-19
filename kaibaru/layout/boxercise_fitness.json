@@ -26,7 +26,7 @@
       "slides": [
         {
           "id": "af27d137-9536-58f5-a226-0031f2f0d578",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/fitness/slide-class.jpg",
           "heading": "楽しく汗をかこう！",
           "subheading": "ボクササイズ・フィットネスクラブ（背景写真を変更：音楽に合わせて楽しく運動している会員の写真）",
           "buttonText": "体験・入会はこちら",
@@ -37,7 +37,7 @@
         },
         {
           "id": "cca1b0e1-a147-51f0-82e5-54517b3515dc",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/fitness/slide-group.jpg",
           "heading": "運動初心者も大歓迎",
           "subheading": "グループレッスンで続けやすい（背景写真を変更：グループレッスンの様子（インストラクター付き））",
           "buttonText": "スケジュールを見る",
@@ -48,7 +48,7 @@
         },
         {
           "id": "693606b6-5c17-5c74-9784-0c782ca26429",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/fitness/slide-smiles.jpg",
           "heading": "ダイエット・健康づくりに",
           "subheading": "あなたのペースで無理なく（背景写真を変更：笑顔で運動している会員の写真）",
           "buttonText": "料金を見る",
@@ -79,7 +79,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/fitness/about.jpg",
                 "width": 492,
                 "height": 277,
                 "x": 2,
@@ -391,7 +391,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/fitness/boxercise.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -548,7 +548,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/fitness/hiit.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -705,7 +705,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/fitness/stretch.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,

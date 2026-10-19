@@ -26,7 +26,7 @@
       "slides": [
         {
           "id": "392529be-751b-556f-87a2-edc6abadcc12",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/gym/slide-machines.jpg",
           "heading": "理想のカラダを、ここから。",
           "subheading": "マシン・フリーウェイトが充実したジム（背景写真を変更：トレーニングマシンが並ぶジム内の写真）",
           "buttonText": "体験・入会はこちら",
@@ -37,7 +37,7 @@
         },
         {
           "id": "9ad76db0-4de6-5bc4-a975-002896d57e53",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/gym/slide-orientation.jpg",
           "heading": "初めてでも安心",
           "subheading": "スタッフがマシンの使い方をご案内（背景写真を変更：スタッフが利用者にマシンの説明をしている写真）",
           "buttonText": "スケジュールを見る",
@@ -48,7 +48,7 @@
         },
         {
           "id": "f64ff6c5-2819-5446-81cd-83397c620b5f",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/gym/slide-entrance.jpg",
           "heading": "あなたに合う会員プラン",
           "subheading": "通う頻度に合わせて選べます（背景写真を変更：ジム入口・受付の写真）",
           "buttonText": "料金を見る",
@@ -79,7 +79,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/gym/floor-wide.jpg",
                 "width": 492,
                 "height": 277,
                 "x": 2,
@@ -391,7 +391,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/gym/machines.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -518,7 +518,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/gym/free-weights.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -645,7 +645,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/gym/lockers.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -816,7 +816,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/gym/member-training.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -973,7 +973,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/gym/studio-class.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -1130,7 +1130,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/gym/personal-training.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,

@@ -26,7 +26,7 @@
       "slides": [
         {
           "id": "20aa914c-24ec-503b-89e3-0f005e0ed9b8",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/default/slide-group.jpg",
           "heading": "〇〇クラブへようこそ",
           "subheading": "初めての方も、経験者の方も大歓迎です（背景写真を変更：クラブの雰囲気が伝わる集合写真や活動風景）",
           "buttonText": "体験・入会はこちら",
@@ -37,7 +37,7 @@
         },
         {
           "id": "db6b786c-f995-58cd-9a8b-b5d04b49cc50",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/default/slide-members.jpg",
           "heading": "みんなで楽しく続ける",
           "subheading": "無理なく、自分のペースで（背景写真を変更：メンバーが楽しんでいる様子の写真）",
           "buttonText": "スケジュールを見る",
@@ -48,7 +48,7 @@
         },
         {
           "id": "25f37a89-e409-5d2c-85bd-59bab88e5a87",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/default/slide-entrance.jpg",
           "heading": "通いやすい料金プラン",
           "subheading": "目的に合わせて選べます（背景写真を変更：クラブの外観や入口の写真）",
           "buttonText": "料金を見る",
@@ -79,7 +79,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/default/about.jpg",
                 "width": 492,
                 "height": 277,
                 "x": 2,

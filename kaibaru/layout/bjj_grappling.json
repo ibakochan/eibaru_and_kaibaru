@@ -26,7 +26,7 @@
       "slides": [
         {
           "id": "a6c7034b-caba-5039-b8d3-871c4f0b4f2d",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/bjj/slide-practice.jpg",
           "heading": "柔よく剛を制す",
           "subheading": "ブラジリアン柔術・グラップリング道場（背景写真を変更：道場で柔術の練習をしている写真）",
           "buttonText": "体験・入会はこちら",
@@ -37,7 +37,7 @@
         },
         {
           "id": "2b0b79d7-c779-5352-9f7d-7d25535fa6f4",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/bjj/slide-drills.jpg",
           "heading": "未経験からでも始められる",
           "subheading": "初心者クラスで基礎から学べます（背景写真を変更：初心者クラスの様子（ドリル練習など））",
           "buttonText": "スケジュールを見る",
@@ -48,7 +48,7 @@
         },
         {
           "id": "7cf6115b-a789-584a-ae39-0903161b1940",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/bjj/slide-competition.jpg",
           "heading": "大会にも挑戦できる",
           "subheading": "ギ・ノーギ両方のクラスをご用意（背景写真を変更：試合や大会で戦う選手の写真）",
           "buttonText": "料金を見る",
@@ -79,7 +79,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/bjj/mat-wide.jpg",
                 "width": 492,
                 "height": 277,
                 "x": 2,
@@ -391,7 +391,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/bjj/beginner-technique.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -548,7 +548,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/bjj/gi-sparring.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -705,7 +705,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/bjj/nogi.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,

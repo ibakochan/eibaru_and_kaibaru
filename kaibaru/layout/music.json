@@ -26,7 +26,7 @@
       "slides": [
         {
           "id": "3a8988da-85bd-564a-bd60-cbe14be234c4",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/music/slide-playing.jpg",
           "heading": "音楽を、もっと楽しく",
           "subheading": "ピアノ・ギター・ボーカル・ドラム（背景写真を変更：楽器を演奏している生徒の写真）",
           "buttonText": "体験・入会はこちら",
@@ -37,7 +37,7 @@
         },
         {
           "id": "b093909f-25a6-5581-a7e1-e3cfa69a6dd0",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/music/slide-lesson.jpg",
           "heading": "お子様から大人まで",
           "subheading": "あなたのペースで上達できます（背景写真を変更：先生が生徒に教えている写真）",
           "buttonText": "スケジュールを見る",
@@ -48,7 +48,7 @@
         },
         {
           "id": "fe851d9c-a977-5987-b7b3-fbd0a0b9b69a",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/music/slide-recital.jpg",
           "heading": "発表会で輝こう",
           "subheading": "日頃の成果を披露するステージ（背景写真を変更：発表会・ステージの写真）",
           "buttonText": "料金を見る",
@@ -79,7 +79,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/music/lesson-room.jpg",
                 "width": 492,
                 "height": 277,
                 "x": 2,
@@ -391,7 +391,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/music/piano.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -548,7 +548,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/music/guitar.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -705,7 +705,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/music/vocals.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -1100,7 +1100,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/music/recital-stage.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -1227,7 +1227,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/music/group-photo.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -1354,7 +1354,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/music/rehearsal.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,

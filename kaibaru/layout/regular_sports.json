@@ -26,7 +26,7 @@
       "slides": [
         {
           "id": "ec4e1b0b-ec01-59e4-ad19-0d48cecc1dd4",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/sports/slide-practice.jpg",
           "heading": "スポーツを、もっと楽しく",
           "subheading": "子どもから大人まで参加できるクラブ（背景写真を変更：練習・試合をしているメンバーの写真）",
           "buttonText": "体験・入会はこちら",
@@ -37,7 +37,7 @@
         },
         {
           "id": "85999cc0-c3a7-5865-bc07-9dddd3c01dc0",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/sports/slide-team.jpg",
           "heading": "チームで成長する",
           "subheading": "技術も、心も、一緒に育てる（背景写真を変更：チームで声を掛け合っている写真）",
           "buttonText": "スケジュールを見る",
@@ -48,7 +48,7 @@
         },
         {
           "id": "f04767f4-8479-5dff-b0a5-7a5dce67178d",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/sports/slide-ground.jpg",
           "heading": "まずは体験参加から",
           "subheading": "見学・体験は随時受付中（背景写真を変更：練習場所（グラウンド・体育館）の写真）",
           "buttonText": "料金を見る",
@@ -79,7 +79,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/sports/team-photo.jpg",
                 "width": 492,
                 "height": 277,
                 "x": 2,
@@ -391,7 +391,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/sports/juniors.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -548,7 +548,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/sports/youth-match.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -705,7 +705,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/sports/adults.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -1076,7 +1076,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/sports/facility.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -1203,7 +1203,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/sports/benches.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -1330,7 +1330,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/sports/clubhouse.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,

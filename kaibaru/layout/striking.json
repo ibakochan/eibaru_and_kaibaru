@@ -26,7 +26,7 @@
       "slides": [
         {
           "id": "5cffaca0-f0e1-514d-a528-32d82ddfe331",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/striking/slide-heavy-bag.jpg",
           "heading": "拳で、自分を超えろ。",
           "subheading": "初心者からプロ志望まで、本気の指導（背景写真を変更：サンドバッグを打つ選手の迫力ある写真）",
           "buttonText": "体験・入会はこちら",
@@ -37,7 +37,7 @@
         },
         {
           "id": "e68a2169-1774-5ea7-9a9f-f45af6e4dc2c",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/striking/slide-mitts.jpg",
           "heading": "未経験からのスタート",
           "subheading": "ミット打ちからはじめる体験レッスン（背景写真を変更：トレーナーとミット打ちをしている写真）",
           "buttonText": "スケジュールを見る",
@@ -48,7 +48,7 @@
         },
         {
           "id": "d1d094c9-8c8d-548b-a248-a5571e263101",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/striking/slide-sparring.jpg",
           "heading": "仲間と高め合う",
           "subheading": "スパーリング・大会出場もサポート（背景写真を変更：リング上でのスパーリングの写真）",
           "buttonText": "料金を見る",
@@ -79,7 +79,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/striking/gym-wide.jpg",
                 "width": 492,
                 "height": 277,
                 "x": 2,
@@ -391,7 +391,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/striking/boxing.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -548,7 +548,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/striking/kick-mitts.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -705,7 +705,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/striking/fitness-class.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,

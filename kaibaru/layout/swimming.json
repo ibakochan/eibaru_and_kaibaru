@@ -26,7 +26,7 @@
       "slides": [
         {
           "id": "62e65ad4-06a2-5603-9166-21a52c109da1",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/swimming/slide-pool.jpg",
           "heading": "水の中で、もっと自由に",
           "subheading": "初心者から選手育成まで（背景写真を変更：プールで泳ぐ子どもや大人の写真）",
           "buttonText": "体験・入会はこちら",
@@ -37,7 +37,7 @@
         },
         {
           "id": "31e83056-2226-5a68-9e96-cd81e2243ca7",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/swimming/slide-coach.jpg",
           "heading": "お子様の「泳げた！」を応援",
           "subheading": "少人数制で安心の指導（背景写真を変更：コーチが子どもに教えている写真）",
           "buttonText": "スケジュールを見る",
@@ -48,7 +48,7 @@
         },
         {
           "id": "f909ddcf-b4b1-5365-b511-ebfddb6fbc8e",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/swimming/slide-adults.jpg",
           "heading": "大人のスイミングも",
           "subheading": "運動不足解消・ダイエットに（背景写真を変更：大人がプールで泳いでいる写真）",
           "buttonText": "料金を見る",
@@ -79,7 +79,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/swimming/pool-wide.jpg",
                 "width": 492,
                 "height": 277,
                 "x": 2,
@@ -391,7 +391,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/swimming/toddler-class.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -548,7 +548,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/swimming/juniors.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -705,7 +705,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/swimming/adult-lesson.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -1076,7 +1076,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/swimming/pool-wide.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -1203,7 +1203,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/swimming/changing-room.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
@@ -1330,7 +1330,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/swimming/viewing.jpg",
                 "width": 332,
                 "height": 187,
                 "x": 2,
