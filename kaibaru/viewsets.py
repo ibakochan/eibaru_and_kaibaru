@@ -26,6 +26,7 @@ from django.db.models import Prefetch
 from django.db.models.functions import Coalesce
 from django.core.exceptions import ValidationError
 from .user_errors import format_validation_error
+from .layout_templates import is_template_key, page_content_for_club
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
 from .tasks import delete_membership_plan_task
@@ -4271,7 +4272,27 @@ class ClubViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        club = Club.objects.create(subdomain=subdomain, owner=request.user, expiration_date = timezone.now())
+        # Optional ready-made site: "template" is a Club.layout key. Blank or
+        # missing keeps the old behaviour (empty site, default layout).
+        template = request.data.get("template") or ""
+        extra = {}
+        if template:
+            if not is_template_key(template):
+                return Response(
+                    {"error": "選択されたテンプレートは使用できません。"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            extra = {
+                "layout": template,
+                "page_content": page_content_for_club(template),
+            }
+
+        club = Club.objects.create(
+            subdomain=subdomain,
+            owner=request.user,
+            expiration_date=timezone.now(),
+            **extra,
+        )
 
         serializer = self.get_serializer(club, context={"request": request})
         return Response(serializer.data, status=status.HTTP_201_CREATED)

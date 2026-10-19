@@ -1,0 +1,1560 @@
+{
+  "version": 1,
+  "next_section_id": 14,
+  "sections": {
+    "1": {
+      "id": 1,
+      "order": 1,
+      "title": "ヘッダー",
+      "slug": "header",
+      "type": "header",
+      "header": {
+        "logoHeight": 56,
+        "title": "〇〇ボクシングジム",
+        "subtitle": "打って、鍛えて、強くなる。",
+        "transparent": false,
+        "collapseAllNav": false
+      }
+    },
+    "2": {
+      "id": 2,
+      "order": 2,
+      "title": "ホーム",
+      "slug": "home",
+      "type": "slideshow",
+      "icon": "home",
+      "slides": [
+        {
+          "id": "5cffaca0-f0e1-514d-a528-32d82ddfe331",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "heading": "拳で、自分を超えろ。",
+          "subheading": "初心者からプロ志望まで、本気の指導（背景写真を変更：サンドバッグを打つ選手の迫力ある写真）",
+          "buttonText": "体験・入会はこちら",
+          "buttonLink": "",
+          "buttonSectionId": 11,
+          "buttonBoxId": null,
+          "textAlign": "center"
+        },
+        {
+          "id": "e68a2169-1774-5ea7-9a9f-f45af6e4dc2c",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "heading": "未経験からのスタート",
+          "subheading": "ミット打ちからはじめる体験レッスン（背景写真を変更：トレーナーとミット打ちをしている写真）",
+          "buttonText": "スケジュールを見る",
+          "buttonLink": "",
+          "buttonSectionId": 6,
+          "buttonBoxId": null,
+          "textAlign": "center"
+        },
+        {
+          "id": "d1d094c9-8c8d-548b-a248-a5571e263101",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "heading": "仲間と高め合う",
+          "subheading": "スパーリング・大会出場もサポート（背景写真を変更：リング上でのスパーリングの写真）",
+          "buttonText": "料金を見る",
+          "buttonLink": "",
+          "buttonSectionId": 7,
+          "buttonBoxId": null,
+          "textAlign": "center"
+        }
+      ]
+    },
+    "3": {
+      "id": 3,
+      "order": 3,
+      "title": "ジムについて",
+      "slug": "ジムについて",
+      "type": "custom",
+      "icon": "info",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "033b9fa6-86d4-5e91-a0ed-ce1a3a889e18",
+            "x": 50,
+            "y": 20,
+            "width": 500,
+            "height": 285,
+            "order": 1,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "width": 492,
+                "height": 277,
+                "x": 2,
+                "y": 0,
+                "aspectRatio": 1.7778,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "08efdf41-4bf9-5f7a-8b81-8b34b92275e6",
+            "x": 50,
+            "y": 309,
+            "width": 500,
+            "height": 66,
+            "order": 2,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.2,
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：ジムの全景（リング・サンドバッグが写っているもの）",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          },
+          {
+            "id": "a8eca951-991f-5f2b-bcca-82de42541fd1",
+            "x": 590,
+            "y": 20,
+            "width": 560,
+            "height": 66,
+            "order": 3,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "children": [
+                  {
+                    "text": "〇〇ボクシングジムについて"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "f92f4259-6115-55e6-99b1-06dc87b543b2",
+            "x": 590,
+            "y": 99.80000000000001,
+            "width": 560,
+            "height": 140,
+            "order": 4,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "ボクシング・キックボクシングを中心に、ダイエット目的の方から試合を目指す選手まで、幅広く指導しているジムです。",
+                    "fontSize": 18
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "経験豊富なトレーナーが、あなたのレベルと目標に合わせたメニューをご提案します。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "ec0f16bf-1758-54c5-87ec-eec340cbe354",
+            "x": 590,
+            "y": 253.0,
+            "width": 560,
+            "height": 148,
+            "order": 5,
+            "content": [
+              {
+                "type": "list",
+                "ordered": false,
+                "children": [
+                  {
+                    "type": "list-item",
+                    "children": [
+                      {
+                        "text": "プロ・アマ大会出場経験のあるトレーナー",
+                        "fontSize": 18
+                      }
+                    ]
+                  },
+                  {
+                    "type": "list-item",
+                    "children": [
+                      {
+                        "text": "初心者向けのクラスを毎日開催",
+                        "fontSize": 18
+                      }
+                    ]
+                  },
+                  {
+                    "type": "list-item",
+                    "children": [
+                      {
+                        "text": "シャワー・更衣室・レンタルグローブ完備",
+                        "fontSize": 18
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "117f3b22-a321-5461-8b36-dcb7ce5aa36e",
+            "x": 50,
+            "y": 430.9,
+            "width": 1100,
+            "height": 94,
+            "order": 6,
+            "content": [
+              {
+                "type": "button",
+                "label": "体験・入会のお申込みはこちら",
+                "align": "center",
+                "sectionId": 11,
+                "boxId": null,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "4": {
+      "id": 4,
+      "order": 4,
+      "title": "クラス紹介",
+      "slug": "クラス紹介",
+      "type": "custom",
+      "icon": "featured",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "2d247b36-7f12-5229-a3e5-371ff83e4588",
+            "x": 50,
+            "y": 20,
+            "width": 1100,
+            "height": 99,
+            "order": 1,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "children": [
+                  {
+                    "text": "クラス紹介"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "レベルや目的に合わせて参加できるクラスです。",
+                    "fontSize": 18
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          },
+          {
+            "id": "01bd5d09-5abb-5558-9e1c-1ac9b4e71894",
+            "x": 50,
+            "y": 148.1,
+            "width": 340,
+            "height": 195,
+            "order": 2,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "width": 332,
+                "height": 187,
+                "x": 2,
+                "y": 0,
+                "aspectRatio": 1.7778,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "e1376756-0fcd-5f58-80f0-c5febd1297eb",
+            "x": 50,
+            "y": 347.1,
+            "width": 340,
+            "height": 66,
+            "order": 3,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.2,
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：ボクシングの練習風景（シャドー・ミット打ち）",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          },
+          {
+            "id": "63e813ea-8399-546d-b395-5dd487524d55",
+            "x": 50,
+            "y": 426.90000000000003,
+            "width": 340,
+            "height": 119,
+            "order": 4,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "ボクシング"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "基本のフォームから、ミット打ち・スパーリングまで段階的に指導します。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "887089bb-92f4-5b5f-8782-eb25249da103",
+            "x": 430,
+            "y": 148.1,
+            "width": 340,
+            "height": 195,
+            "order": 5,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "width": 332,
+                "height": 187,
+                "x": 2,
+                "y": 0,
+                "aspectRatio": 1.7778,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "dbaef347-45fc-551b-bf5f-f5a532aa8206",
+            "x": 430,
+            "y": 347.1,
+            "width": 340,
+            "height": 66,
+            "order": 6,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.2,
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：キックミットを蹴っている写真",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          },
+          {
+            "id": "e780608d-b58d-52d1-bb8e-3a3bafcebfa2",
+            "x": 430,
+            "y": 426.90000000000003,
+            "width": 340,
+            "height": 119,
+            "order": 7,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "キックボクシング"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "パンチ・キック・ひざ蹴りを使った全身運動。ストレス発散にも最適です。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "6783e9cb-902a-526c-b9a9-3874bc54c56a",
+            "x": 810,
+            "y": 148.1,
+            "width": 340,
+            "height": 195,
+            "order": 8,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "width": 332,
+                "height": 187,
+                "x": 2,
+                "y": 0,
+                "aspectRatio": 1.7778,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "db47ebe7-9fc7-551a-848a-876d428bcebc",
+            "x": 810,
+            "y": 347.1,
+            "width": 340,
+            "height": 66,
+            "order": 9,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.2,
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：女性会員が楽しそうに練習している写真",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          },
+          {
+            "id": "bcf67ca9-d594-58b0-af84-52cacd16ac1c",
+            "x": 810,
+            "y": 426.90000000000003,
+            "width": 340,
+            "height": 119,
+            "order": 10,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "フィットネスクラス"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "格闘技のエッセンスを取り入れた、初心者・女性向けクラスです。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "5": {
+      "id": 5,
+      "order": 5,
+      "title": "選ばれる理由",
+      "slug": "選ばれる理由",
+      "type": "custom",
+      "icon": "award",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "edeee718-239e-569d-b56e-97bc4d5d8c86",
+            "x": 50,
+            "y": 20,
+            "width": 1100,
+            "height": 99,
+            "order": 1,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "children": [
+                  {
+                    "text": "選ばれる理由"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "〇〇ボクシングジムの強み",
+                    "fontSize": 18
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          },
+          {
+            "id": "8fa14bf8-8c2f-5055-83c2-8820831a4cac",
+            "x": 50,
+            "y": 148.1,
+            "width": 340,
+            "height": 147,
+            "order": 2,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.2,
+                "children": [
+                  {
+                    "text": "POINT 01",
+                    "fontSize": 16,
+                    "bold": true
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "実戦に強い指導"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "試合経験豊富なトレーナーが、実戦で使える技術を丁寧に教えます。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "ef2a75fa-81c6-5d3e-95fa-e2b731a9375a",
+            "x": 430,
+            "y": 148.1,
+            "width": 340,
+            "height": 147,
+            "order": 3,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.2,
+                "children": [
+                  {
+                    "text": "POINT 02",
+                    "fontSize": 16,
+                    "bold": true
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "初心者に優しい"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "「いきなりスパーリングはしません」。基礎からステップアップできます。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "072eaaa1-1ce8-5ad8-b254-2b10a70aa2ee",
+            "x": 810,
+            "y": 148.1,
+            "width": 340,
+            "height": 147,
+            "order": 4,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.2,
+                "children": [
+                  {
+                    "text": "POINT 03",
+                    "fontSize": 16,
+                    "bold": true
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "本気で変われる"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "ダイエットも大会出場も。目標に合わせて継続をサポートします。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "6": {
+      "id": 6,
+      "order": 6,
+      "title": "スケジュール",
+      "slug": "スケジュール",
+      "type": "schedule",
+      "icon": "schedule"
+    },
+    "7": {
+      "id": 7,
+      "order": 7,
+      "title": "料金",
+      "slug": "料金",
+      "type": "memberplans",
+      "icon": "payment"
+    },
+    "8": {
+      "id": 8,
+      "order": 8,
+      "title": "トレーナー",
+      "slug": "トレーナー",
+      "type": "teacher",
+      "icon": "teacher"
+    },
+    "9": {
+      "id": 9,
+      "order": 9,
+      "title": "持ち物・ご案内",
+      "slug": "持ち物ご案内",
+      "type": "custom",
+      "icon": "check",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "56f8c361-bc2e-5c93-a31a-d4077c83b3fd",
+            "x": 50,
+            "y": 20,
+            "width": 1100,
+            "height": 99,
+            "order": 1,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "children": [
+                  {
+                    "text": "持ち物・ご案内"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "体験にお越しの方へ。",
+                    "fontSize": 18
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          },
+          {
+            "id": "9efd4253-0dd9-520b-b4f1-f6af627d7d56",
+            "x": 50,
+            "y": 148.1,
+            "width": 520,
+            "height": 193,
+            "order": 2,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "持ち物"
+                  }
+                ]
+              },
+              {
+                "type": "list",
+                "ordered": false,
+                "children": [
+                  {
+                    "type": "list-item",
+                    "children": [
+                      {
+                        "text": "動きやすい服装・運動靴（室内用）",
+                        "fontSize": 18
+                      }
+                    ]
+                  },
+                  {
+                    "type": "list-item",
+                    "children": [
+                      {
+                        "text": "タオル・お飲み物",
+                        "fontSize": 18
+                      }
+                    ]
+                  },
+                  {
+                    "type": "list-item",
+                    "children": [
+                      {
+                        "text": "バンデージ・グローブ（レンタル可）",
+                        "fontSize": 18
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "dd342d98-df42-5d15-8ec0-0b539ba5afec",
+            "x": 630,
+            "y": 148.1,
+            "width": 520,
+            "height": 193,
+            "order": 3,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "ご案内"
+                  }
+                ]
+              },
+              {
+                "type": "list",
+                "ordered": false,
+                "children": [
+                  {
+                    "type": "list-item",
+                    "children": [
+                      {
+                        "text": "食後すぐのご参加はお控えください",
+                        "fontSize": 18
+                      }
+                    ]
+                  },
+                  {
+                    "type": "list-item",
+                    "children": [
+                      {
+                        "text": "ケガ・持病のある方は事前にお知らせください",
+                        "fontSize": 18
+                      }
+                    ]
+                  },
+                  {
+                    "type": "list-item",
+                    "children": [
+                      {
+                        "text": "見学のみのご来館も歓迎です",
+                        "fontSize": 18
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "10": {
+      "id": 10,
+      "order": 10,
+      "title": "よくある質問",
+      "slug": "よくある質問",
+      "type": "custom",
+      "icon": "info",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "6afa0d4f-5712-5601-90aa-91ca62d2a579",
+            "x": 50,
+            "y": 20,
+            "width": 1100,
+            "height": 99,
+            "order": 1,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "children": [
+                  {
+                    "text": "よくある質問"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "ご入会前によくいただくご質問です。",
+                    "fontSize": 18
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          },
+          {
+            "id": "a7186d9b-471e-538e-b429-17e61474049f",
+            "x": 50,
+            "y": 148.1,
+            "width": 520,
+            "height": 119,
+            "order": 2,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "Q. 運動経験がなくても大丈夫ですか？"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "A. はい。ほとんどの会員様が未経験からのスタートです。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "faff0507-acdf-5c26-bff6-6532d30d9abd",
+            "x": 630,
+            "y": 148.1,
+            "width": 520,
+            "height": 119,
+            "order": 3,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "Q. スパーリングは必須ですか？"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "A. いいえ。ご希望の方のみ、準備ができてから参加いただきます。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "a9cc9d91-77d4-5d43-a584-4384c4ae0ba6",
+            "x": 50,
+            "y": 296.884,
+            "width": 520,
+            "height": 119,
+            "order": 4,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "Q. 女性でも通えますか？"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "A. はい。女性専用クラスもご用意しています。（変更してください）",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "dea68e57-1238-55e4-816c-c3410e0fe43d",
+            "x": 630,
+            "y": 296.884,
+            "width": 520,
+            "height": 119,
+            "order": 5,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "Q. プロを目指せますか？"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "A. ご相談ください。目標に合わせた練習メニューをご提案します。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "11": {
+      "id": 11,
+      "order": 11,
+      "title": "体験・入会",
+      "slug": "join",
+      "type": "join",
+      "icon": "join"
+    },
+    "12": {
+      "id": 12,
+      "order": 12,
+      "title": "アクセス",
+      "slug": "アクセス",
+      "type": "custom",
+      "icon": "access",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "a7abcc5c-d428-5654-923a-a1b9945ad44e",
+            "x": 50,
+            "y": 20,
+            "width": 1100,
+            "height": 99,
+            "order": 1,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "children": [
+                  {
+                    "text": "アクセス"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "見学のみでもお気軽にお越しください。",
+                    "fontSize": 18
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          },
+          {
+            "id": "130dea00-b709-5c7f-8961-9a74281692e0",
+            "x": 50,
+            "y": 148.1,
+            "width": 520,
+            "height": 248,
+            "order": 2,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "所在地・ご連絡先"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "住所：",
+                    "fontSize": 18,
+                    "bold": true
+                  },
+                  {
+                    "text": "〒000-0000 〇〇県〇〇市〇〇 0-0-0 〇〇ビル 1F",
+                    "fontSize": 18
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "電話：",
+                    "fontSize": 18,
+                    "bold": true
+                  },
+                  {
+                    "text": "000-0000-0000",
+                    "fontSize": 18
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "営業時間：",
+                    "fontSize": 18,
+                    "bold": true
+                  },
+                  {
+                    "text": "〇:〇〇〜〇〇:〇〇（変更してください）",
+                    "fontSize": 18
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "定休日：",
+                    "fontSize": 18,
+                    "bold": true
+                  },
+                  {
+                    "text": "〇曜日・祝日（変更してください）",
+                    "fontSize": 18
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "最寄り駅：",
+                    "fontSize": 18,
+                    "bold": true
+                  },
+                  {
+                    "text": "〇〇駅 〇〇口より徒歩〇分",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "d7595998-8210-5e17-99c6-ae89328ee5cc",
+            "x": 610,
+            "y": 148.1,
+            "width": 540,
+            "height": 340,
+            "order": 3,
+            "content": [
+              {
+                "type": "map",
+                "provider": "osm",
+                "lat": 35.681236,
+                "lng": 139.767125,
+                "zoom": 15,
+                "height": 320,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "c83ceac7-aafd-562d-9122-59a699279083",
+            "x": 610,
+            "y": 502.1,
+            "width": 540,
+            "height": 38,
+            "order": 4,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.2,
+                "children": [
+                  {
+                    "text": "▲ 地図の位置を、実際のお店・教室の所在地に変更してください",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "13": {
+      "id": 13,
+      "order": 13,
+      "title": "会員ページ",
+      "slug": "会員ページ",
+      "type": "member",
+      "icon": "memberCard"
+    }
+  }
+}

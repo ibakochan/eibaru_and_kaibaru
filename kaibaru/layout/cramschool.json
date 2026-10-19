@@ -1,0 +1,1743 @@
+{
+  "version": 1,
+  "next_section_id": 15,
+  "sections": {
+    "1": {
+      "id": 1,
+      "order": 1,
+      "title": "ヘッダー",
+      "slug": "header",
+      "type": "header",
+      "header": {
+        "logoHeight": 56,
+        "title": "〇〇学習塾",
+        "subtitle": "わかる喜びが、次の一歩になる。",
+        "transparent": false,
+        "collapseAllNav": false
+      }
+    },
+    "2": {
+      "id": 2,
+      "order": 2,
+      "title": "ホーム",
+      "slug": "home",
+      "type": "slideshow",
+      "icon": "home",
+      "slides": [
+        {
+          "id": "e8c513b5-4c9a-5e38-a34b-2852639896d9",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "heading": "「わかる」から「できる」へ",
+          "subheading": "一人ひとりに寄り添う学習塾（背景写真を変更：教室で生徒が集中して勉強している写真）",
+          "buttonText": "体験・入会はこちら",
+          "buttonLink": "",
+          "buttonSectionId": 12,
+          "buttonBoxId": null,
+          "textAlign": "center"
+        },
+        {
+          "id": "aac0a6f5-7fd3-58f2-8162-d6a60aa8eb95",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "heading": "志望校合格をサポート",
+          "subheading": "目標に合わせた学習計画（背景写真を変更：講師が生徒に説明している写真）",
+          "buttonText": "スケジュールを見る",
+          "buttonLink": "",
+          "buttonSectionId": 7,
+          "buttonBoxId": null,
+          "textAlign": "center"
+        },
+        {
+          "id": "a3b6716a-975e-595b-a61b-d795c5c1026e",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "heading": "まずは無料体験から",
+          "subheading": "学習のお悩みもご相談ください（背景写真を変更：教室の外観や入口の写真）",
+          "buttonText": "料金を見る",
+          "buttonLink": "",
+          "buttonSectionId": 8,
+          "buttonBoxId": null,
+          "textAlign": "center"
+        }
+      ]
+    },
+    "3": {
+      "id": 3,
+      "order": 3,
+      "title": "塾について",
+      "slug": "塾について",
+      "type": "custom",
+      "icon": "info",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "46c0f5ac-efe7-5157-9582-ff63733eafe6",
+            "x": 50,
+            "y": 20,
+            "width": 500,
+            "height": 285,
+            "order": 1,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "width": 492,
+                "height": 277,
+                "x": 2,
+                "y": 0,
+                "aspectRatio": 1.7778,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "9c98c3a5-3796-5040-b1bf-7dbeb3de7826",
+            "x": 50,
+            "y": 309,
+            "width": 500,
+            "height": 38,
+            "order": 2,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.2,
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：教室の様子（机や黒板が写っているもの）",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          },
+          {
+            "id": "62b3c151-4b4d-54f3-a1b5-ad6c10069e87",
+            "x": 590,
+            "y": 20,
+            "width": 560,
+            "height": 66,
+            "order": 3,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "children": [
+                  {
+                    "text": "〇〇学習塾について"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "7b7c23cc-724c-5dc0-822d-32661e7244d8",
+            "x": 590,
+            "y": 99.80000000000001,
+            "width": 560,
+            "height": 140,
+            "order": 4,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "〇〇学習塾は、小学生から高校生までを対象に、基礎学力の定着から受験対策まで一人ひとりに合わせて指導する学習塾です。",
+                    "fontSize": 18
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "「わかった」という成功体験を積み重ね、自ら学ぶ力を育てます。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "42b45361-90bd-574f-923b-46bcf93dfd0e",
+            "x": 590,
+            "y": 253.0,
+            "width": 560,
+            "height": 148,
+            "order": 5,
+            "content": [
+              {
+                "type": "list",
+                "ordered": false,
+                "children": [
+                  {
+                    "type": "list-item",
+                    "children": [
+                      {
+                        "text": "少人数制・個別対応",
+                        "fontSize": 18
+                      }
+                    ]
+                  },
+                  {
+                    "type": "list-item",
+                    "children": [
+                      {
+                        "text": "定期テスト対策・受験対策",
+                        "fontSize": 18
+                      }
+                    ]
+                  },
+                  {
+                    "type": "list-item",
+                    "children": [
+                      {
+                        "text": "保護者の方への面談・報告",
+                        "fontSize": 18
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "dd72552e-6f60-51f0-ac19-0bf1d0c06e6d",
+            "x": 50,
+            "y": 430.9,
+            "width": 1100,
+            "height": 94,
+            "order": 6,
+            "content": [
+              {
+                "type": "button",
+                "label": "体験・入会のお申込みはこちら",
+                "align": "center",
+                "sectionId": 12,
+                "boxId": null,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "4": {
+      "id": 4,
+      "order": 4,
+      "title": "コース紹介",
+      "slug": "コース紹介",
+      "type": "custom",
+      "icon": "featured",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "e91d42e3-339c-5bb2-889b-93b1848b2ad5",
+            "x": 50,
+            "y": 20,
+            "width": 1100,
+            "height": 99,
+            "order": 1,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "children": [
+                  {
+                    "text": "コース紹介"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "学年や目標に合わせたコースをご用意しています。",
+                    "fontSize": 18
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          },
+          {
+            "id": "690d7b24-c56d-5d61-ac8b-ae1fac324f48",
+            "x": 50,
+            "y": 148.1,
+            "width": 340,
+            "height": 195,
+            "order": 2,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "width": 332,
+                "height": 187,
+                "x": 2,
+                "y": 0,
+                "aspectRatio": 1.7778,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "17774b0a-554c-5ad6-ae70-56d6cbe20115",
+            "x": 50,
+            "y": 347.1,
+            "width": 340,
+            "height": 66,
+            "order": 3,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.2,
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：小学生が楽しく学習している写真",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          },
+          {
+            "id": "68ad4c54-a997-531f-9806-bb0472c8bcc9",
+            "x": 50,
+            "y": 426.90000000000003,
+            "width": 340,
+            "height": 119,
+            "order": 4,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "小学生コース"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "国語・算数を中心に、学ぶ楽しさと基礎学力を育てます。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "3b4f2b86-a346-521b-9b88-87169b7fa337",
+            "x": 430,
+            "y": 148.1,
+            "width": 340,
+            "height": 195,
+            "order": 5,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "width": 332,
+                "height": 187,
+                "x": 2,
+                "y": 0,
+                "aspectRatio": 1.7778,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "49475f93-4a2e-590a-9a58-93fa56c37e15",
+            "x": 430,
+            "y": 347.1,
+            "width": 340,
+            "height": 66,
+            "order": 6,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.2,
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：中学生が授業を受けている写真",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          },
+          {
+            "id": "12aa3d5f-e084-554c-ba57-a5fa5a662b8d",
+            "x": 430,
+            "y": 426.90000000000003,
+            "width": 340,
+            "height": 119,
+            "order": 7,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "中学生コース"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "定期テスト対策と高校受験に向けた指導を行います。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "20730f3a-7bbc-5b0a-bfed-95fa3fd49ed7",
+            "x": 810,
+            "y": 148.1,
+            "width": 340,
+            "height": 195,
+            "order": 8,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "width": 332,
+                "height": 187,
+                "x": 2,
+                "y": 0,
+                "aspectRatio": 1.7778,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "ce60e501-132a-5ad6-af70-f1bab32a533f",
+            "x": 810,
+            "y": 347.1,
+            "width": 340,
+            "height": 38,
+            "order": 9,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.2,
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：高校生が自習している写真",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          },
+          {
+            "id": "ab62d43b-5ad4-50f7-9f66-7ce6c36bf908",
+            "x": 810,
+            "y": 399.0,
+            "width": 340,
+            "height": 119,
+            "order": 10,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "高校生コース"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "大学受験に向けた学習計画と、苦手科目の克服をサポートします。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "5": {
+      "id": 5,
+      "order": 5,
+      "title": "指導の特色",
+      "slug": "指導の特色",
+      "type": "custom",
+      "icon": "award",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "09f2064a-47e9-54d4-a0a0-e2a5f669e51d",
+            "x": 50,
+            "y": 20,
+            "width": 1100,
+            "height": 99,
+            "order": 1,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "children": [
+                  {
+                    "text": "指導の特色"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "〇〇学習塾が大切にしていること",
+                    "fontSize": 18
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          },
+          {
+            "id": "e8c1b3d3-0d8c-534e-a4c1-02cb900945a8",
+            "x": 50,
+            "y": 148.1,
+            "width": 340,
+            "height": 147,
+            "order": 2,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.2,
+                "children": [
+                  {
+                    "text": "POINT 01",
+                    "fontSize": 16,
+                    "bold": true
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "一人ひとりに合わせた指導"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "理解度に合わせて授業内容や進度を調整します。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "e6859957-01e8-5209-9cf5-228b0fa9931e",
+            "x": 430,
+            "y": 148.1,
+            "width": 340,
+            "height": 147,
+            "order": 3,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.2,
+                "children": [
+                  {
+                    "text": "POINT 02",
+                    "fontSize": 16,
+                    "bold": true
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "学習習慣の定着"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "宿題・自習のサポートで、毎日の勉強習慣をつくります。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "d1f195b8-b3a6-5cc9-8324-9932075c636c",
+            "x": 810,
+            "y": 148.1,
+            "width": 340,
+            "height": 147,
+            "order": 4,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.2,
+                "children": [
+                  {
+                    "text": "POINT 03",
+                    "fontSize": 16,
+                    "bold": true
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "保護者との連携"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "定期的な面談で、学習状況と今後の方針を共有します。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "6": {
+      "id": 6,
+      "order": 6,
+      "title": "合格実績",
+      "slug": "合格実績",
+      "type": "custom",
+      "icon": "award",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "e2269555-82f9-5330-a6ce-7bedf842b81b",
+            "x": 50,
+            "y": 20,
+            "width": 1100,
+            "height": 99,
+            "order": 1,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "children": [
+                  {
+                    "text": "合格実績"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "これまでの合格実績（実際の数字に書き換えてください）",
+                    "fontSize": 18
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          },
+          {
+            "id": "87ed3499-8fcc-5b20-a5d7-97935374e9b6",
+            "x": 50,
+            "y": 148.1,
+            "width": 340,
+            "height": 131,
+            "order": 2,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "children": [
+                  {
+                    "text": "〇〇名"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "〇〇高校合格",
+                    "fontSize": 18,
+                    "bold": true
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "公立・私立の合格者数",
+                    "fontSize": 16
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          },
+          {
+            "id": "a3cbef9c-4321-5c92-8d3f-75907ff19aa0",
+            "x": 430,
+            "y": 148.1,
+            "width": 340,
+            "height": 131,
+            "order": 3,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "children": [
+                  {
+                    "text": "〇〇点UP"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "平均得点アップ",
+                    "fontSize": 18,
+                    "bold": true
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "定期テストでの平均上昇点数",
+                    "fontSize": 16
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          },
+          {
+            "id": "b3170746-afce-53f4-a0da-34d8d3d8abcd",
+            "x": 810,
+            "y": 148.1,
+            "width": 340,
+            "height": 131,
+            "order": 4,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "children": [
+                  {
+                    "text": "〇〇%"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "成績向上率",
+                    "fontSize": 18,
+                    "bold": true
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "入塾後に成績が上がった生徒の割合",
+                    "fontSize": 16
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "7": {
+      "id": 7,
+      "order": 7,
+      "title": "授業日程",
+      "slug": "授業日程",
+      "type": "schedule",
+      "icon": "schedule"
+    },
+    "8": {
+      "id": 8,
+      "order": 8,
+      "title": "授業料",
+      "slug": "授業料",
+      "type": "memberplans",
+      "icon": "payment"
+    },
+    "9": {
+      "id": 9,
+      "order": 9,
+      "title": "講師",
+      "slug": "講師",
+      "type": "teacher",
+      "icon": "teacher"
+    },
+    "10": {
+      "id": 10,
+      "order": 10,
+      "title": "保護者の声",
+      "slug": "保護者の声",
+      "type": "custom",
+      "icon": "heart",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "e91c1020-207d-5ddf-9a8d-fa3ba7602f1e",
+            "x": 50,
+            "y": 20,
+            "width": 1100,
+            "height": 99,
+            "order": 1,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "children": [
+                  {
+                    "text": "保護者の声"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "ご家庭からいただいた声です（実際の声に書き換えてください）。",
+                    "fontSize": 18
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          },
+          {
+            "id": "9463a4b2-9618-5cbb-af09-b916f45bdd8c",
+            "x": 50,
+            "y": 148.1,
+            "width": 340,
+            "height": 107,
+            "order": 2,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "「成績が上がっただけでなく、自分から勉強するようになりました。」",
+                    "fontSize": 18,
+                    "italic": true
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "— 〇〇さん保護者",
+                    "fontSize": 16,
+                    "bold": true
+                  }
+                ],
+                "align": "right"
+              }
+            ]
+          },
+          {
+            "id": "431886a2-0902-5e87-8bdf-ecc39f7c634f",
+            "x": 430,
+            "y": 148.1,
+            "width": 340,
+            "height": 107,
+            "order": 3,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "「先生が子どもの様子をよく見てくれて安心です。」",
+                    "fontSize": 18,
+                    "italic": true
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "— 〇〇さん保護者",
+                    "fontSize": 16,
+                    "bold": true
+                  }
+                ],
+                "align": "right"
+              }
+            ]
+          },
+          {
+            "id": "0b22760c-a619-5e30-84ad-a41f1e0d605f",
+            "x": 810,
+            "y": 148.1,
+            "width": 340,
+            "height": 107,
+            "order": 4,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "「質問しやすい雰囲気で、苦手科目が得意になりました。」",
+                    "fontSize": 18,
+                    "italic": true
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "— 〇〇さん（中学生）",
+                    "fontSize": 16,
+                    "bold": true
+                  }
+                ],
+                "align": "right"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "11": {
+      "id": 11,
+      "order": 11,
+      "title": "よくある質問",
+      "slug": "よくある質問",
+      "type": "custom",
+      "icon": "info",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "153cd143-ab09-5682-9cdf-06d469ab3775",
+            "x": 50,
+            "y": 20,
+            "width": 1100,
+            "height": 99,
+            "order": 1,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "children": [
+                  {
+                    "text": "よくある質問"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "入塾前によくいただくご質問です。",
+                    "fontSize": 18
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          },
+          {
+            "id": "aaaac956-54e2-5b60-a2ea-31754b24e718",
+            "x": 50,
+            "y": 148.1,
+            "width": 520,
+            "height": 87,
+            "order": 2,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "Q. 体験授業はありますか？"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "A. 無料体験授業を随時受け付けています。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "a3e6f12f-0091-57eb-9b78-79f621ab7410",
+            "x": 630,
+            "y": 148.1,
+            "width": 520,
+            "height": 119,
+            "order": 3,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "Q. 途中入塾はできますか？"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "A. いつでも入塾できます。現在の学習状況に合わせて指導します。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "0e4bf52e-8547-5d88-8c25-c702604b8869",
+            "x": 50,
+            "y": 296.884,
+            "width": 520,
+            "height": 87,
+            "order": 4,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "Q. 複数科目の受講はできますか？"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "A. はい。ご希望に合わせて組み合わせられます。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "77d92c58-e950-5d61-8a35-d51a013b9c21",
+            "x": 630,
+            "y": 296.884,
+            "width": 520,
+            "height": 87,
+            "order": 5,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "Q. 宿題はどのくらい出ますか？"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "A. 学力と目標に合わせて調整します。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "12": {
+      "id": 12,
+      "order": 12,
+      "title": "体験・入塾",
+      "slug": "join",
+      "type": "join",
+      "icon": "join"
+    },
+    "13": {
+      "id": 13,
+      "order": 13,
+      "title": "アクセス",
+      "slug": "アクセス",
+      "type": "custom",
+      "icon": "access",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "8063da9f-2a14-59ce-83e5-1147b70d54c6",
+            "x": 50,
+            "y": 20,
+            "width": 1100,
+            "height": 99,
+            "order": 1,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "children": [
+                  {
+                    "text": "アクセス"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "お子様の送迎にも便利な場所です。",
+                    "fontSize": 18
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          },
+          {
+            "id": "da59de60-d986-5fa6-9612-55068bdaf0c6",
+            "x": 50,
+            "y": 148.1,
+            "width": 520,
+            "height": 281,
+            "order": 2,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "所在地・ご連絡先"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "住所：",
+                    "fontSize": 18,
+                    "bold": true
+                  },
+                  {
+                    "text": "〒000-0000 〇〇県〇〇市〇〇 0-0-0 〇〇ビル 1F",
+                    "fontSize": 18
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "電話：",
+                    "fontSize": 18,
+                    "bold": true
+                  },
+                  {
+                    "text": "000-0000-0000",
+                    "fontSize": 18
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "営業時間：",
+                    "fontSize": 18,
+                    "bold": true
+                  },
+                  {
+                    "text": "〇:〇〇〜〇〇:〇〇（変更してください）",
+                    "fontSize": 18
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "定休日：",
+                    "fontSize": 18,
+                    "bold": true
+                  },
+                  {
+                    "text": "〇曜日・祝日（変更してください）",
+                    "fontSize": 18
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "最寄り駅：",
+                    "fontSize": 18,
+                    "bold": true
+                  },
+                  {
+                    "text": "〇〇駅 〇〇口より徒歩〇分",
+                    "fontSize": 18
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "自転車置き場：",
+                    "fontSize": 18,
+                    "bold": true
+                  },
+                  {
+                    "text": "ご利用いただけます（変更してください）",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "0cf9aaa8-8a07-5aaf-9bfa-7463637da62a",
+            "x": 610,
+            "y": 148.1,
+            "width": 540,
+            "height": 340,
+            "order": 3,
+            "content": [
+              {
+                "type": "map",
+                "provider": "osm",
+                "lat": 35.681236,
+                "lng": 139.767125,
+                "zoom": 15,
+                "height": 320,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "69540d36-369b-55c2-b0e0-754e734be6c6",
+            "x": 610,
+            "y": 502.1,
+            "width": 540,
+            "height": 38,
+            "order": 4,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.2,
+                "children": [
+                  {
+                    "text": "▲ 地図の位置を、実際のお店・教室の所在地に変更してください",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "14": {
+      "id": 14,
+      "order": 14,
+      "title": "生徒ページ",
+      "slug": "生徒ページ",
+      "type": "member",
+      "icon": "memberCard"
+    }
+  }
+}

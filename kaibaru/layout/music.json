@@ -1,0 +1,1980 @@
+{
+  "version": 1,
+  "next_section_id": 15,
+  "sections": {
+    "1": {
+      "id": 1,
+      "order": 1,
+      "title": "ヘッダー",
+      "slug": "header",
+      "type": "header",
+      "header": {
+        "logoHeight": 56,
+        "title": "〇〇音楽教室",
+        "subtitle": "音楽のある毎日を、あなたに。",
+        "transparent": false,
+        "collapseAllNav": false
+      }
+    },
+    "2": {
+      "id": 2,
+      "order": 2,
+      "title": "ホーム",
+      "slug": "home",
+      "type": "slideshow",
+      "icon": "home",
+      "slides": [
+        {
+          "id": "3a8988da-85bd-564a-bd60-cbe14be234c4",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "heading": "音楽を、もっと楽しく",
+          "subheading": "ピアノ・ギター・ボーカル・ドラム（背景写真を変更：楽器を演奏している生徒の写真）",
+          "buttonText": "体験・入会はこちら",
+          "buttonLink": "",
+          "buttonSectionId": 12,
+          "buttonBoxId": null,
+          "textAlign": "center"
+        },
+        {
+          "id": "b093909f-25a6-5581-a7e1-e3cfa69a6dd0",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "heading": "お子様から大人まで",
+          "subheading": "あなたのペースで上達できます（背景写真を変更：先生が生徒に教えている写真）",
+          "buttonText": "スケジュールを見る",
+          "buttonLink": "",
+          "buttonSectionId": 6,
+          "buttonBoxId": null,
+          "textAlign": "center"
+        },
+        {
+          "id": "fe851d9c-a977-5987-b7b3-fbd0a0b9b69a",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+          "heading": "発表会で輝こう",
+          "subheading": "日頃の成果を披露するステージ（背景写真を変更：発表会・ステージの写真）",
+          "buttonText": "料金を見る",
+          "buttonLink": "",
+          "buttonSectionId": 7,
+          "buttonBoxId": null,
+          "textAlign": "center"
+        }
+      ]
+    },
+    "3": {
+      "id": 3,
+      "order": 3,
+      "title": "教室について",
+      "slug": "教室について",
+      "type": "custom",
+      "icon": "info",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "ce447671-92f8-5434-9188-5fbd3db6a65f",
+            "x": 50,
+            "y": 20,
+            "width": 500,
+            "height": 285,
+            "order": 1,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "width": 492,
+                "height": 277,
+                "x": 2,
+                "y": 0,
+                "aspectRatio": 1.7778,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "8d33395c-0658-5150-82a7-2e7fe9eaf0fc",
+            "x": 50,
+            "y": 309,
+            "width": 500,
+            "height": 38,
+            "order": 2,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.2,
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：レッスン室や楽器が写っている写真",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          },
+          {
+            "id": "4fe57b9b-98d9-56d4-aecb-86a40ce3d9c4",
+            "x": 590,
+            "y": 20,
+            "width": 560,
+            "height": 66,
+            "order": 3,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "children": [
+                  {
+                    "text": "〇〇音楽教室について"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "45e996b0-c27d-5699-8944-585de120af91",
+            "x": 590,
+            "y": 99.80000000000001,
+            "width": 560,
+            "height": 140,
+            "order": 4,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "〇〇音楽教室は、子どもから大人まで、初心者から経験者まで、音楽を楽しめる教室です。",
+                    "fontSize": 18
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "一人ひとりの目標とペースに合わせたレッスンで、「弾ける」「歌える」喜びを大切にしています。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "b97654f1-95d7-5dd6-96a1-a6f50c00a1f8",
+            "x": 590,
+            "y": 253.0,
+            "width": 560,
+            "height": 148,
+            "order": 5,
+            "content": [
+              {
+                "type": "list",
+                "ordered": false,
+                "children": [
+                  {
+                    "type": "list-item",
+                    "children": [
+                      {
+                        "text": "初心者・再開の方も歓迎",
+                        "fontSize": 18
+                      }
+                    ]
+                  },
+                  {
+                    "type": "list-item",
+                    "children": [
+                      {
+                        "text": "マンツーマンで丁寧に指導",
+                        "fontSize": 18
+                      }
+                    ]
+                  },
+                  {
+                    "type": "list-item",
+                    "children": [
+                      {
+                        "text": "発表会・イベントで成果を披露",
+                        "fontSize": 18
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "d1fb1656-cc77-5212-ae00-5d1417cd48c0",
+            "x": 50,
+            "y": 430.9,
+            "width": 1100,
+            "height": 94,
+            "order": 6,
+            "content": [
+              {
+                "type": "button",
+                "label": "体験・入会のお申込みはこちら",
+                "align": "center",
+                "sectionId": 12,
+                "boxId": null,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "4": {
+      "id": 4,
+      "order": 4,
+      "title": "レッスン紹介",
+      "slug": "レッスン紹介",
+      "type": "custom",
+      "icon": "featured",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "47e109dd-de91-5be7-97e6-fa4a1304577e",
+            "x": 50,
+            "y": 20,
+            "width": 1100,
+            "height": 99,
+            "order": 1,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "children": [
+                  {
+                    "text": "レッスン紹介"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "さまざまな楽器・ジャンルのレッスンがあります。",
+                    "fontSize": 18
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          },
+          {
+            "id": "081d0ab4-2dcb-5bc6-9e04-a0152f72eae4",
+            "x": 50,
+            "y": 148.1,
+            "width": 340,
+            "height": 195,
+            "order": 2,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "width": 332,
+                "height": 187,
+                "x": 2,
+                "y": 0,
+                "aspectRatio": 1.7778,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "f13f241a-9b9e-52ad-b8c8-8c11a22f8d5c",
+            "x": 50,
+            "y": 347.1,
+            "width": 340,
+            "height": 66,
+            "order": 3,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.2,
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：ピアノを弾いている生徒の写真",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          },
+          {
+            "id": "af572ff2-9779-562c-902a-bb327b47576e",
+            "x": 50,
+            "y": 426.90000000000003,
+            "width": 340,
+            "height": 119,
+            "order": 4,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "ピアノ"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "クラシックからポップスまで。基礎から丁寧に指導します。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "457500d5-d946-51e9-875c-30e10aa60a6e",
+            "x": 430,
+            "y": 148.1,
+            "width": 340,
+            "height": 195,
+            "order": 5,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "width": 332,
+                "height": 187,
+                "x": 2,
+                "y": 0,
+                "aspectRatio": 1.7778,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "e00a2d4e-7d14-5ee4-892d-fd33fd71effc",
+            "x": 430,
+            "y": 347.1,
+            "width": 340,
+            "height": 66,
+            "order": 6,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.2,
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：ギターを弾いている生徒の写真",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          },
+          {
+            "id": "596bf9fe-bfc7-5ad0-be7a-9392c6b7b66d",
+            "x": 430,
+            "y": 426.90000000000003,
+            "width": 340,
+            "height": 119,
+            "order": 7,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "ギター・ベース"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "弾き語りやバンド演奏など、好きな曲から始められます。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "92b69594-1c3f-591f-ba62-4d0df1a38c21",
+            "x": 810,
+            "y": 148.1,
+            "width": 340,
+            "height": 195,
+            "order": 8,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "width": 332,
+                "height": 187,
+                "x": 2,
+                "y": 0,
+                "aspectRatio": 1.7778,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "a7783d26-0350-50cc-b7dd-64c018f69d46",
+            "x": 810,
+            "y": 347.1,
+            "width": 340,
+            "height": 66,
+            "order": 9,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.2,
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：ボーカルまたはドラムのレッスンの写真",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          },
+          {
+            "id": "7e71fdb4-3caf-5a13-a511-6cc855fd7feb",
+            "x": 810,
+            "y": 426.90000000000003,
+            "width": 340,
+            "height": 119,
+            "order": 10,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "ボーカル・ドラム"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "歌う楽しさ・叩く楽しさを体で感じるレッスンです。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "5": {
+      "id": 5,
+      "order": 5,
+      "title": "教室の特長",
+      "slug": "教室の特長",
+      "type": "custom",
+      "icon": "award",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "b266d5ec-021c-5a22-bb93-33ed695f1c9f",
+            "x": 50,
+            "y": 20,
+            "width": 1100,
+            "height": 99,
+            "order": 1,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "children": [
+                  {
+                    "text": "教室の特長"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "〇〇音楽教室が選ばれる理由",
+                    "fontSize": 18
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          },
+          {
+            "id": "b15d45e2-70c1-588b-bd0f-79cf48e4156b",
+            "x": 50,
+            "y": 148.1,
+            "width": 340,
+            "height": 147,
+            "order": 2,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.2,
+                "children": [
+                  {
+                    "text": "POINT 01",
+                    "fontSize": 16,
+                    "bold": true
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "マンツーマンレッスン"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "一人ひとりの目標とペースに合わせて進めます。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "dc25b5c9-e69d-5561-b875-c5940d280c99",
+            "x": 430,
+            "y": 148.1,
+            "width": 340,
+            "height": 147,
+            "order": 3,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.2,
+                "children": [
+                  {
+                    "text": "POINT 02",
+                    "fontSize": 16,
+                    "bold": true
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "好きな曲で学べる"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "好きな曲を課題にして、モチベーションを保ちながら上達できます。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "db1c94e0-049b-57f5-84fd-b4fc5112dde9",
+            "x": 810,
+            "y": 148.1,
+            "width": 340,
+            "height": 147,
+            "order": 4,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.2,
+                "children": [
+                  {
+                    "text": "POINT 03",
+                    "fontSize": 16,
+                    "bold": true
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "発表会・イベント"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "発表会で成果を披露でき、大きな自信になります。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "6": {
+      "id": 6,
+      "order": 6,
+      "title": "レッスン日程",
+      "slug": "レッスン日程",
+      "type": "schedule",
+      "icon": "schedule"
+    },
+    "7": {
+      "id": 7,
+      "order": 7,
+      "title": "月謝",
+      "slug": "月謝",
+      "type": "memberplans",
+      "icon": "payment"
+    },
+    "8": {
+      "id": 8,
+      "order": 8,
+      "title": "講師",
+      "slug": "講師",
+      "type": "teacher",
+      "icon": "teacher"
+    },
+    "9": {
+      "id": 9,
+      "order": 9,
+      "title": "発表会・イベント",
+      "slug": "発表会イベント",
+      "type": "custom",
+      "icon": "featured",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "aed02a54-becb-51cd-a1bc-5c0c31451652",
+            "x": 50,
+            "y": 20,
+            "width": 1100,
+            "height": 99,
+            "order": 1,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "children": [
+                  {
+                    "text": "発表会・イベント"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "年に〇回、発表会を開催しています（変更してください）。",
+                    "fontSize": 18
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          },
+          {
+            "id": "ff3448c3-6b70-588e-bb83-359700f9e0cd",
+            "x": 50,
+            "y": 148.1,
+            "width": 340,
+            "height": 195,
+            "order": 2,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "width": 332,
+                "height": 187,
+                "x": 2,
+                "y": 0,
+                "aspectRatio": 1.7778,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "e1aeb4f8-a69d-57b1-9887-38e80ab4b9b0",
+            "x": 50,
+            "y": 347.1,
+            "width": 340,
+            "height": 38,
+            "order": 3,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.2,
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：発表会のステージ写真",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          },
+          {
+            "id": "54767e64-979c-57f7-83f4-86170338196c",
+            "x": 430,
+            "y": 148.1,
+            "width": 340,
+            "height": 195,
+            "order": 4,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "width": 332,
+                "height": 187,
+                "x": 2,
+                "y": 0,
+                "aspectRatio": 1.7778,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "b588b940-95c6-5fad-ac61-5436a052e61a",
+            "x": 430,
+            "y": 347.1,
+            "width": 340,
+            "height": 38,
+            "order": 5,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.2,
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：出演者の集合写真",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          },
+          {
+            "id": "fe91da5a-1043-5321-b60f-e08a9da366f6",
+            "x": 810,
+            "y": 148.1,
+            "width": 340,
+            "height": 195,
+            "order": 6,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/examplepic.png",
+                "width": 332,
+                "height": 187,
+                "x": 2,
+                "y": 0,
+                "aspectRatio": 1.7778,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "b63f5157-ed61-5e80-be86-81eaa612bc94",
+            "x": 810,
+            "y": 347.1,
+            "width": 340,
+            "height": 66,
+            "order": 7,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.2,
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：リハーサル・準備風景の写真",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "10": {
+      "id": 10,
+      "order": 10,
+      "title": "生徒の声",
+      "slug": "生徒の声",
+      "type": "custom",
+      "icon": "heart",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "d7ea1afa-4696-5bb4-9259-3e3a5dcb26e1",
+            "x": 50,
+            "y": 20,
+            "width": 1100,
+            "height": 99,
+            "order": 1,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "children": [
+                  {
+                    "text": "生徒の声"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "生徒様からいただいた声です（実際の声に書き換えてください）。",
+                    "fontSize": 18
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          },
+          {
+            "id": "cb126bf3-ae56-5932-b02f-bb01d915c1b5",
+            "x": 50,
+            "y": 148.1,
+            "width": 340,
+            "height": 107,
+            "order": 2,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "「子どもが自分から練習するようになりました。」",
+                    "fontSize": 18,
+                    "italic": true
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "— 〇〇さん保護者",
+                    "fontSize": 16,
+                    "bold": true
+                  }
+                ],
+                "align": "right"
+              }
+            ]
+          },
+          {
+            "id": "d30990f2-0a51-5235-85e1-c87a805d6c00",
+            "x": 430,
+            "y": 148.1,
+            "width": 340,
+            "height": 107,
+            "order": 3,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "「仕事帰りに通えて、いい気分転換になります。」",
+                    "fontSize": 18,
+                    "italic": true
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "— 〇〇さん（40代）",
+                    "fontSize": 16,
+                    "bold": true
+                  }
+                ],
+                "align": "right"
+              }
+            ]
+          },
+          {
+            "id": "4b49a63b-824f-5646-bfe1-6d24303b63c8",
+            "x": 810,
+            "y": 148.1,
+            "width": 340,
+            "height": 107,
+            "order": 4,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "「憧れの曲が弾けるようになって感動しました！」",
+                    "fontSize": 18,
+                    "italic": true
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "— 〇〇さん（30代）",
+                    "fontSize": 16,
+                    "bold": true
+                  }
+                ],
+                "align": "right"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "11": {
+      "id": 11,
+      "order": 11,
+      "title": "よくある質問",
+      "slug": "よくある質問",
+      "type": "custom",
+      "icon": "info",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "13f0888e-c325-571a-9a03-95afc8b78f67",
+            "x": 50,
+            "y": 20,
+            "width": 1100,
+            "height": 99,
+            "order": 1,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "children": [
+                  {
+                    "text": "よくある質問"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "入会前によくいただくご質問です。",
+                    "fontSize": 18
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          },
+          {
+            "id": "1c2a1cf7-1900-5b28-9b50-39af7ff5ce21",
+            "x": 50,
+            "y": 148.1,
+            "width": 520,
+            "height": 150,
+            "order": 2,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "Q. 楽器を持っていなくても大丈夫ですか？"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "A. はい。最初は教室の楽器をご利用いただけます。（変更してください）",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "ed85ed62-6108-534c-a167-7957b25dce09",
+            "x": 630,
+            "y": 148.1,
+            "width": 520,
+            "height": 87,
+            "order": 3,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "Q. 何歳から始められますか？"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "A. 〇歳から始められます。（変更してください）",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "0454a056-7a2f-5b9d-98d8-73f6591ce16a",
+            "x": 50,
+            "y": 327.772,
+            "width": 520,
+            "height": 87,
+            "order": 4,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "Q. 体験レッスンはありますか？"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "A. 体験レッスンを随時受け付けています。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "fe4a99e0-3b3c-537e-89dc-c57c4b774af4",
+            "x": 630,
+            "y": 327.772,
+            "width": 520,
+            "height": 87,
+            "order": 5,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "Q. レッスンの振替はできますか？"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "A. 事前のご連絡で振替できます。（変更してください）",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "12": {
+      "id": 12,
+      "order": 12,
+      "title": "体験・入会",
+      "slug": "join",
+      "type": "join",
+      "icon": "join"
+    },
+    "13": {
+      "id": 13,
+      "order": 13,
+      "title": "アクセス",
+      "slug": "アクセス",
+      "type": "custom",
+      "icon": "access",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "7d4038a0-c3f6-5705-baa5-f689909a4fb8",
+            "x": 50,
+            "y": 20,
+            "width": 1100,
+            "height": 99,
+            "order": 1,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "children": [
+                  {
+                    "text": "アクセス"
+                  }
+                ],
+                "align": "center"
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "お仕事帰り・学校帰りにも通いやすい立地です。",
+                    "fontSize": 18
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          },
+          {
+            "id": "681f8a27-054d-534a-861a-38939428026e",
+            "x": 50,
+            "y": 148.1,
+            "width": 520,
+            "height": 248,
+            "order": 2,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "children": [
+                  {
+                    "text": "所在地・ご連絡先"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "住所：",
+                    "fontSize": 18,
+                    "bold": true
+                  },
+                  {
+                    "text": "〒000-0000 〇〇県〇〇市〇〇 0-0-0 〇〇ビル 1F",
+                    "fontSize": 18
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "電話：",
+                    "fontSize": 18,
+                    "bold": true
+                  },
+                  {
+                    "text": "000-0000-0000",
+                    "fontSize": 18
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "営業時間：",
+                    "fontSize": 18,
+                    "bold": true
+                  },
+                  {
+                    "text": "〇:〇〇〜〇〇:〇〇（変更してください）",
+                    "fontSize": 18
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "定休日：",
+                    "fontSize": 18,
+                    "bold": true
+                  },
+                  {
+                    "text": "〇曜日・祝日（変更してください）",
+                    "fontSize": 18
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "最寄り駅：",
+                    "fontSize": 18,
+                    "bold": true
+                  },
+                  {
+                    "text": "〇〇駅 〇〇口より徒歩〇分",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "02432cf4-f9ec-538f-aff1-72b26a533788",
+            "x": 610,
+            "y": 148.1,
+            "width": 540,
+            "height": 340,
+            "order": 3,
+            "content": [
+              {
+                "type": "map",
+                "provider": "osm",
+                "lat": 35.681236,
+                "lng": 139.767125,
+                "zoom": 15,
+                "height": 320,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "7e92ac94-6c17-55b7-877a-7f8fa0aec42b",
+            "x": 610,
+            "y": 502.1,
+            "width": 540,
+            "height": 38,
+            "order": 4,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.2,
+                "children": [
+                  {
+                    "text": "▲ 地図の位置を、実際のお店・教室の所在地に変更してください",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ],
+                "align": "center"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "14": {
+      "id": 14,
+      "order": 14,
+      "title": "会員ページ",
+      "slug": "会員ページ",
+      "type": "member",
+      "icon": "memberCard"
+    }
+  }
+}
