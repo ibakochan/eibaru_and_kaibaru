@@ -28,7 +28,7 @@
           "id": "3c74f40d-d1bc-5924-8e2d-9b0690162f9c",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/karate/slide-practice.jpg",
           "heading": "心技体を磨く",
-          "subheading": "伝統を守り、未来を育てる道場（背景写真を変更：道場で稽古をしている会員の写真）",
+          "subheading": "伝統を守り、未来を育てる道場。写真や文章を変えるには、上のメニューで「ホーム」を押し、右に出る鉛筆のマークを押してください（背景写真の例：道場で稽古をしている会員の写真）",
           "buttonText": "体験予約はこちら",
           "buttonLink": "",
           "buttonSectionId": 6,
@@ -39,7 +39,7 @@
           "id": "b45e58eb-8b78-55fb-9ad4-93cb204c93c7",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/karate/slide-bow.jpg",
           "heading": "子どもから大人まで",
-          "subheading": "礼儀と自信を育てる稽古（背景写真を変更：子どもたちが整列して礼をしている写真）",
+          "subheading": "礼儀と自信を育てる稽古（背景写真の例：子どもたちが整列して礼をしている写真。変え方は「ホーム」右の鉛筆マーク）",
           "buttonText": "スケジュールを見る",
           "buttonLink": "",
           "buttonSectionId": 6,
@@ -50,7 +50,7 @@
           "id": "023b1aca-36f4-52af-b503-91b012bfbfa4",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/karate/slide-grading.jpg",
           "heading": "昇級・昇段・大会",
-          "subheading": "目標に向かって、一歩ずつ（背景写真を変更：昇級審査や大会の様子の写真）",
+          "subheading": "目標に向かって、一歩ずつ（背景写真の例：昇級審査や大会の様子の写真。変え方は「ホーム」右の鉛筆マーク）",
           "buttonText": "料金を見る",
           "buttonLink": "",
           "buttonSectionId": 7,
@@ -206,7 +206,7 @@
             "x": 50,
             "y": 309,
             "width": 500,
-            "height": 38,
+            "height": 58.4,
             "order": 2,
             "content": [
               {
@@ -214,7 +214,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：道場の外観または内観の写真",
+                    "text": "▲ この写真を変更：道場の外観または内観の写真。左上の「レイアウト編集」（「セクション追加」のとなり）を押すと、この写真も周りの文章も変えられます。",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -499,7 +499,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：子どもたちが基本の型を行っている写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：子どもたちが基本の型を行っている写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -656,7 +656,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：大人の会員が組手・型の稽古をしている写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：大人の会員が組手・型の稽古をしている写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -813,7 +813,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：女性やシニアの会員が稽古している写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：女性やシニアの会員が稽古している写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -1715,7 +1715,7 @@
                 "align": "center",
                 "children": [
                   {
-                    "text": "▲ これはサンプルの地図です。文字を消すときと同じように、地図のすぐうしろにカーソルを置いてBackspaceキーを押すと削除できます。地図を追加するには、上にある本のような地図アイコンをクリックし、実際の場所のGoogleマップURLを貼り付けてください。",
+                    "text": "▲ これはサンプルの地図です。まず画面左上の「レイアウト編集」（「セクション追加」のとなり）を押してください。文字を消すときと同じように、地図のすぐうしろにカーソルを置いてBackspaceキーを押すと削除できます。地図を追加するには、編集中に文章の上へ出る本のような地図アイコンをクリックし、実際の場所のGoogleマップURLを貼り付けてください。",
                     "fontSize": 14,
                     "italic": true
                   }

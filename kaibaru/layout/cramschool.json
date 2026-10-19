@@ -28,7 +28,7 @@
           "id": "e8c513b5-4c9a-5e38-a34b-2852639896d9",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/cram/slide-study.jpg",
           "heading": "「わかる」から「できる」へ",
-          "subheading": "一人ひとりに寄り添う学習塾（背景写真を変更：教室で生徒が集中して勉強している写真）",
+          "subheading": "一人ひとりに寄り添う学習塾。写真や文章を変えるには、上のメニューで「ホーム」を押し、右に出る鉛筆のマークを押してください（背景写真の例：教室で生徒が集中して勉強している写真）",
           "buttonText": "体験予約はこちら",
           "buttonLink": "",
           "buttonSectionId": 7,
@@ -39,7 +39,7 @@
           "id": "aac0a6f5-7fd3-58f2-8162-d6a60aa8eb95",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/cram/slide-teaching.jpg",
           "heading": "志望校合格をサポート",
-          "subheading": "目標に合わせた学習計画（背景写真を変更：講師が生徒に説明している写真）",
+          "subheading": "目標に合わせた学習計画（背景写真の例：講師が生徒に説明している写真。変え方は「ホーム」右の鉛筆マーク）",
           "buttonText": "スケジュールを見る",
           "buttonLink": "",
           "buttonSectionId": 7,
@@ -50,7 +50,7 @@
           "id": "a3b6716a-975e-595b-a61b-d795c5c1026e",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/cram/slide-exterior.jpg",
           "heading": "まずは無料体験から",
-          "subheading": "学習のお悩みもご相談ください（背景写真を変更：教室の外観や入口の写真）",
+          "subheading": "学習のお悩みもご相談ください（背景写真の例：教室の外観や入口の写真。変え方は「ホーム」右の鉛筆マーク）",
           "buttonText": "料金を見る",
           "buttonLink": "",
           "buttonSectionId": 8,
@@ -206,7 +206,7 @@
             "x": 50,
             "y": 309,
             "width": 500,
-            "height": 38,
+            "height": 58.4,
             "order": 2,
             "content": [
               {
@@ -214,7 +214,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：教室の様子（机や黒板が写っているもの）",
+                    "text": "▲ この写真を変更：教室の様子（机や黒板が写っているもの）。左上の「レイアウト編集」（「セクション追加」のとなり）を押すと、この写真も周りの文章も変えられます。",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -499,7 +499,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：小学生が楽しく学習している写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：小学生が楽しく学習している写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -656,7 +656,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：中学生が授業を受けている写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：中学生が授業を受けている写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -805,7 +805,7 @@
             "x": 810,
             "y": 347.1,
             "width": 340,
-            "height": 38,
+            "height": 41.6,
             "order": 9,
             "content": [
               {
@@ -813,7 +813,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：高校生が自習している写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：高校生が自習している写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -1710,7 +1710,7 @@
                 "align": "center",
                 "children": [
                   {
-                    "text": "▲ これはサンプルの地図です。文字を消すときと同じように、地図のすぐうしろにカーソルを置いてBackspaceキーを押すと削除できます。地図を追加するには、上にある本のような地図アイコンをクリックし、実際の場所のGoogleマップURLを貼り付けてください。",
+                    "text": "▲ これはサンプルの地図です。まず画面左上の「レイアウト編集」（「セクション追加」のとなり）を押してください。文字を消すときと同じように、地図のすぐうしろにカーソルを置いてBackspaceキーを押すと削除できます。地図を追加するには、編集中に文章の上へ出る本のような地図アイコンをクリックし、実際の場所のGoogleマップURLを貼り付けてください。",
                     "fontSize": 14,
                     "italic": true
                   }

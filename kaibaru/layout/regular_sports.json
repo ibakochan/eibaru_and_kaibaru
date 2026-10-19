@@ -28,7 +28,7 @@
           "id": "ec4e1b0b-ec01-59e4-ad19-0d48cecc1dd4",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/sports/slide-practice.jpg",
           "heading": "スポーツを、もっと楽しく",
-          "subheading": "子どもから大人まで参加できるクラブ（背景写真を変更：練習・試合をしているメンバーの写真）",
+          "subheading": "子どもから大人まで参加できるクラブ。写真や文章を変えるには、上のメニューで「ホーム」を押し、右に出る鉛筆のマークを押してください（背景写真の例：練習・試合をしているメンバーの写真）",
           "buttonText": "体験予約はこちら",
           "buttonLink": "",
           "buttonSectionId": 7,
@@ -39,7 +39,7 @@
           "id": "85999cc0-c3a7-5865-bc07-9dddd3c01dc0",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/sports/slide-team.jpg",
           "heading": "チームで成長する",
-          "subheading": "技術も、心も、一緒に育てる（背景写真を変更：チームで声を掛け合っている写真）",
+          "subheading": "技術も、心も、一緒に育てる（背景写真の例：チームで声を掛け合っている写真。変え方は「ホーム」右の鉛筆マーク）",
           "buttonText": "スケジュールを見る",
           "buttonLink": "",
           "buttonSectionId": 7,
@@ -50,7 +50,7 @@
           "id": "f04767f4-8479-5dff-b0a5-7a5dce67178d",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/sports/slide-ground.jpg",
           "heading": "まずは体験参加から",
-          "subheading": "見学・体験は随時受付中（背景写真を変更：練習場所（グラウンド・体育館）の写真）",
+          "subheading": "見学・体験は随時受付中（背景写真の例：練習場所（グラウンド・体育館）の写真。変え方は「ホーム」右の鉛筆マーク）",
           "buttonText": "料金を見る",
           "buttonLink": "",
           "buttonSectionId": 8,
@@ -206,7 +206,7 @@
             "x": 50,
             "y": 309,
             "width": 500,
-            "height": 38,
+            "height": 58.4,
             "order": 2,
             "content": [
               {
@@ -214,7 +214,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：クラブのメンバー集合写真",
+                    "text": "▲ この写真を変更：クラブのメンバー集合写真。左上の「レイアウト編集」（「セクション追加」のとなり）を押すと、この写真も周りの文章も変えられます。",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -499,7 +499,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：ジュニアが練習している写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：ジュニアが練習している写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -656,7 +656,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：ユースが練習・試合をしている写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：ユースが練習・試合をしている写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -813,7 +813,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：大人のメンバーが楽しんでいる写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：大人のメンバーが楽しんでいる写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -1184,7 +1184,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：メインの練習場所（グラウンド・体育館）の写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：メインの練習場所（グラウンド・体育館）の写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -1311,7 +1311,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：更衣室・ベンチなどの設備の写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：更衣室・ベンチなどの設備の写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -1438,7 +1438,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：クラブハウスや集合場所の写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：クラブハウスや集合場所の写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -1992,7 +1992,7 @@
                 "align": "center",
                 "children": [
                   {
-                    "text": "▲ これはサンプルの地図です。文字を消すときと同じように、地図のすぐうしろにカーソルを置いてBackspaceキーを押すと削除できます。地図を追加するには、上にある本のような地図アイコンをクリックし、実際の場所のGoogleマップURLを貼り付けてください。",
+                    "text": "▲ これはサンプルの地図です。まず画面左上の「レイアウト編集」（「セクション追加」のとなり）を押してください。文字を消すときと同じように、地図のすぐうしろにカーソルを置いてBackspaceキーを押すと削除できます。地図を追加するには、編集中に文章の上へ出る本のような地図アイコンをクリックし、実際の場所のGoogleマップURLを貼り付けてください。",
                     "fontSize": 14,
                     "italic": true
                   }

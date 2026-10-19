@@ -28,7 +28,7 @@
           "id": "392529be-751b-556f-87a2-edc6abadcc12",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/gym/slide-machines.jpg",
           "heading": "理想のカラダを、ここから。",
-          "subheading": "マシン・フリーウェイトが充実したジム（背景写真を変更：トレーニングマシンが並ぶジム内の写真）",
+          "subheading": "マシン・フリーウェイトが充実したジム。写真や文章を変えるには、上のメニューで「ホーム」を押し、右に出る鉛筆のマークを押してください（背景写真の例：トレーニングマシンが並ぶジム内の写真）",
           "buttonText": "体験予約はこちら",
           "buttonLink": "",
           "buttonSectionId": 7,
@@ -39,7 +39,7 @@
           "id": "9ad76db0-4de6-5bc4-a975-002896d57e53",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/gym/slide-orientation.jpg",
           "heading": "初めてでも安心",
-          "subheading": "スタッフがマシンの使い方をご案内（背景写真を変更：スタッフが利用者にマシンの説明をしている写真）",
+          "subheading": "スタッフがマシンの使い方をご案内（背景写真の例：スタッフが利用者にマシンの説明をしている写真。変え方は「ホーム」右の鉛筆マーク）",
           "buttonText": "スケジュールを見る",
           "buttonLink": "",
           "buttonSectionId": 7,
@@ -50,7 +50,7 @@
           "id": "f64ff6c5-2819-5446-81cd-83397c620b5f",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/gym/slide-entrance.jpg",
           "heading": "あなたに合う会員プラン",
-          "subheading": "通う頻度に合わせて選べます（背景写真を変更：ジム入口・受付の写真）",
+          "subheading": "通う頻度に合わせて選べます（背景写真の例：ジム入口・受付の写真。変え方は「ホーム」右の鉛筆マーク）",
           "buttonText": "料金を見る",
           "buttonLink": "",
           "buttonSectionId": 8,
@@ -214,7 +214,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：ジムの全景（マシン・フリーウェイトが見えるもの）",
+                    "text": "▲ この写真を変更：ジムの全景（マシン・フリーウェイトが見えるもの）。左上の「レイアウト編集」（「セクション追加」のとなり）を押すと、この写真も周りの文章も変えられます。",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -491,7 +491,7 @@
             "x": 50,
             "y": 347.1,
             "width": 340,
-            "height": 38,
+            "height": 41.6,
             "order": 3,
             "content": [
               {
@@ -499,7 +499,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：マシンエリアの写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：マシンエリアの写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -626,7 +626,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：フリーウェイトエリアの写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：フリーウェイトエリアの写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -753,7 +753,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：シャワー・ロッカールームの写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：シャワー・ロッカールームの写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -924,7 +924,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：ジムでトレーニングしている会員の写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：ジムでトレーニングしている会員の写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -1073,7 +1073,7 @@
             "x": 430,
             "y": 347.1,
             "width": 340,
-            "height": 38,
+            "height": 41.6,
             "order": 6,
             "content": [
               {
@@ -1081,7 +1081,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：スタジオレッスンの様子",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：スタジオレッスンの様子",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -1238,7 +1238,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：パーソナルトレーナーと会員の写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：パーソナルトレーナーと会員の写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -1967,7 +1967,7 @@
                 "align": "center",
                 "children": [
                   {
-                    "text": "▲ これはサンプルの地図です。文字を消すときと同じように、地図のすぐうしろにカーソルを置いてBackspaceキーを押すと削除できます。地図を追加するには、上にある本のような地図アイコンをクリックし、実際の場所のGoogleマップURLを貼り付けてください。",
+                    "text": "▲ これはサンプルの地図です。まず画面左上の「レイアウト編集」（「セクション追加」のとなり）を押してください。文字を消すときと同じように、地図のすぐうしろにカーソルを置いてBackspaceキーを押すと削除できます。地図を追加するには、編集中に文章の上へ出る本のような地図アイコンをクリックし、実際の場所のGoogleマップURLを貼り付けてください。",
                     "fontSize": 14,
                     "italic": true
                   }

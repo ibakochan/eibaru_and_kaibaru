@@ -28,7 +28,7 @@
           "id": "af27d137-9536-58f5-a226-0031f2f0d578",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/fitness/slide-class.jpg",
           "heading": "楽しく汗をかこう！",
-          "subheading": "ボクササイズ・フィットネスクラブ（背景写真を変更：音楽に合わせて楽しく運動している会員の写真）",
+          "subheading": "ボクササイズ・フィットネスクラブ。写真や文章を変えるには、上のメニューで「ホーム」を押し、右に出る鉛筆のマークを押してください（背景写真の例：音楽に合わせて楽しく運動している会員の写真）",
           "buttonText": "体験予約はこちら",
           "buttonLink": "",
           "buttonSectionId": 6,
@@ -39,7 +39,7 @@
           "id": "cca1b0e1-a147-51f0-82e5-54517b3515dc",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/fitness/slide-group.jpg",
           "heading": "運動初心者も大歓迎",
-          "subheading": "グループレッスンで続けやすい（背景写真を変更：グループレッスンの様子（インストラクター付き））",
+          "subheading": "グループレッスンで続けやすい（背景写真の例：グループレッスンの様子（インストラクター付き）。変え方は「ホーム」右の鉛筆マーク）",
           "buttonText": "スケジュールを見る",
           "buttonLink": "",
           "buttonSectionId": 6,
@@ -50,7 +50,7 @@
           "id": "693606b6-5c17-5c74-9784-0c782ca26429",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/fitness/slide-smiles.jpg",
           "heading": "ダイエット・健康づくりに",
-          "subheading": "あなたのペースで無理なく（背景写真を変更：笑顔で運動している会員の写真）",
+          "subheading": "あなたのペースで無理なく（背景写真の例：笑顔で運動している会員の写真。変え方は「ホーム」右の鉛筆マーク）",
           "buttonText": "料金を見る",
           "buttonLink": "",
           "buttonSectionId": 7,
@@ -206,7 +206,7 @@
             "x": 50,
             "y": 309,
             "width": 500,
-            "height": 38,
+            "height": 58.4,
             "order": 2,
             "content": [
               {
@@ -214,7 +214,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：インストラクターと会員が楽しく運動している写真",
+                    "text": "▲ この写真を変更：インストラクターと会員が楽しく運動している写真。左上の「レイアウト編集」（「セクション追加」のとなり）を押すと、この写真も周りの文章も変えられます。",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -499,7 +499,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：ボクササイズのレッスン風景",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：ボクササイズのレッスン風景",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -656,7 +656,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：HIITやサーキットトレーニングの写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：HIITやサーキットトレーニングの写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -813,7 +813,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：ストレッチ・マットエクササイズの写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：ストレッチ・マットエクササイズの写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -1522,7 +1522,7 @@
                 "align": "center",
                 "children": [
                   {
-                    "text": "▲ これはサンプルの地図です。文字を消すときと同じように、地図のすぐうしろにカーソルを置いてBackspaceキーを押すと削除できます。地図を追加するには、上にある本のような地図アイコンをクリックし、実際の場所のGoogleマップURLを貼り付けてください。",
+                    "text": "▲ これはサンプルの地図です。まず画面左上の「レイアウト編集」（「セクション追加」のとなり）を押してください。文字を消すときと同じように、地図のすぐうしろにカーソルを置いてBackspaceキーを押すと削除できます。地図を追加するには、編集中に文章の上へ出る本のような地図アイコンをクリックし、実際の場所のGoogleマップURLを貼り付けてください。",
                     "fontSize": 14,
                     "italic": true
                   }

@@ -28,7 +28,7 @@
           "id": "62e65ad4-06a2-5603-9166-21a52c109da1",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/swimming/slide-pool.jpg",
           "heading": "水の中で、もっと自由に",
-          "subheading": "初心者から選手育成まで（背景写真を変更：プールで泳ぐ子どもや大人の写真）",
+          "subheading": "初心者から選手育成まで。写真や文章を変えるには、上のメニューで「ホーム」を押し、右に出る鉛筆のマークを押してください（背景写真の例：プールで泳ぐ子どもや大人の写真）",
           "buttonText": "体験予約はこちら",
           "buttonLink": "",
           "buttonSectionId": 7,
@@ -39,7 +39,7 @@
           "id": "31e83056-2226-5a68-9e96-cd81e2243ca7",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/swimming/slide-coach.jpg",
           "heading": "お子様の「泳げた！」を応援",
-          "subheading": "少人数制で安心の指導（背景写真を変更：コーチが子どもに教えている写真）",
+          "subheading": "少人数制で安心の指導（背景写真の例：コーチが子どもに教えている写真。変え方は「ホーム」右の鉛筆マーク）",
           "buttonText": "スケジュールを見る",
           "buttonLink": "",
           "buttonSectionId": 7,
@@ -50,7 +50,7 @@
           "id": "f909ddcf-b4b1-5365-b511-ebfddb6fbc8e",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/swimming/slide-adults.jpg",
           "heading": "大人のスイミングも",
-          "subheading": "運動不足解消・ダイエットに（背景写真を変更：大人がプールで泳いでいる写真）",
+          "subheading": "運動不足解消・ダイエットに（背景写真の例：大人がプールで泳いでいる写真。変え方は「ホーム」右の鉛筆マーク）",
           "buttonText": "料金を見る",
           "buttonLink": "",
           "buttonSectionId": 8,
@@ -206,7 +206,7 @@
             "x": 50,
             "y": 309,
             "width": 500,
-            "height": 38,
+            "height": 41.6,
             "order": 2,
             "content": [
               {
@@ -214,7 +214,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：プール全景の写真",
+                    "text": "▲ この写真を変更：プール全景の写真。左上の「レイアウト編集」（「セクション追加」のとなり）を押すと、この写真も周りの文章も変えられます。",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -499,7 +499,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：幼児が水遊びをしているレッスンの写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：幼児が水遊びをしているレッスンの写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -648,7 +648,7 @@
             "x": 430,
             "y": 347.1,
             "width": 340,
-            "height": 38,
+            "height": 41.6,
             "order": 6,
             "content": [
               {
@@ -656,7 +656,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：ジュニアが泳いでいる写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：ジュニアが泳いでいる写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -805,7 +805,7 @@
             "x": 810,
             "y": 347.1,
             "width": 340,
-            "height": 38,
+            "height": 41.6,
             "order": 9,
             "content": [
               {
@@ -813,7 +813,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：大人のレッスン風景",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：大人のレッスン風景",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -1176,7 +1176,7 @@
             "x": 50,
             "y": 347.1,
             "width": 340,
-            "height": 38,
+            "height": 41.6,
             "order": 3,
             "content": [
               {
@@ -1184,7 +1184,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：プール全景の写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：プール全景の写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -1303,7 +1303,7 @@
             "x": 430,
             "y": 347.1,
             "width": 340,
-            "height": 38,
+            "height": 41.6,
             "order": 5,
             "content": [
               {
@@ -1311,7 +1311,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：更衣室・シャワーの写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：更衣室・シャワーの写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -1430,7 +1430,7 @@
             "x": 810,
             "y": 347.1,
             "width": 340,
-            "height": 38,
+            "height": 41.6,
             "order": 7,
             "content": [
               {
@@ -1438,7 +1438,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：見学スペースの写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：見学スペースの写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -1967,7 +1967,7 @@
                 "align": "center",
                 "children": [
                   {
-                    "text": "▲ これはサンプルの地図です。文字を消すときと同じように、地図のすぐうしろにカーソルを置いてBackspaceキーを押すと削除できます。地図を追加するには、上にある本のような地図アイコンをクリックし、実際の場所のGoogleマップURLを貼り付けてください。",
+                    "text": "▲ これはサンプルの地図です。まず画面左上の「レイアウト編集」（「セクション追加」のとなり）を押してください。文字を消すときと同じように、地図のすぐうしろにカーソルを置いてBackspaceキーを押すと削除できます。地図を追加するには、編集中に文章の上へ出る本のような地図アイコンをクリックし、実際の場所のGoogleマップURLを貼り付けてください。",
                     "fontSize": 14,
                     "italic": true
                   }

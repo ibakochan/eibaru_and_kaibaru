@@ -28,7 +28,7 @@
           "id": "d4156a95-c2cb-526a-ae88-0c474cce4c92",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/yoga/slide-class.jpg",
           "heading": "心と体を、ゆっくりほどく",
-          "subheading": "呼吸とともに、自分に戻る時間を（背景写真を変更：明るく穏やかなスタジオでヨガをしている写真）",
+          "subheading": "呼吸とともに、自分に戻る時間を。写真や文章を変えるには、上のメニューで「ホーム」を押し、右に出る鉛筆のマークを押してください（背景写真の例：明るく穏やかなスタジオでヨガをしている写真）",
           "buttonText": "体験予約はこちら",
           "buttonLink": "",
           "buttonSectionId": 6,
@@ -39,7 +39,7 @@
           "id": "ed169acd-03be-5b01-9aed-7f6abcf1808c",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/yoga/slide-beginner.jpg",
           "heading": "初めてのヨガも安心",
-          "subheading": "少人数制で一人ひとりに丁寧にご案内します（背景写真を変更：初心者クラスでインストラクターが指導している写真）",
+          "subheading": "少人数制で一人ひとりに丁寧にご案内します（背景写真の例：初心者クラスでインストラクターが指導している写真。変え方は「ホーム」右の鉛筆マーク）",
           "buttonText": "スケジュールを見る",
           "buttonLink": "",
           "buttonSectionId": 6,
@@ -50,7 +50,7 @@
           "id": "eeb36b83-8f00-5387-bf70-a5c4c53617f0",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/yoga/slide-morning.jpg",
           "heading": "あなたに合ったクラスを",
-          "subheading": "朝ヨガからナイトクラスまで（背景写真を変更：朝日が差し込むスタジオの写真）",
+          "subheading": "朝ヨガからナイトクラスまで（背景写真の例：朝日が差し込むスタジオの写真。変え方は「ホーム」右の鉛筆マーク）",
           "buttonText": "料金を見る",
           "buttonLink": "",
           "buttonSectionId": 7,
@@ -206,7 +206,7 @@
             "x": 50,
             "y": 309,
             "width": 500,
-            "height": 38,
+            "height": 58.4,
             "order": 2,
             "content": [
               {
@@ -214,7 +214,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：スタジオの雰囲気が伝わる、落ち着いた室内の写真",
+                    "text": "▲ この写真を変更：スタジオの雰囲気が伝わる、落ち着いた室内の写真。左上の「レイアウト編集」（「セクション追加」のとなり）を押すと、この写真も周りの文章も変えられます。",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -499,7 +499,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：基本のポーズ（山のポーズ・下向きの犬のポーズなど）を行う様子",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：基本のポーズ（山のポーズ・下向きの犬のポーズなど）を行う様子",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -656,7 +656,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：動きのあるヨガ（太陽礼拝など）の写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：動きのあるヨガ（太陽礼拝など）の写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -813,7 +813,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：ブランケットやボルスターを使ったリラックスポーズ",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：ブランケットやボルスターを使ったリラックスポーズ",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -1014,7 +1014,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：スタジオ全体が見渡せる写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：スタジオ全体が見渡せる写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -1141,7 +1141,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：更衣室・シャワールームの写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：更衣室・シャワールームの写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -1268,7 +1268,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：ヨガマットやプロップスなど備品の写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：ヨガマットやプロップスなど備品の写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -1782,7 +1782,7 @@
                 "align": "center",
                 "children": [
                   {
-                    "text": "▲ これはサンプルの地図です。文字を消すときと同じように、地図のすぐうしろにカーソルを置いてBackspaceキーを押すと削除できます。地図を追加するには、上にある本のような地図アイコンをクリックし、実際の場所のGoogleマップURLを貼り付けてください。",
+                    "text": "▲ これはサンプルの地図です。まず画面左上の「レイアウト編集」（「セクション追加」のとなり）を押してください。文字を消すときと同じように、地図のすぐうしろにカーソルを置いてBackspaceキーを押すと削除できます。地図を追加するには、編集中に文章の上へ出る本のような地図アイコンをクリックし、実際の場所のGoogleマップURLを貼り付けてください。",
                     "fontSize": 14,
                     "italic": true
                   }
