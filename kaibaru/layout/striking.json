@@ -29,9 +29,9 @@
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/striking/slide-heavy-bag.jpg",
           "heading": "拳で、自分を超えろ。",
           "subheading": "初心者からプロ志望まで、本気の指導（背景写真を変更：サンドバッグを打つ選手の迫力ある写真）",
-          "buttonText": "体験・入会はこちら",
+          "buttonText": "体験予約はこちら",
           "buttonLink": "",
-          "buttonSectionId": 11,
+          "buttonSectionId": 6,
           "buttonBoxId": null,
           "textAlign": "center"
         },
@@ -325,9 +325,9 @@
             "content": [
               {
                 "type": "button",
-                "label": "体験・入会のお申込みはこちら",
+                "label": "体験予約はこちら",
                 "align": "center",
-                "sectionId": 11,
+                "sectionId": 6,
                 "boxId": null,
                 "children": [
                   {
@@ -1360,7 +1360,7 @@
     "11": {
       "id": 11,
       "order": 11,
-      "title": "体験・入会",
+      "title": "入会",
       "slug": "join",
       "type": "join",
       "icon": "join"
@@ -1528,7 +1528,7 @@
             "x": 610,
             "y": 502.1,
             "width": 540,
-            "height": 38,
+            "height": 72,
             "order": 4,
             "content": [
               {
@@ -1536,7 +1536,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ 地図の位置を、実際のお店・教室の所在地に変更してください",
+                    "text": "▲ これはサンプルの地図です。写真のように差し替えることはできません。この地図を削除し、編集画面の地図ボタンから、実際の場所のGoogleマップURLを貼り付けてください。",
                     "fontSize": 14,
                     "italic": true
                   }

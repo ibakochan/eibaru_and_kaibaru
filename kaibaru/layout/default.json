@@ -29,9 +29,9 @@
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/default/slide-group.jpg",
           "heading": "〇〇クラブへようこそ",
           "subheading": "初めての方も、経験者の方も大歓迎です（背景写真を変更：クラブの雰囲気が伝わる集合写真や活動風景）",
-          "buttonText": "体験・入会はこちら",
+          "buttonText": "体験予約はこちら",
           "buttonLink": "",
-          "buttonSectionId": 10,
+          "buttonSectionId": 5,
           "buttonBoxId": null,
           "textAlign": "center"
         },
@@ -325,9 +325,9 @@
             "content": [
               {
                 "type": "button",
-                "label": "体験・入会のお申込みはこちら",
+                "label": "体験予約はこちら",
                 "align": "center",
-                "sectionId": 10,
+                "sectionId": 5,
                 "boxId": null,
                 "children": [
                   {
@@ -610,7 +610,7 @@
                 "paragraphSize": 0.4,
                 "children": [
                   {
-                    "text": "「体験・入会」ページのフォームから、ご希望の日時をお知らせください。",
+                    "text": "スケジュールから受けたいレッスンを選び、体験予約をしてください。",
                     "fontSize": 18
                   }
                 ]
@@ -694,7 +694,7 @@
                 "paragraphSize": 0.4,
                 "children": [
                   {
-                    "text": "体験後、ご納得いただけましたら、そのままご入会のお手続きができます。",
+                    "text": "体験後、ご納得いただけましたら、「入会」ページからお手続きできます。",
                     "fontSize": 18
                   }
                 ]
@@ -711,9 +711,9 @@
             "content": [
               {
                 "type": "button",
-                "label": "体験・入会のお申込みはこちら",
+                "label": "体験予約はこちら",
                 "align": "center",
-                "sectionId": 10,
+                "sectionId": 5,
                 "boxId": null,
                 "children": [
                   {
@@ -818,7 +818,7 @@
                 "paragraphSize": 0.4,
                 "children": [
                   {
-                    "text": "A. 体験は随時受け付けています。「体験・入会」ページからお申込みください。",
+                    "text": "A. 体験は随時受け付けています。スケジュールから体験予約ができます。",
                     "fontSize": 18
                   }
                 ]
@@ -889,7 +889,7 @@
     "10": {
       "id": 10,
       "order": 10,
-      "title": "体験・入会",
+      "title": "入会",
       "slug": "join",
       "type": "join",
       "icon": "join"
@@ -1057,7 +1057,7 @@
             "x": 610,
             "y": 502.1,
             "width": 540,
-            "height": 38,
+            "height": 72,
             "order": 4,
             "content": [
               {
@@ -1065,7 +1065,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ 地図の位置を、実際のお店・教室の所在地に変更してください",
+                    "text": "▲ これはサンプルの地図です。写真のように差し替えることはできません。この地図を削除し、編集画面の地図ボタンから、実際の場所のGoogleマップURLを貼り付けてください。",
                     "fontSize": 14,
                     "italic": true
                   }

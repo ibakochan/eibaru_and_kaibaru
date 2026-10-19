@@ -29,9 +29,9 @@
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/swimming/slide-pool.jpg",
           "heading": "水の中で、もっと自由に",
           "subheading": "初心者から選手育成まで（背景写真を変更：プールで泳ぐ子どもや大人の写真）",
-          "buttonText": "体験・入会はこちら",
+          "buttonText": "体験予約はこちら",
           "buttonLink": "",
-          "buttonSectionId": 12,
+          "buttonSectionId": 7,
           "buttonBoxId": null,
           "textAlign": "center"
         },
@@ -325,9 +325,9 @@
             "content": [
               {
                 "type": "button",
-                "label": "体験・入会のお申込みはこちら",
+                "label": "体験予約はこちら",
                 "align": "center",
-                "sectionId": 12,
+                "sectionId": 7,
                 "boxId": null,
                 "children": [
                   {
@@ -1785,7 +1785,7 @@
     "12": {
       "id": 12,
       "order": 12,
-      "title": "体験・入会",
+      "title": "入会",
       "slug": "join",
       "type": "join",
       "icon": "join"
@@ -1968,7 +1968,7 @@
             "x": 610,
             "y": 502.1,
             "width": 540,
-            "height": 38,
+            "height": 72,
             "order": 4,
             "content": [
               {
@@ -1976,7 +1976,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ 地図の位置を、実際のお店・教室の所在地に変更してください",
+                    "text": "▲ これはサンプルの地図です。写真のように差し替えることはできません。この地図を削除し、編集画面の地図ボタンから、実際の場所のGoogleマップURLを貼り付けてください。",
                     "fontSize": 14,
                     "italic": true
                   }
