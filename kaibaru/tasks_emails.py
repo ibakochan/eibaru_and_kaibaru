@@ -337,6 +337,75 @@ def send_subscription_canceled_emails(self, club_data):
     retry_backoff=60,
     retry_kwargs={"max_retries": 5},
 )
+def send_platform_cycle_paid_email(self, platform_subscription_id, invoice_id):
+    """Receipt for a paid platform subscription cycle.
+
+    Uses the same invoice lines as 請求歴, without the member-Stripe 1%
+    which is collected separately and is not on this invoice.
+    """
+    import stripe
+
+    from .models import PlatformSubscription
+    from .service_platform_billing_history import (
+        _build_history_entry,
+        _owner_club_ids,
+        _stripe,
+        format_platform_cycle_receipt,
+    )
+
+    platform_sub = (
+        PlatformSubscription.objects
+        .select_related("user")
+        .filter(id=platform_subscription_id)
+        .first()
+    )
+    if not platform_sub or not platform_sub.user_id:
+        logger.warning(
+            "[EMAIL] Platform cycle receipt missing subscription id=%s",
+            platform_subscription_id,
+        )
+        return
+
+    owner = platform_sub.user
+    if not owner.email:
+        logger.warning(
+            "[EMAIL] Platform cycle receipt owner has no email sub=%s",
+            platform_subscription_id,
+        )
+        return
+
+    _stripe()
+    stripe_invoice = stripe.Invoice.retrieve(invoice_id, expand=["lines"])
+    entry = _build_history_entry(
+        stripe_invoice,
+        _owner_club_ids(platform_sub.user_id),
+        include_stripe_processing=False,
+    )
+    receipt = format_platform_cycle_receipt(entry)
+    pay_month = ""
+    if entry.get("payment_year") and entry.get("payment_month"):
+        pay_month = f"{entry['payment_year']}年{entry['payment_month']}月"
+    owner_name = owner.get_full_name() or owner.email
+
+    send_mail(
+        subject=f"【Kaibaru】{pay_month}のプラットフォーム利用料" if pay_month else "【Kaibaru】プラットフォーム利用料",
+        message=(
+            f"{owner_name} 様\n\n"
+            f"Kaibaru プラットフォーム利用料のお支払いを確認しました。\n\n"
+            f"{receipt}\n\n"
+            f"Kaibaru 運営チーム"
+        ),
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[owner.email],
+    )
+
+
+@shared_task(
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=60,
+    retry_kwargs={"max_retries": 5},
+)
 def send_subscription_activated_emails(self, club_id, invoice_id):
     club = Club.objects.select_related("owner").get(id=club_id)
     owner = club.owner

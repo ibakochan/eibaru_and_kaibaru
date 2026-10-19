@@ -3483,3 +3483,29 @@ class ReservationSerializer(serializers.ModelSerializer):
         }
 
 
+class ExpenseReceiptSerializer(serializers.ModelSerializer):
+    image_url = serializers.SerializerMethodField()
+
+    class Meta:
+        from .models import ExpenseReceipt
+
+        model = ExpenseReceipt
+        fields = [
+            "id",
+            "title",
+            "amount",
+            "description",
+            "purchased_on",
+            "image_url",
+            "created_at",
+        ]
+
+    def get_image_url(self, obj):
+        if not obj.image:
+            return None
+        try:
+            return obj.image.url
+        except Exception:
+            return None
+
+

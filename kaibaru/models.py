@@ -45,6 +45,16 @@ def club_og_image_upload_to(instance, filename):
     club_subdomain = getattr(instance, "subdomain", "unknown_club")
     return f"{club_subdomain}/og/{filename}"
 
+def club_expense_receipt_upload_to(instance, filename):
+    import os
+    import uuid
+
+    ext = os.path.splitext(filename or "")[1].lower()
+    if ext not in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
+        ext = ""
+    club_subdomain = getattr(getattr(instance, "club", None), "subdomain", "unknown_club")
+    return f"{club_subdomain}/expenses/{uuid.uuid4().hex}{ext}"
+
 class ActiveClubManager(models.Manager):
     def get_queryset(self):
         return super().get_queryset().filter(is_deleted=False)
@@ -2648,3 +2658,32 @@ class MemberRecord(models.Model):
 
     def __str__(self):
         return f"{self.member.full_name} - {self.name}"
+
+
+class ExpenseReceipt(models.Model):
+    """A club cost, such as equipment, with the receipt photo on Google Cloud."""
+
+    club = models.ForeignKey(
+        Club,
+        on_delete=models.CASCADE,
+        related_name="expense_receipts",
+    )
+    image = models.ImageField(
+        upload_to=club_expense_receipt_upload_to,
+        storage=PrivateMediaStorage(),
+    )
+    title = models.CharField(max_length=200, blank=True, default="")
+    amount = models.PositiveIntegerField(null=True, blank=True)
+    description = models.TextField(blank=True, default="")
+    purchased_on = models.DateField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-purchased_on", "-id"]
+        indexes = [
+            models.Index(fields=["club", "purchased_on"]),
+        ]
+
+    def __str__(self):
+        label = self.title or "経費"
+        return f"{self.club_id} {self.purchased_on} {label}"

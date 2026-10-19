@@ -3,7 +3,7 @@ from rest_framework import viewsets, serializers, status
 from rest_framework.decorators import action
 from rest_framework.viewsets import ViewSet
 from rest_framework.response import Response
-from .models import TicketGrant, TicketType, TicketPackage, Reservation, Event, EventReservation, MemberRecord, Invoice, MemberPricingAdjustment, Discount, DiscountCondition, SubscriptionItem, Member, Club, Lesson, Participation, SlateImage, JoinRequest, MembershipPlan, Subscription
+from .models import TicketGrant, TicketType, TicketPackage, Reservation, Event, EventReservation, MemberRecord, Invoice, MemberPricingAdjustment, Discount, DiscountCondition, SubscriptionItem, Member, Club, Lesson, Participation, SlateImage, JoinRequest, MembershipPlan, Subscription, ExpenseReceipt
 from accounts.models import CustomUser
 from django.contrib.auth import login
 import re
@@ -3752,6 +3752,142 @@ class ParticipationViewSet(viewsets.ModelViewSet):
             )
 
 
+def _owner_club(request, subdomain):
+    club = Club.objects.filter(is_deleted=False, subdomain=subdomain).first()
+    if not club:
+        return None, Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+    if not request.user.is_authenticated or club.owner_id != request.user.id:
+        return None, Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
+    return club, None
+
+
+def _parse_expense_fields(request, *, image_required):
+    from datetime import date as date_cls
+
+    image = request.FILES.get("image")
+    if image_required and not image:
+        return None, Response(
+            {"detail": "領収書の画像を選択してください。"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if image:
+        content_type = (getattr(image, "content_type", "") or "").lower()
+        if content_type and not content_type.startswith("image/"):
+            return None, Response(
+                {"detail": "画像ファイルを選択してください。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    raw_date = request.data.get("purchased_on") or ""
+    if not isinstance(raw_date, str):
+        raw_date = str(raw_date)
+    try:
+        purchased_on = date_cls.fromisoformat(raw_date.strip())
+    except (TypeError, ValueError):
+        return None, Response(
+            {"detail": "購入日を入力してください。"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    title = request.data.get("title") or ""
+    if not isinstance(title, str):
+        title = str(title)
+    title = title.strip()
+    if len(title) > 200:
+        return None, Response(
+            {"detail": "タイトルは200文字以内にしてください。"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    description = request.data.get("description") or ""
+    if not isinstance(description, str):
+        description = str(description)
+    description = description.strip()
+
+    raw_amount = request.data.get("amount")
+    amount = None
+    if raw_amount not in (None, ""):
+        try:
+            amount = int(str(raw_amount).strip())
+        except (TypeError, ValueError):
+            amount = -1
+        if amount < 0:
+            return None, Response(
+                {"detail": "金額は0以上の整数で入力してください。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    return {
+        "image": image,
+        "purchased_on": purchased_on,
+        "title": title,
+        "description": description,
+        "amount": amount,
+    }, None
+
+
+def _apply_expense_fields(receipt, fields):
+    from django.core.exceptions import ValidationError as DjangoValidationError
+
+    image = fields["image"]
+    old_name = ""
+    if receipt.pk and receipt.image:
+        old_name = receipt.image.name or ""
+    if image and hasattr(image, "seek"):
+        image.seek(0)
+    receipt.purchased_on = fields["purchased_on"]
+    receipt.title = fields["title"]
+    receipt.description = fields["description"]
+    receipt.amount = fields["amount"]
+    if image:
+        receipt.image = image
+        try:
+            receipt.full_clean()
+        except DjangoValidationError:
+            return Response(
+                {"detail": "この画像は保存できません。JPEGまたはPNGを選んでください。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if hasattr(image, "seek"):
+            image.seek(0)
+    receipt.save()
+    if image and old_name and old_name != receipt.image.name:
+        try:
+            receipt.image.storage.delete(old_name)
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "Failed to delete replaced expense image %s",
+                old_name,
+            )
+    return None
+
+
+def _expense_months(club):
+    from .serializers import ExpenseReceiptSerializer
+
+    months = []
+    current = None
+    for receipt in club.expense_receipts.all():
+        year = receipt.purchased_on.year
+        month = receipt.purchased_on.month
+        if current is None or current["year"] != year or current["month"] != month:
+            current = {
+                "year": year,
+                "month": month,
+                "total_yen": 0,
+                "receipt_count": 0,
+                "receipts": [],
+            }
+            months.append(current)
+        current["receipt_count"] += 1
+        if receipt.amount is not None:
+            current["total_yen"] += receipt.amount
+        current["receipts"].append(
+            ExpenseReceiptSerializer(receipt).data
+        )
+    return months
+
+
 class ClubViewSet(viewsets.ModelViewSet):
     serializer_class = ClubSerializer
     queryset = Club.objects.all()
@@ -4005,6 +4141,73 @@ class ClubViewSet(viewsets.ModelViewSet):
                 "reservations": month["reservations"],
             })
         return Response({"entries": entries})
+
+    @action(
+        detail=False,
+        methods=["get", "post"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/expenses",
+    )
+    def expenses(self, request, subdomain=None):
+        from .serializers import ExpenseReceiptSerializer
+
+        club, error = _owner_club(request, subdomain)
+        if error:
+            return error
+
+        if request.method == "GET":
+            return Response({"months": _expense_months(club)})
+
+        fields, error = _parse_expense_fields(request, image_required=True)
+        if error:
+            return error
+        receipt = ExpenseReceipt(club=club)
+        error = _apply_expense_fields(receipt, fields)
+        if error:
+            return error
+        return Response(
+            ExpenseReceiptSerializer(receipt, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(
+        detail=False,
+        methods=["patch", "delete"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/expenses/(?P<receipt_id>\d+)",
+    )
+    def expense_record(self, request, subdomain=None, receipt_id=None):
+        from .serializers import ExpenseReceiptSerializer
+
+        club, error = _owner_club(request, subdomain)
+        if error:
+            return error
+        receipt = ExpenseReceipt.objects.filter(club=club, id=receipt_id).first()
+        if not receipt:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        if request.method == "DELETE":
+            image = receipt.image
+            stored_name = image.name if image else ""
+            storage = image.storage if image else None
+            receipt.delete()
+            if storage and stored_name:
+                try:
+                    storage.delete(stored_name)
+                except Exception:
+                    logging.getLogger(__name__).exception(
+                        "Failed to delete expense image %s",
+                        stored_name,
+                    )
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        fields, error = _parse_expense_fields(request, image_required=False)
+        if error:
+            return error
+        error = _apply_expense_fields(receipt, fields)
+        if error:
+            return error
+        return Response(
+            ExpenseReceiptSerializer(receipt, context={"request": request}).data
+        )
 
     @action(detail=True, methods=["post"], url_path="pricing_preview")
     def pricing_preview(self, request, pk=None):

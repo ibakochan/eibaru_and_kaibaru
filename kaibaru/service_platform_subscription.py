@@ -26,6 +26,7 @@ from .models import (
 )
 from .tasks_emails import (
     send_club_deleted_emails,
+    send_platform_cycle_paid_email,
     send_subscription_activated_emails,
 )
 
@@ -1132,7 +1133,9 @@ def _invoice_paid_locked(platform_sub, invoice):
         club.save(update_fields=["last_paid_invoice_id"])
         if remaining is None and not link.pending_removal:
             remaining = club
-    if remaining:
+    if invoice.get("billing_reason") == "subscription_cycle":
+        send_platform_cycle_paid_email.delay(platform_sub.id, invoice["id"])
+    elif remaining:
         send_subscription_activated_emails.delay(remaining.id, invoice["id"])
 
 

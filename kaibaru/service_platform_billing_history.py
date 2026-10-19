@@ -482,6 +482,86 @@ def platform_billing_history_for_owner(user, *, include_stripe_processing=False)
     return {"entries": entries}
 
 
+def _yen(amount):
+    try:
+        value = int(amount or 0)
+    except (TypeError, ValueError):
+        value = 0
+    return f"¥{value:,}"
+
+
+def _month_label(year, month):
+    if not year or not month:
+        return ""
+    return f"{year}年{month}月"
+
+
+def format_platform_cycle_receipt(entry):
+    """Owner email body for a paid platform cycle. Invoice lines only.
+
+    The Kaibaru 1% on member Stripe charges is not part of this invoice,
+    so it is left out.
+    """
+    pay_month = _month_label(entry.get("payment_year"), entry.get("payment_month"))
+    fee_month = _month_label(entry.get("fee_source_year"), entry.get("fee_source_month"))
+    paid_on = entry.get("paid_on") or ""
+    lines = []
+
+    lines.append(f"{pay_month}の請求" if pay_month else "ご請求")
+    total_line = f"合計 {_yen(entry.get('total_yen'))}"
+    if paid_on:
+        total_line += f" · 支払日 {paid_on}"
+    lines.append(total_line)
+    lines.append("")
+    lines.append("Kaibaru プラットフォーム利用料")
+    pay_line = f"お支払い月：{pay_month}" if pay_month else "お支払い月："
+    if paid_on:
+        pay_line += f"（支払日 {paid_on}）"
+    lines.append(pay_line)
+    if entry.get("invoice_number"):
+        lines.append(f"請求書番号：{entry['invoice_number']}")
+    lines.append("")
+
+    lines.append("クラブ基本料")
+    lines.append(_yen(entry.get("club_base_yen")))
+    if (entry.get("extra_clubs") or 0) > 0:
+        lines.append("")
+        lines.append(f"追加クラブ × {entry['extra_clubs']}")
+        lines.append(_yen(entry.get("club_extra_yen")))
+    if (entry.get("full_price_members") or 0) > 0:
+        lines.append("")
+        lines.append(f"会員（〜100名）× {entry['full_price_members']}")
+        lines.append(_yen(entry.get("member_full_yen")))
+    if (entry.get("reduced_members") or 0) > 0:
+        lines.append("")
+        lines.append(f"会員（超過）× {entry['reduced_members']}")
+        lines.append(_yen(entry.get("member_reduced_yen")))
+    if (entry.get("cash_fee_yen") or 0) > 0 or (entry.get("cash_invoice_base_yen") or 0) > 0:
+        lines.append("")
+        lines.append(f"現金・振込手数料1%（{fee_month}分の請求に対する手数料）")
+        lines.append(_yen(entry.get("cash_fee_yen")))
+    if (entry.get("other_yen") or 0) > 0:
+        lines.append("")
+        lines.append("その他")
+        lines.append(_yen(entry.get("other_yen")))
+
+    lines.append("")
+    lines.append("Kaibaru請求 合計")
+    lines.append(_yen(entry.get("total_yen")))
+    lines.append("")
+    note = (
+        "※ 現金・振込の1%は、プラットフォーム請求月の前月"
+        f"（{fee_month}）に発生した現金・振込請求が対象です。"
+    )
+    if (entry.get("cash_invoice_base_yen") or 0) > 0:
+        note += f" 対象合計 {_yen(entry.get('cash_invoice_base_yen'))}"
+        if entry.get("cash_invoice_count"):
+            note += f"（{entry['cash_invoice_count']}件）"
+        note += "。"
+    lines.append(note)
+    return "\n".join(lines)
+
+
 def platform_billing_history_entry_for_owner(
     user,
     stripe_invoice_id,
