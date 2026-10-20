@@ -37,6 +37,30 @@ def load_page_content(layout):
     return json.loads(json.dumps(_load(layout)))
 
 
+def section_ids_of_type(page_content, section_type):
+    """Ids of sections of one type, from a page_content dict or JSON string."""
+    data = page_content
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except (TypeError, ValueError):
+            return []
+    if not isinstance(data, dict):
+        return []
+    sections = data.get("sections") or {}
+    if not isinstance(sections, dict):
+        return []
+    ids = []
+    for section in sections.values():
+        if (
+            isinstance(section, dict)
+            and section.get("type") == section_type
+            and section.get("id") is not None
+        ):
+            ids.append(section["id"])
+    return ids
+
+
 def page_content_for_club(layout):
     """Return page_content in the format stored on Club.page_content.
 

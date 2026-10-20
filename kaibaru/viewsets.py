@@ -26,7 +26,12 @@ from django.db.models import Prefetch
 from django.db.models.functions import Coalesce
 from django.core.exceptions import ValidationError
 from .user_errors import format_validation_error
-from .layout_templates import is_template_key, page_content_for_club
+from .layout_templates import (
+    is_template_key,
+    load_page_content,
+    page_content_for_club,
+    section_ids_of_type,
+)
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
 from .tasks import delete_membership_plan_task
@@ -4296,6 +4301,52 @@ class ClubViewSet(viewsets.ModelViewSet):
 
         serializer = self.get_serializer(club, context={"request": request})
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="apply-template")
+    def apply_template(self, request, pk=None):
+        club = self.get_object()
+        if not request.user.is_authenticated:
+            return Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
+        is_owner = club.owner_id == request.user.id
+        is_manager = Member.objects.filter(
+            club=club, user=request.user, is_manager=True
+        ).exists()
+        if not is_owner and not is_manager:
+            return Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
+
+        template = request.data.get("template") or ""
+        if not is_template_key(template):
+            return Response(
+                {"error": "選択されたテンプレートは使用できません。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        new_page = load_page_content(template)
+        new_schedule_ids = section_ids_of_type(new_page, "schedule")
+        old_schedule_ids = section_ids_of_type(club.page_content, "schedule")
+
+        from django.db import transaction
+
+        with transaction.atomic():
+            club.layout = template
+            club.page_content = page_content_for_club(template)
+            update_fields = ["layout", "page_content"]
+            color = request.data.get("default_background_color")
+            if isinstance(color, str) and re.fullmatch(r"#[0-9A-Fa-f]{6}", color.strip()):
+                club.default_background_color = color.strip().lower()
+                update_fields.append("default_background_color")
+            club.save(update_fields=update_fields)
+            if new_schedule_ids:
+                lesson_query = Q(section_id__isnull=True)
+                if old_schedule_ids:
+                    lesson_query |= Q(section_id__in=old_schedule_ids)
+                Lesson.objects.filter(club=club).filter(lesson_query).update(
+                    section_id=new_schedule_ids[0]
+                )
+
+        club = self.get_queryset().get(pk=club.pk)
+        serializer = self.get_serializer(club, context={"request": request})
+        return Response(serializer.data)
 
     @action(detail=True, methods=["patch"], url_path="update_section_layout")
     def update_section_layout(self, request, pk=None):

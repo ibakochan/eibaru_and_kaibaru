@@ -29,7 +29,7 @@
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/cram/slide-study.jpg",
           "heading": "「わかる」から「できる」へ",
           "subheading": "一人ひとりに寄り添う学習塾。「ホーム」の右にある鉛筆マークを押すと、写真も文章も変えられます（写真の例：教室で生徒が集中して勉強している写真）",
-          "buttonText": "体験予約はこちら",
+          "buttonText": "授業日程から体験を予約",
           "buttonLink": "",
           "buttonSectionId": 7,
           "buttonBoxId": null,
@@ -40,9 +40,9 @@
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/cram/slide-teaching.jpg",
           "heading": "志望校合格をサポート",
           "subheading": "目標に合わせた学習計画（「ホーム」右の鉛筆マークで写真と文章を変更。写真の例：講師が生徒に説明している写真）",
-          "buttonText": "スケジュールを見る",
+          "buttonText": "コースを見る",
           "buttonLink": "",
-          "buttonSectionId": 7,
+          "buttonSectionId": 4,
           "buttonBoxId": null,
           "textAlign": "center"
         },
@@ -325,7 +325,7 @@
             "content": [
               {
                 "type": "button",
-                "label": "体験予約はこちら",
+                "label": "授業日程から体験を予約",
                 "align": "center",
                 "sectionId": 7,
                 "boxId": null,
@@ -1217,8 +1217,8 @@
     "9": {
       "id": 9,
       "order": 9,
-      "title": "講師",
-      "slug": "講師",
+      "title": "先生",
+      "slug": "先生",
       "type": "teacher",
       "icon": "teacher"
     },

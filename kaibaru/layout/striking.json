@@ -29,7 +29,7 @@
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/striking/slide-heavy-bag.jpg",
           "heading": "拳で、自分を超えろ。",
           "subheading": "初心者からプロ志望まで、本気の指導。「ホーム」の右にある鉛筆マークを押すと、写真も文章も変えられます（写真の例：サンドバッグを打つ選手の迫力ある写真）",
-          "buttonText": "体験予約はこちら",
+          "buttonText": "スケジュールから体験を予約",
           "buttonLink": "",
           "buttonSectionId": 6,
           "buttonBoxId": null,
@@ -40,9 +40,9 @@
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/striking/slide-mitts.jpg",
           "heading": "未経験からのスタート",
           "subheading": "ミット打ちからはじめる体験レッスン（「ホーム」右の鉛筆マークで写真と文章を変更。写真の例：トレーナーとミット打ちをしている写真）",
-          "buttonText": "スケジュールを見る",
+          "buttonText": "クラスを見る",
           "buttonLink": "",
-          "buttonSectionId": 6,
+          "buttonSectionId": 4,
           "buttonBoxId": null,
           "textAlign": "center"
         },
@@ -325,7 +325,7 @@
             "content": [
               {
                 "type": "button",
-                "label": "体験予約はこちら",
+                "label": "スケジュールから体験を予約",
                 "align": "center",
                 "sectionId": 6,
                 "boxId": null,

@@ -29,7 +29,7 @@
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/sports/slide-practice.jpg",
           "heading": "スポーツを、もっと楽しく",
           "subheading": "子どもから大人まで参加できるクラブ。「ホーム」の右にある鉛筆マークを押すと、写真も文章も変えられます（写真の例：練習・試合をしているメンバーの写真）",
-          "buttonText": "体験予約はこちら",
+          "buttonText": "練習日程から体験を予約",
           "buttonLink": "",
           "buttonSectionId": 7,
           "buttonBoxId": null,
@@ -40,9 +40,9 @@
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/sports/slide-team.jpg",
           "heading": "チームで成長する",
           "subheading": "技術も、心も、一緒に育てる（「ホーム」右の鉛筆マークで写真と文章を変更。写真の例：チームで声を掛け合っている写真）",
-          "buttonText": "スケジュールを見る",
+          "buttonText": "活動を見る",
           "buttonLink": "",
-          "buttonSectionId": 7,
+          "buttonSectionId": 4,
           "buttonBoxId": null,
           "textAlign": "center"
         },
@@ -325,7 +325,7 @@
             "content": [
               {
                 "type": "button",
-                "label": "体験予約はこちら",
+                "label": "練習日程から体験を予約",
                 "align": "center",
                 "sectionId": 7,
                 "boxId": null,

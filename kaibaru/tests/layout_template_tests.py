@@ -1,5 +1,6 @@
 """Tests for the ready-made site templates in kaibaru/layout/*.json."""
 import json
+from datetime import time
 
 from django.db.models.signals import post_save
 from django.test import SimpleTestCase, TestCase
@@ -13,7 +14,7 @@ from kaibaru.layout_templates import (
     page_content_for_club,
     template_path,
 )
-from kaibaru.models import Club
+from kaibaru.models import Club, Lesson
 from kaibaru.signals import club_created_signal
 
 EXAMPLE_PIC_PREFIX = "https://storage.googleapis.com/sitepicsforkaibaru/layouts/"
@@ -177,6 +178,59 @@ class CreateTrialTemplateTests(TestCase):
         club = Club.objects.get(subdomain="tplblank")
         self.assertEqual(club.layout, "default")
         self.assertIsNone(club.page_content)
+
+    def test_apply_template_replaces_page_and_keeps_lessons(self):
+        created = self.client.post(
+            self.URL, {"subdomain": "tplswap", "template": "yoga"}, format="json"
+        )
+        self.assertEqual(created.status_code, 201, created.content)
+        club = Club.objects.get(subdomain="tplswap")
+        lesson = Lesson.objects.create(
+            club=club,
+            section_id=6,
+            title="朝のクラス",
+            weekday=0,
+            start_time=time(9, 0),
+            end_time=time(10, 0),
+        )
+        response = self.client.post(
+            f"/api/clubs/{club.id}/apply-template/",
+            {"template": "swimming", "default_background_color": "#f2fbfc"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        club.refresh_from_db()
+        lesson.refresh_from_db()
+        self.assertEqual(club.layout, "swimming")
+        self.assertEqual(club.default_background_color, "#f2fbfc")
+        self.assertEqual(json.loads(club.page_content), load_page_content("swimming"))
+        self.assertEqual(lesson.section_id, 7)
+        self.assertEqual(lesson.title, "朝のクラス")
+
+    def test_apply_template_rejects_unknown_and_strangers(self):
+        created = self.client.post(
+            self.URL, {"subdomain": "tplkeep", "template": "yoga"}, format="json"
+        )
+        club = Club.objects.get(subdomain="tplkeep")
+        bad = self.client.post(
+            f"/api/clubs/{club.id}/apply-template/",
+            {"template": "nope"},
+            format="json",
+        )
+        self.assertEqual(bad.status_code, 400)
+        self.assertEqual(Club.objects.get(pk=club.pk).layout, "yoga")
+
+        stranger = CustomUser.objects.create_user(
+            username="tplother", email="other@example.com", password="pass123"
+        )
+        self.client.force_authenticate(stranger)
+        denied = self.client.post(
+            f"/api/clubs/{club.id}/apply-template/",
+            {"template": "dance"},
+            format="json",
+        )
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(Club.objects.get(pk=club.pk).layout, "yoga")
 
     def test_unknown_template_rejected(self):
         response = self.client.post(

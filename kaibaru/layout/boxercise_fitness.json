@@ -29,7 +29,7 @@
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/fitness/slide-class.jpg",
           "heading": "楽しく汗をかこう！",
           "subheading": "ボクササイズ・フィットネスクラブ。「ホーム」の右にある鉛筆マークを押すと、写真も文章も変えられます（写真の例：音楽に合わせて楽しく運動している会員の写真）",
-          "buttonText": "体験予約はこちら",
+          "buttonText": "スケジュールから体験を予約",
           "buttonLink": "",
           "buttonSectionId": 6,
           "buttonBoxId": null,
@@ -40,9 +40,9 @@
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/fitness/slide-group.jpg",
           "heading": "運動初心者も大歓迎",
           "subheading": "グループレッスンで続けやすい（「ホーム」右の鉛筆マークで写真と文章を変更。写真の例：グループレッスンの様子（インストラクター付き））",
-          "buttonText": "スケジュールを見る",
+          "buttonText": "プログラムを見る",
           "buttonLink": "",
-          "buttonSectionId": 6,
+          "buttonSectionId": 4,
           "buttonBoxId": null,
           "textAlign": "center"
         },
@@ -325,7 +325,7 @@
             "content": [
               {
                 "type": "button",
-                "label": "体験予約はこちら",
+                "label": "スケジュールから体験を予約",
                 "align": "center",
                 "sectionId": 6,
                 "boxId": null,

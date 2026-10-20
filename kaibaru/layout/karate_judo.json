@@ -29,7 +29,7 @@
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/karate/slide-practice.jpg",
           "heading": "心技体を磨く",
           "subheading": "伝統を守り、未来を育てる道場。「ホーム」の右にある鉛筆マークを押すと、写真も文章も変えられます（写真の例：道場で稽古をしている会員の写真）",
-          "buttonText": "体験予約はこちら",
+          "buttonText": "稽古日程から体験を予約",
           "buttonLink": "",
           "buttonSectionId": 6,
           "buttonBoxId": null,
@@ -40,9 +40,9 @@
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/karate/slide-bow.jpg",
           "heading": "子どもから大人まで",
           "subheading": "礼儀と自信を育てる稽古（「ホーム」右の鉛筆マークで写真と文章を変更。写真の例：子どもたちが整列して礼をしている写真）",
-          "buttonText": "スケジュールを見る",
+          "buttonText": "稽古を見る",
           "buttonLink": "",
-          "buttonSectionId": 6,
+          "buttonSectionId": 4,
           "buttonBoxId": null,
           "textAlign": "center"
         },
@@ -325,7 +325,7 @@
             "content": [
               {
                 "type": "button",
-                "label": "体験予約はこちら",
+                "label": "稽古日程から体験を予約",
                 "align": "center",
                 "sectionId": 6,
                 "boxId": null,
@@ -1044,8 +1044,8 @@
     "8": {
       "id": 8,
       "order": 8,
-      "title": "師範・指導員",
-      "slug": "師範指導員",
+      "title": "先生",
+      "slug": "先生",
       "type": "teacher",
       "icon": "teacher"
     },

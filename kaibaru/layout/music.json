@@ -29,7 +29,7 @@
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/music/slide-playing.jpg",
           "heading": "音楽を、もっと楽しく",
           "subheading": "ピアノ・ギター・ボーカル・ドラム。「ホーム」の右にある鉛筆マークを押すと、写真も文章も変えられます（写真の例：楽器を演奏している生徒の写真）",
-          "buttonText": "体験予約はこちら",
+          "buttonText": "レッスン日程から体験を予約",
           "buttonLink": "",
           "buttonSectionId": 6,
           "buttonBoxId": null,
@@ -40,9 +40,9 @@
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/music/slide-lesson.jpg",
           "heading": "お子様から大人まで",
           "subheading": "あなたのペースで上達できます（「ホーム」右の鉛筆マークで写真と文章を変更。写真の例：先生が生徒に教えている写真）",
-          "buttonText": "スケジュールを見る",
+          "buttonText": "レッスンを見る",
           "buttonLink": "",
-          "buttonSectionId": 6,
+          "buttonSectionId": 4,
           "buttonBoxId": null,
           "textAlign": "center"
         },
@@ -325,7 +325,7 @@
             "content": [
               {
                 "type": "button",
-                "label": "体験予約はこちら",
+                "label": "レッスン日程から体験を予約",
                 "align": "center",
                 "sectionId": 6,
                 "boxId": null,
@@ -1044,8 +1044,8 @@
     "8": {
       "id": 8,
       "order": 8,
-      "title": "講師",
-      "slug": "講師",
+      "title": "先生",
+      "slug": "先生",
       "type": "teacher",
       "icon": "teacher"
     },

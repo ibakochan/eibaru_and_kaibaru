@@ -29,7 +29,7 @@
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/gym/slide-machines.jpg",
           "heading": "理想のカラダを、ここから。",
           "subheading": "マシン・フリーウェイトが充実したジム。「ホーム」の右にある鉛筆マークを押すと、写真も文章も変えられます（写真の例：トレーニングマシンが並ぶジム内の写真）",
-          "buttonText": "体験予約はこちら",
+          "buttonText": "スケジュールから体験を予約",
           "buttonLink": "",
           "buttonSectionId": 7,
           "buttonBoxId": null,
@@ -40,9 +40,9 @@
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/gym/slide-orientation.jpg",
           "heading": "初めてでも安心",
           "subheading": "スタッフがマシンの使い方をご案内（「ホーム」右の鉛筆マークで写真と文章を変更。写真の例：スタッフが利用者にマシンの説明をしている写真）",
-          "buttonText": "スケジュールを見る",
+          "buttonText": "ジムを見る",
           "buttonLink": "",
-          "buttonSectionId": 7,
+          "buttonSectionId": 3,
           "buttonBoxId": null,
           "textAlign": "center"
         },
@@ -325,7 +325,7 @@
             "content": [
               {
                 "type": "button",
-                "label": "体験予約はこちら",
+                "label": "スケジュールから体験を予約",
                 "align": "center",
                 "sectionId": 7,
                 "boxId": null,
@@ -1469,8 +1469,8 @@
     "9": {
       "id": 9,
       "order": 9,
-      "title": "スタッフ",
-      "slug": "スタッフ",
+      "title": "トレーナー",
+      "slug": "トレーナー",
       "type": "teacher",
       "icon": "teacher"
     },

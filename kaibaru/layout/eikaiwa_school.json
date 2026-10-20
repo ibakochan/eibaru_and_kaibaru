@@ -29,7 +29,7 @@
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/eikaiwa/slide-conversation.jpg",
           "heading": "英語で、世界とつながる",
           "subheading": "初心者からビジネスまで英会話レッスン。「ホーム」の右にある鉛筆マークを押すと、写真も文章も変えられます（写真の例：講師と生徒が楽しく英会話をしている写真）",
-          "buttonText": "体験予約はこちら",
+          "buttonText": "レッスン日程から体験を予約",
           "buttonLink": "",
           "buttonSectionId": 7,
           "buttonBoxId": null,
@@ -40,9 +40,9 @@
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/eikaiwa/slide-small-group.jpg",
           "heading": "楽しく話して身につく",
           "subheading": "少人数・マンツーマンで会話中心（「ホーム」右の鉛筆マークで写真と文章を変更。写真の例：少人数のレッスン風景）",
-          "buttonText": "スケジュールを見る",
+          "buttonText": "コースを見る",
           "buttonLink": "",
-          "buttonSectionId": 7,
+          "buttonSectionId": 4,
           "buttonBoxId": null,
           "textAlign": "center"
         },
@@ -325,7 +325,7 @@
             "content": [
               {
                 "type": "button",
-                "label": "体験予約はこちら",
+                "label": "レッスン日程から体験を予約",
                 "align": "center",
                 "sectionId": 7,
                 "boxId": null,
@@ -1469,8 +1469,8 @@
     "9": {
       "id": 9,
       "order": 9,
-      "title": "講師",
-      "slug": "講師",
+      "title": "先生",
+      "slug": "先生",
       "type": "teacher",
       "icon": "teacher"
     },

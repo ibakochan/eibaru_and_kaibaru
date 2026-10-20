@@ -29,7 +29,7 @@
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/default/slide-group.jpg",
           "heading": "〇〇クラブへようこそ",
           "subheading": "初めての方も、経験者の方も大歓迎です。「ホーム」の右にある鉛筆マークを押すと、写真も文章も変えられます（写真の例：クラブの雰囲気が伝わる集合写真や活動風景）",
-          "buttonText": "体験予約はこちら",
+          "buttonText": "スケジュールから体験を予約",
           "buttonLink": "",
           "buttonSectionId": 5,
           "buttonBoxId": null,
@@ -40,9 +40,9 @@
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/default/slide-members.jpg",
           "heading": "みんなで楽しく続ける",
           "subheading": "無理なく、自分のペースで（「ホーム」右の鉛筆マークで写真と文章を変更。写真の例：メンバーが楽しんでいる様子の写真）",
-          "buttonText": "スケジュールを見る",
+          "buttonText": "特徴を見る",
           "buttonLink": "",
-          "buttonSectionId": 5,
+          "buttonSectionId": 4,
           "buttonBoxId": null,
           "textAlign": "center"
         },
@@ -325,7 +325,7 @@
             "content": [
               {
                 "type": "button",
-                "label": "体験予約はこちら",
+                "label": "スケジュールから体験を予約",
                 "align": "center",
                 "sectionId": 5,
                 "boxId": null,
@@ -529,8 +529,8 @@
     "7": {
       "id": 7,
       "order": 7,
-      "title": "講師",
-      "slug": "講師",
+      "title": "指導者",
+      "slug": "指導者",
       "type": "teacher",
       "icon": "teacher"
     },
@@ -711,7 +711,7 @@
             "content": [
               {
                 "type": "button",
-                "label": "体験予約はこちら",
+                "label": "スケジュールから体験を予約",
                 "align": "center",
                 "sectionId": 5,
                 "boxId": null,

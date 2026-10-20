@@ -29,7 +29,7 @@
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/yoga/slide-class.jpg",
           "heading": "心と体を、ゆっくりほどく",
           "subheading": "呼吸とともに、自分に戻る時間を。「ホーム」の右にある鉛筆マークを押すと、写真も文章も変えられます（写真の例：明るく穏やかなスタジオでヨガをしている写真）",
-          "buttonText": "体験予約はこちら",
+          "buttonText": "スケジュールから体験を予約",
           "buttonLink": "",
           "buttonSectionId": 6,
           "buttonBoxId": null,
@@ -40,9 +40,9 @@
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/yoga/slide-beginner.jpg",
           "heading": "初めてのヨガも安心",
           "subheading": "少人数制で一人ひとりに丁寧にご案内します（「ホーム」右の鉛筆マークで写真と文章を変更。写真の例：初心者クラスでインストラクターが指導している写真）",
-          "buttonText": "スケジュールを見る",
+          "buttonText": "クラスを見る",
           "buttonLink": "",
-          "buttonSectionId": 6,
+          "buttonSectionId": 4,
           "buttonBoxId": null,
           "textAlign": "center"
         },
@@ -325,7 +325,7 @@
             "content": [
               {
                 "type": "button",
-                "label": "体験予約はこちら",
+                "label": "スケジュールから体験を予約",
                 "align": "center",
                 "sectionId": 6,
                 "boxId": null,
