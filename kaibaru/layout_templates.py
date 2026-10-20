@@ -61,6 +61,90 @@ def section_ids_of_type(page_content, section_type):
     return ids
 
 
+def _as_page(page_content):
+    data = page_content
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except (TypeError, ValueError):
+            return None
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
+def merge_carried_sections(template_page, old_page_content):
+    """Keep event and past sections when a template replaces the page.
+
+    Those sections are how saved events stay on the page. Their ids are kept
+    when the new template does not already use them. A clash returns a map of
+    old id to new id so the event rows can be pointed at the new section.
+    """
+    page = json.loads(json.dumps(template_page))
+    sections = page.setdefault("sections", {})
+    old = _as_page(old_page_content) or {}
+    old_sections = old.get("sections") or {}
+    if not isinstance(old_sections, dict):
+        old_sections = {}
+
+    carried = [
+        section
+        for section in old_sections.values()
+        if isinstance(section, dict) and section.get("type") in {"event", "past"}
+    ]
+    carried.sort(key=lambda section: (section.get("order") or 0, section.get("id") or 0))
+
+    used_slugs = set()
+    used_ids = set()
+    orders = []
+    for section in sections.values():
+        if not isinstance(section, dict):
+            continue
+        if section.get("slug"):
+            used_slugs.add(section["slug"])
+        used_slugs.update(section.get("previous_slugs") or [])
+        if section.get("id") is not None:
+            used_ids.add(int(section["id"]))
+        orders.append(int(section.get("order") or 0))
+
+    next_order = (max(orders) if orders else 0) + 1
+    highest_id = max(used_ids or [0])
+    id_remap = {}
+
+    for section in carried:
+        copied = json.loads(json.dumps(section))
+        old_id = int(copied["id"])
+        new_id = old_id
+        if new_id in used_ids:
+            new_id = highest_id + 1
+            id_remap[old_id] = new_id
+        highest_id = max(highest_id, new_id)
+        used_ids.add(new_id)
+        copied["id"] = new_id
+        copied["order"] = next_order
+        next_order += 1
+
+        slug = copied.get("slug") or ""
+        if slug and slug in used_slugs:
+            previous = list(copied.get("previous_slugs") or [])
+            if slug not in previous:
+                previous.append(slug)
+            base = slug
+            suffix = 2
+            while f"{base}-{suffix}" in used_slugs:
+                suffix += 1
+            copied["slug"] = f"{base}-{suffix}"
+            copied["previous_slugs"] = previous
+        if copied.get("slug"):
+            used_slugs.add(copied["slug"])
+        used_slugs.update(copied.get("previous_slugs") or [])
+
+        sections[str(new_id)] = copied
+
+    page["next_section_id"] = max(int(page.get("next_section_id") or 1), highest_id + 1)
+    return page, id_remap
+
+
 def page_content_for_club(layout):
     """Return page_content in the format stored on Club.page_content.
 

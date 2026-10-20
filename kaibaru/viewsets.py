@@ -29,6 +29,7 @@ from .user_errors import format_validation_error
 from .layout_templates import (
     is_template_key,
     load_page_content,
+    merge_carried_sections,
     page_content_for_club,
     section_ids_of_type,
 )
@@ -4321,21 +4322,29 @@ class ClubViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        new_page = load_page_content(template)
-        new_schedule_ids = section_ids_of_type(new_page, "schedule")
+        template_page = load_page_content(template)
+        new_schedule_ids = section_ids_of_type(template_page, "schedule")
         old_schedule_ids = section_ids_of_type(club.page_content, "schedule")
+        merged_page, event_section_remap = merge_carried_sections(
+            template_page, club.page_content
+        )
 
         from django.db import transaction
 
         with transaction.atomic():
             club.layout = template
-            club.page_content = page_content_for_club(template)
+            club.page_content = json.dumps(merged_page, ensure_ascii=False)
             update_fields = ["layout", "page_content"]
             color = request.data.get("default_background_color")
             if isinstance(color, str) and re.fullmatch(r"#[0-9A-Fa-f]{6}", color.strip()):
                 club.default_background_color = color.strip().lower()
                 update_fields.append("default_background_color")
             club.save(update_fields=update_fields)
+            for old_id, new_id in event_section_remap.items():
+                Event.objects.filter(club=club, section_id=old_id).update(section_id=new_id)
+                Event.objects.filter(club=club, live_section_id=old_id).update(
+                    live_section_id=new_id
+                )
             if new_schedule_ids:
                 lesson_query = Q(section_id__isnull=True)
                 if old_schedule_ids:

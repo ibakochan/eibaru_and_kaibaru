@@ -11,6 +11,7 @@ from kaibaru.layout_templates import (
     LAYOUT_DIR,
     TEMPLATE_KEYS,
     load_page_content,
+    merge_carried_sections,
     page_content_for_club,
     template_path,
 )
@@ -142,6 +143,64 @@ class LayoutTemplateFileTests(SimpleTestCase):
     def test_unknown_layout_rejected(self):
         with self.assertRaises(ValueError):
             load_page_content("nope")
+
+
+class MergeCarriedSectionsTests(SimpleTestCase):
+    def test_event_and_past_sections_keep_their_ids(self):
+        template = {
+            "version": 1,
+            "next_section_id": 3,
+            "sections": {
+                "1": {"id": 1, "order": 1, "type": "header", "slug": "header", "title": "ヘッダー"},
+            },
+        }
+        old = {
+            "sections": {
+                "9": {
+                    "id": 9,
+                    "order": 4,
+                    "type": "event",
+                    "slug": "大会",
+                    "title": "春の大会",
+                },
+                "10": {
+                    "id": 10,
+                    "order": 5,
+                    "type": "past",
+                    "slug": "過去の試合",
+                    "title": "過去の試合",
+                    "bucket": "competition",
+                },
+            }
+        }
+        page, remap = merge_carried_sections(template, json.dumps(old))
+        self.assertEqual(remap, {})
+        self.assertEqual(page["sections"]["1"]["type"], "header")
+        self.assertEqual(page["sections"]["9"]["title"], "春の大会")
+        self.assertEqual(page["sections"]["9"]["id"], 9)
+        self.assertEqual(page["sections"]["10"]["bucket"], "competition")
+        self.assertGreater(page["sections"]["9"]["order"], page["sections"]["1"]["order"])
+        self.assertEqual(page["next_section_id"], 11)
+
+    def test_clashing_event_id_is_moved(self):
+        template = {
+            "version": 1,
+            "next_section_id": 15,
+            "sections": {
+                "14": {"id": 14, "order": 14, "type": "member", "slug": "member", "title": "会員"},
+            },
+        }
+        old = {
+            "sections": {
+                "14": {"id": 14, "order": 8, "type": "event", "slug": "大会", "title": "大会"},
+            }
+        }
+        page, remap = merge_carried_sections(template, old)
+        self.assertEqual(remap, {14: 15})
+        self.assertEqual(page["sections"]["14"]["type"], "member")
+        self.assertEqual(page["sections"]["15"]["type"], "event")
+        self.assertEqual(page["sections"]["15"]["id"], 15)
+        self.assertEqual(page["next_section_id"], 16)
 
 
 class CreateTrialTemplateTests(TestCase):
