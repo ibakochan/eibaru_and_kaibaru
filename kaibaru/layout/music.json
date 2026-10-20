@@ -28,7 +28,7 @@
           "id": "3a8988da-85bd-564a-bd60-cbe14be234c4",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/music/slide-playing.jpg",
           "heading": "音楽を、もっと楽しく",
-          "subheading": "ピアノ・ギター・ボーカル・ドラム。写真や文章を変えるには、上のメニューで「ホーム」を押し、右に出る鉛筆のマークを押してください（背景写真の例：楽器を演奏している生徒の写真）",
+          "subheading": "ピアノ・ギター・ボーカル・ドラム。「ホーム」の右にある鉛筆マークを押すと、写真も文章も変えられます（写真の例：楽器を演奏している生徒の写真）",
           "buttonText": "体験予約はこちら",
           "buttonLink": "",
           "buttonSectionId": 6,
@@ -39,7 +39,7 @@
           "id": "b093909f-25a6-5581-a7e1-e3cfa69a6dd0",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/music/slide-lesson.jpg",
           "heading": "お子様から大人まで",
-          "subheading": "あなたのペースで上達できます（背景写真の例：先生が生徒に教えている写真。変え方は「ホーム」右の鉛筆マーク）",
+          "subheading": "あなたのペースで上達できます（「ホーム」右の鉛筆マークで写真と文章を変更。写真の例：先生が生徒に教えている写真）",
           "buttonText": "スケジュールを見る",
           "buttonLink": "",
           "buttonSectionId": 6,
@@ -50,7 +50,7 @@
           "id": "fe851d9c-a977-5987-b7b3-fbd0a0b9b69a",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/music/slide-recital.jpg",
           "heading": "発表会で輝こう",
-          "subheading": "日頃の成果を披露するステージ（背景写真の例：発表会・ステージの写真。変え方は「ホーム」右の鉛筆マーク）",
+          "subheading": "日頃の成果を披露するステージ（「ホーム」右の鉛筆マークで写真と文章を変更。写真の例：発表会・ステージの写真）",
           "buttonText": "料金を見る",
           "buttonLink": "",
           "buttonSectionId": 7,
@@ -214,7 +214,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：レッスン室や楽器が写っている写真。左上の「レイアウト編集」（「セクション追加」のとなり）を押すと、この写真も周りの文章も変えられます。",
+                    "text": "▲ この写真を変更：レッスン室や楽器が写っている写真。左上の「レイアウト編集」を押し、この枠に写真をドラッグすると変わります。文章もそこで変えられます。",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -499,7 +499,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：ピアノを弾いている生徒の写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更（この枠に写真をドラッグ。文字もそこで変更）：ピアノを弾いている生徒の写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -656,7 +656,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：ギターを弾いている生徒の写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更（この枠に写真をドラッグ。文字もそこで変更）：ギターを弾いている生徒の写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -813,7 +813,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：ボーカルまたはドラムのレッスンの写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更（この枠に写真をドラッグ。文字もそこで変更）：ボーカルまたはドラムのレッスンの写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -1208,7 +1208,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：発表会のステージ写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更（この枠に写真をドラッグ。文字もそこで変更）：発表会のステージ写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -1335,7 +1335,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：出演者の集合写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更（この枠に写真をドラッグ。文字もそこで変更）：出演者の集合写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -1462,7 +1462,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：リハーサル・準備風景の写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更（この枠に写真をドラッグ。文字もそこで変更）：リハーサル・準備風景の写真",
                     "fontSize": 14,
                     "italic": true
                   }

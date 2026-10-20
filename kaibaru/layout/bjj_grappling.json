@@ -28,7 +28,7 @@
           "id": "a6c7034b-caba-5039-b8d3-871c4f0b4f2d",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/bjj/slide-practice.jpg",
           "heading": "柔よく剛を制す",
-          "subheading": "ブラジリアン柔術・グラップリング道場。写真や文章を変えるには、上のメニューで「ホーム」を押し、右に出る鉛筆のマークを押してください（背景写真の例：道場で柔術の練習をしている写真）",
+          "subheading": "ブラジリアン柔術・グラップリング道場。「ホーム」の右にある鉛筆マークを押すと、写真も文章も変えられます（写真の例：道場で柔術の練習をしている写真）",
           "buttonText": "体験予約はこちら",
           "buttonLink": "",
           "buttonSectionId": 6,
@@ -39,7 +39,7 @@
           "id": "2b0b79d7-c779-5352-9f7d-7d25535fa6f4",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/bjj/slide-drills.jpg",
           "heading": "未経験からでも始められる",
-          "subheading": "初心者クラスで基礎から学べます（背景写真の例：初心者クラスの様子（ドリル練習など）。変え方は「ホーム」右の鉛筆マーク）",
+          "subheading": "初心者クラスで基礎から学べます（「ホーム」右の鉛筆マークで写真と文章を変更。写真の例：初心者クラスの様子（ドリル練習など））",
           "buttonText": "スケジュールを見る",
           "buttonLink": "",
           "buttonSectionId": 6,
@@ -50,7 +50,7 @@
           "id": "7cf6115b-a789-584a-ae39-0903161b1940",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/bjj/slide-competition.jpg",
           "heading": "大会にも挑戦できる",
-          "subheading": "ギ・ノーギ両方のクラスをご用意（背景写真の例：試合や大会で戦う選手の写真。変え方は「ホーム」右の鉛筆マーク）",
+          "subheading": "ギ・ノーギ両方のクラスをご用意（「ホーム」右の鉛筆マークで写真と文章を変更。写真の例：試合や大会で戦う選手の写真）",
           "buttonText": "料金を見る",
           "buttonLink": "",
           "buttonSectionId": 7,
@@ -214,7 +214,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：道場全体（マットが敷かれた練習スペース）の写真。左上の「レイアウト編集」（「セクション追加」のとなり）を押すと、この写真も周りの文章も変えられます。",
+                    "text": "▲ この写真を変更：道場全体（マットが敷かれた練習スペース）の写真。左上の「レイアウト編集」を押し、この枠に写真をドラッグすると変わります。文章もそこで変えられます。",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -499,7 +499,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：初心者クラスで技を練習している写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更（この枠に写真をドラッグ。文字もそこで変更）：初心者クラスで技を練習している写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -656,7 +656,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：道着を着てスパーリングしている写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更（この枠に写真をドラッグ。文字もそこで変更）：道着を着てスパーリングしている写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -813,7 +813,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：ノーギで練習している写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更（この枠に写真をドラッグ。文字もそこで変更）：ノーギで練習している写真",
                     "fontSize": 14,
                     "italic": true
                   }

@@ -28,7 +28,7 @@
           "id": "e8c513b5-4c9a-5e38-a34b-2852639896d9",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/cram/slide-study.jpg",
           "heading": "「わかる」から「できる」へ",
-          "subheading": "一人ひとりに寄り添う学習塾。写真や文章を変えるには、上のメニューで「ホーム」を押し、右に出る鉛筆のマークを押してください（背景写真の例：教室で生徒が集中して勉強している写真）",
+          "subheading": "一人ひとりに寄り添う学習塾。「ホーム」の右にある鉛筆マークを押すと、写真も文章も変えられます（写真の例：教室で生徒が集中して勉強している写真）",
           "buttonText": "体験予約はこちら",
           "buttonLink": "",
           "buttonSectionId": 7,
@@ -39,7 +39,7 @@
           "id": "aac0a6f5-7fd3-58f2-8162-d6a60aa8eb95",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/cram/slide-teaching.jpg",
           "heading": "志望校合格をサポート",
-          "subheading": "目標に合わせた学習計画（背景写真の例：講師が生徒に説明している写真。変え方は「ホーム」右の鉛筆マーク）",
+          "subheading": "目標に合わせた学習計画（「ホーム」右の鉛筆マークで写真と文章を変更。写真の例：講師が生徒に説明している写真）",
           "buttonText": "スケジュールを見る",
           "buttonLink": "",
           "buttonSectionId": 7,
@@ -50,7 +50,7 @@
           "id": "a3b6716a-975e-595b-a61b-d795c5c1026e",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/cram/slide-exterior.jpg",
           "heading": "まずは無料体験から",
-          "subheading": "学習のお悩みもご相談ください（背景写真の例：教室の外観や入口の写真。変え方は「ホーム」右の鉛筆マーク）",
+          "subheading": "学習のお悩みもご相談ください（「ホーム」右の鉛筆マークで写真と文章を変更。写真の例：教室の外観や入口の写真）",
           "buttonText": "料金を見る",
           "buttonLink": "",
           "buttonSectionId": 8,
@@ -214,7 +214,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：教室の様子（机や黒板が写っているもの）。左上の「レイアウト編集」（「セクション追加」のとなり）を押すと、この写真も周りの文章も変えられます。",
+                    "text": "▲ この写真を変更：教室の様子（机や黒板が写っているもの）。左上の「レイアウト編集」を押し、この枠に写真をドラッグすると変わります。文章もそこで変えられます。",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -499,7 +499,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：小学生が楽しく学習している写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更（この枠に写真をドラッグ。文字もそこで変更）：小学生が楽しく学習している写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -656,7 +656,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：中学生が授業を受けている写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更（この枠に写真をドラッグ。文字もそこで変更）：中学生が授業を受けている写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -813,7 +813,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：高校生が自習している写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更（この枠に写真をドラッグ。文字もそこで変更）：高校生が自習している写真",
                     "fontSize": 14,
                     "italic": true
                   }

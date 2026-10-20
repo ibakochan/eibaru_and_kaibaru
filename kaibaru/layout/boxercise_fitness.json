@@ -28,7 +28,7 @@
           "id": "af27d137-9536-58f5-a226-0031f2f0d578",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/fitness/slide-class.jpg",
           "heading": "楽しく汗をかこう！",
-          "subheading": "ボクササイズ・フィットネスクラブ。写真や文章を変えるには、上のメニューで「ホーム」を押し、右に出る鉛筆のマークを押してください（背景写真の例：音楽に合わせて楽しく運動している会員の写真）",
+          "subheading": "ボクササイズ・フィットネスクラブ。「ホーム」の右にある鉛筆マークを押すと、写真も文章も変えられます（写真の例：音楽に合わせて楽しく運動している会員の写真）",
           "buttonText": "体験予約はこちら",
           "buttonLink": "",
           "buttonSectionId": 6,
@@ -39,7 +39,7 @@
           "id": "cca1b0e1-a147-51f0-82e5-54517b3515dc",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/fitness/slide-group.jpg",
           "heading": "運動初心者も大歓迎",
-          "subheading": "グループレッスンで続けやすい（背景写真の例：グループレッスンの様子（インストラクター付き）。変え方は「ホーム」右の鉛筆マーク）",
+          "subheading": "グループレッスンで続けやすい（「ホーム」右の鉛筆マークで写真と文章を変更。写真の例：グループレッスンの様子（インストラクター付き））",
           "buttonText": "スケジュールを見る",
           "buttonLink": "",
           "buttonSectionId": 6,
@@ -50,7 +50,7 @@
           "id": "693606b6-5c17-5c74-9784-0c782ca26429",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/fitness/slide-smiles.jpg",
           "heading": "ダイエット・健康づくりに",
-          "subheading": "あなたのペースで無理なく（背景写真の例：笑顔で運動している会員の写真。変え方は「ホーム」右の鉛筆マーク）",
+          "subheading": "あなたのペースで無理なく（「ホーム」右の鉛筆マークで写真と文章を変更。写真の例：笑顔で運動している会員の写真）",
           "buttonText": "料金を見る",
           "buttonLink": "",
           "buttonSectionId": 7,
@@ -214,7 +214,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：インストラクターと会員が楽しく運動している写真。左上の「レイアウト編集」（「セクション追加」のとなり）を押すと、この写真も周りの文章も変えられます。",
+                    "text": "▲ この写真を変更：インストラクターと会員が楽しく運動している写真。左上の「レイアウト編集」を押し、この枠に写真をドラッグすると変わります。文章もそこで変えられます。",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -499,7 +499,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：ボクササイズのレッスン風景",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更（この枠に写真をドラッグ。文字もそこで変更）：ボクササイズのレッスン風景",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -656,7 +656,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：HIITやサーキットトレーニングの写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更（この枠に写真をドラッグ。文字もそこで変更）：HIITやサーキットトレーニングの写真",
                     "fontSize": 14,
                     "italic": true
                   }
@@ -813,7 +813,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更：ストレッチ・マットエクササイズの写真",
+                    "text": "▲ 左上の「レイアウト編集」でこの写真を変更（この枠に写真をドラッグ。文字もそこで変更）：ストレッチ・マットエクササイズの写真",
                     "fontSize": 14,
                     "italic": true
                   }

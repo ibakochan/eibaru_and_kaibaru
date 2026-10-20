@@ -28,7 +28,7 @@
           "id": "20aa914c-24ec-503b-89e3-0f005e0ed9b8",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/default/slide-group.jpg",
           "heading": "〇〇クラブへようこそ",
-          "subheading": "初めての方も、経験者の方も大歓迎です。写真や文章を変えるには、上のメニューで「ホーム」を押し、右に出る鉛筆のマークを押してください（背景写真の例：クラブの雰囲気が伝わる集合写真や活動風景）",
+          "subheading": "初めての方も、経験者の方も大歓迎です。「ホーム」の右にある鉛筆マークを押すと、写真も文章も変えられます（写真の例：クラブの雰囲気が伝わる集合写真や活動風景）",
           "buttonText": "体験予約はこちら",
           "buttonLink": "",
           "buttonSectionId": 5,
@@ -39,7 +39,7 @@
           "id": "db6b786c-f995-58cd-9a8b-b5d04b49cc50",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/default/slide-members.jpg",
           "heading": "みんなで楽しく続ける",
-          "subheading": "無理なく、自分のペースで（背景写真の例：メンバーが楽しんでいる様子の写真。変え方は「ホーム」右の鉛筆マーク）",
+          "subheading": "無理なく、自分のペースで（「ホーム」右の鉛筆マークで写真と文章を変更。写真の例：メンバーが楽しんでいる様子の写真）",
           "buttonText": "スケジュールを見る",
           "buttonLink": "",
           "buttonSectionId": 5,
@@ -50,7 +50,7 @@
           "id": "25f37a89-e409-5d2c-85bd-59bab88e5a87",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/default/slide-entrance.jpg",
           "heading": "通いやすい料金プラン",
-          "subheading": "目的に合わせて選べます（背景写真の例：クラブの外観や入口の写真。変え方は「ホーム」右の鉛筆マーク）",
+          "subheading": "目的に合わせて選べます（「ホーム」右の鉛筆マークで写真と文章を変更。写真の例：クラブの外観や入口の写真）",
           "buttonText": "料金を見る",
           "buttonLink": "",
           "buttonSectionId": 6,
@@ -214,7 +214,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "▲ この写真を変更：クラブの代表者や活動風景の写真。左上の「レイアウト編集」（「セクション追加」のとなり）を押すと、この写真も周りの文章も変えられます。",
+                    "text": "▲ この写真を変更：クラブの代表者や活動風景の写真。左上の「レイアウト編集」を押し、この枠に写真をドラッグすると変わります。文章もそこで変えられます。",
                     "fontSize": 14,
                     "italic": true
                   }
