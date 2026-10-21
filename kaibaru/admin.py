@@ -2,6 +2,7 @@ from django.contrib import admin
 from .models import (
     Member,
     Club,
+    ClubMonthlyIncome,
     Lesson,
     Event,
     EventPrice,
@@ -171,6 +172,23 @@ class ClubSubscriptionMutationAdmin(admin.ModelAdmin):
     readonly_fields = ("created_at",)
 
 
+class ClubMonthlyIncomeAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "club",
+        "month",
+        "total_yen",
+        "platform_fee_yen",
+        "receipt_total_yen",
+        "created_at",
+    )
+    search_fields = ("club__subdomain", "club__title")
+    raw_id_fields = ("club",)
+    readonly_fields = ("created_at",)
+    date_hierarchy = "month"
+
+
 admin.site.register(PlatformSubscription, PlatformSubscriptionAdmin)
 admin.site.register(PlatformClub, PlatformClubAdmin)
 admin.site.register(ClubSubscriptionMutation, ClubSubscriptionMutationAdmin)
+admin.site.register(ClubMonthlyIncome, ClubMonthlyIncomeAdmin)
