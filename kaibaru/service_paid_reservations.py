@@ -40,6 +40,7 @@ def _rows(model, club_ids, *, start, end, kind_for):
             "title": _title(reservation),
             "full_name": reservation.full_name,
             "amount": int(reservation.amount or 0),
+            "net_yen": reservation.net_yen,
             "paid_on": local.date().isoformat() if local else None,
             "income_at": income_at,
             "payment_intent_id": reservation.stripe_payment_intent_id or "",

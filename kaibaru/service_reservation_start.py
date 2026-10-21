@@ -244,6 +244,20 @@ def complete_paid_checkout(
             reservation.save(update_fields=update_fields)
             newly_paid_ids.append(reservation.id)
 
+    if newly_paid_ids:
+        from .service_member_income import persist_reservation_net
+
+        paid = next(
+            (
+                reservation for reservation in reservations
+                if reservation.id in newly_paid_ids
+                and reservation.stripe_payment_intent_id
+            ),
+            None,
+        )
+        if paid is not None:
+            persist_reservation_net(paid)
+
     for reservation_id in newly_paid_ids:
         send_visitor_reservation_confirmation_email.delay(
             reservation_id

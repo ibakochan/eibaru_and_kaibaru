@@ -871,6 +871,9 @@ def _charge_member_off_session(
             "is_deleted",
         ]
     )
+    from .service_member_income import persist_reservation_net
+
+    persist_reservation_net(reservation)
     _queue_confirmation(reservation.id)
     result = _paid_result(reservation)
     result["payment_intent_id"] = payment_intent.id
@@ -1033,6 +1036,9 @@ def complete_paid_event_checkout(
             update_fields.append("stripe_payment_intent_id")
         reservation.save(update_fields=update_fields)
 
+    from .service_member_income import persist_reservation_net
+
+    persist_reservation_net(reservation)
     _queue_confirmation(reservation.id)
 
 
@@ -1516,6 +1522,9 @@ class EventReservationPaymentReconciler:
             reservation.stripe_payment_intent_id = payment_intent_id
             update_fields.append("stripe_payment_intent_id")
         reservation.save(update_fields=update_fields)
+        from .service_member_income import persist_reservation_net
+
+        persist_reservation_net(reservation)
         _queue_confirmation(reservation.id)
 
     @classmethod

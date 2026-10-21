@@ -14,11 +14,12 @@ import logging
 import stripe
 from django.conf import settings
 from django.core.cache import cache
+from django.db import IntegrityError
 from django.db.models import Q, Sum
 from django.utils import timezone
 
-from .models import ExpenseReceipt, Invoice
-from .service_cash_platform_fee import month_bounds
+from .models import ClubMonthlyIncome, ExpenseReceipt, Invoice
+from .service_cash_platform_fee import month_bounds, previous_month
 from .service_platform_billing_history import platform_amount_paid_in_month
 from .service_paid_reservations import (
     paid_reservation_counts_by_month,
@@ -301,37 +302,150 @@ def _stripe_fee_for_invoice(invoice, stripe_account):
     return _fee_from_stripe_invoice(stripe_account, stripe_invoice_id)
 
 
-def _apply_invoice_fees(invoices, stripe_account):
+def persist_invoice_net(invoice, stripe_account=None):
+    """Store Stripe's net on a paid invoice. Cash and bank transfers are skipped.
+
+    A missing fee is left empty so a later open can try again. Amounts of 0
+    are left empty too.
+    """
+    if getattr(invoice, "payment_method", None) != "stripe":
+        return invoice
+    if invoice.net_yen is not None:
+        return invoice
+    gross = _amount(invoice)
+    if gross <= 0:
+        return invoice
+    account = stripe_account
+    if not account:
+        club = getattr(invoice, "club", None)
+        account = getattr(club, "stripe_account_id", None)
+    fee = _stripe_fee_for_invoice(invoice, account)
+    if fee is None:
+        return invoice
+    invoice.net_yen = settled_yen(gross, "stripe", fee)
+    invoice.save(update_fields=["net_yen"])
+    return invoice
+
+
+def _present_invoice_net(invoice):
+    """Expose fee_yen for the serializer from the stored net."""
+    gross = _amount(invoice)
+    if invoice.payment_method == "stripe" and invoice.net_yen is not None:
+        invoice.fee_yen = gross - int(invoice.net_yen)
+    else:
+        invoice.fee_yen = None
+
+
+def _ensure_invoice_nets(invoices, stripe_account):
     for invoice in invoices:
-        gross = _amount(invoice)
-        fee = _stripe_fee_for_invoice(invoice, stripe_account)
-        invoice.fee_yen = fee
-        invoice.net_yen = settled_yen(gross, invoice.payment_method, fee)
+        if (
+            invoice.payment_method == "stripe"
+            and invoice.net_yen is None
+            and _amount(invoice) > 0
+        ):
+            persist_invoice_net(invoice, stripe_account)
+        _present_invoice_net(invoice)
 
 
-def _apply_reservation_fees(reservations, stripe_account):
+def _reservation_from_income_row(row):
+    from .models import EventReservation, Reservation
+
+    kind, pk = str(row.get("id") or "").split("-", 1)
+    model = EventReservation if kind == "event" else Reservation
+    return model.objects.filter(pk=int(pk)).first()
+
+
+def persist_reservation_net(reservation):
+    """Store each row's share of the Stripe fee for one payment.
+
+    Trial, visitor, member, and event rows keep their own net. Rows that
+    shared a charge split that one fee. A missing fee is left empty.
+    """
+    try:
+        _persist_reservation_net(reservation)
+    except Exception:
+        logger.exception(
+            "[INCOME] Could not store reservation net for %s",
+            getattr(reservation, "id", None),
+        )
+
+
+def _persist_reservation_net(reservation):
+    if reservation is None or getattr(reservation, "net_yen", None) is not None:
+        return
+    if getattr(reservation, "payment_method", None) == "ticket":
+        return
+    if int(getattr(reservation, "amount", 0) or 0) <= 0:
+        return
+    intent_id = getattr(reservation, "stripe_payment_intent_id", None)
+    if not intent_id:
+        return
+    model = reservation.__class__
+    siblings = list(
+        model.objects.filter(
+            stripe_payment_intent_id=intent_id,
+            status="paid",
+            is_deleted=False,
+        ).order_by("id")
+    )
+    if not any(row.pk == reservation.pk for row in siblings):
+        siblings.append(reservation)
+        siblings.sort(key=lambda row: row.pk or 0)
+    if all(row.net_yen is not None for row in siblings):
+        return
+    club = getattr(reservation, "club", None)
+    account = getattr(club, "stripe_account_id", None)
+    if not account:
+        return
+    fee = _fee_from_payment_intent(account, intent_id)
+    if fee is None:
+        return
+    shares = allocate_fee_shares([row.amount for row in siblings], fee)
+    for row, share in zip(siblings, shares):
+        gross = int(row.amount or 0)
+        net = settled_yen(gross, "stripe", share)
+        row.net_yen = net
+        if row.pk:
+            type(row).objects.filter(pk=row.pk).update(net_yen=net)
+        if row.pk == reservation.pk:
+            reservation.net_yen = net
+
+
+def _ensure_reservation_nets(reservations, stripe_account):
     groups = {}
     for reservation in reservations:
         intent_id = reservation.get("payment_intent_id") or ""
         groups.setdefault(intent_id, []).append(reservation)
     for intent_id, rows in groups.items():
-        fee = None
-        if intent_id and stripe_account:
-            fee = _fee_from_payment_intent(stripe_account, intent_id)
-        shares = (
-            allocate_fee_shares([row.get("amount") for row in rows], fee)
-            if fee is not None
-            else [None] * len(rows)
-        )
-        for reservation, share in zip(rows, shares):
-            gross = int(reservation.get("amount") or 0)
-            reservation["fee_yen"] = share
-            reservation["net_yen"] = settled_yen(
-                gross,
-                "stripe" if intent_id else None,
-                share,
-            )
-            reservation.pop("payment_intent_id", None)
+        missing = [
+            row for row in rows
+            if row.get("net_yen") is None and int(row.get("amount") or 0) > 0 and intent_id
+        ]
+        if missing and stripe_account:
+            anchor = _reservation_from_income_row(missing[0])
+            if anchor is not None:
+                persist_reservation_net(anchor)
+                saved = {
+                    row.pk: row.net_yen
+                    for row in anchor.__class__.objects.filter(
+                        stripe_payment_intent_id=intent_id,
+                    )
+                }
+                for row in rows:
+                    _, pk = str(row.get("id") or "").split("-", 1)
+                    net = saved.get(int(pk))
+                    if net is not None:
+                        row["net_yen"] = net
+        for row in rows:
+            gross = int(row.get("amount") or 0)
+            net = row.get("net_yen")
+            if net is not None:
+                row["fee_yen"] = gross - int(net)
+                row["net_yen"] = int(net)
+            else:
+                row["fee_yen"] = None
+                row["net_yen"] = gross if not intent_id else None
+            row.pop("payment_intent_id", None)
 
 
 def _month_of(paid_at):
@@ -415,10 +529,23 @@ def _invoices_for_month(club, year, month):
     return rows
 
 
+def _invoice_settled(invoice):
+    gross = _amount(invoice)
+    if invoice.payment_method == "stripe" and invoice.net_yen is not None:
+        return int(invoice.net_yen)
+    return gross
+
+
 def member_income_month(club, user, year, month):
-    """One month: Stripe nets, then minus the platform bill and expenses."""
+    """One month of 収納歴.
+
+    The first open stores the income total, the previous month's Kaibaru
+    bill, and that month's receipt total. Later opens read those numbers.
+    Stripe invoices missing a net are filled in and saved.
+    """
     year = int(year)
     month = int(month)
+    start, _end = month_bounds(year, month)
     rows = _invoices_for_month(club, year, month)
     reservations = paid_reservations_for_clubs([club.id], year, month)
     for reservation in reservations:
@@ -428,23 +555,44 @@ def member_income_month(club, user, year, month):
         reverse=True,
     )
     stripe_account = getattr(club, "stripe_account_id", None)
-    _apply_invoice_fees(rows, stripe_account)
-    _apply_reservation_fees(reservations, stripe_account)
-    invoice_total = sum(
-        settled_yen(_amount(invoice), invoice.payment_method, invoice.fee_yen)
-        for invoice in rows
-    )
-    reservation_total = sum(int(row.get("net_yen") or 0) for row in reservations)
-    total = invoice_total + reservation_total
-    platform_fee = platform_amount_paid_in_month(user, year, month)
-    expense_total = _expense_total_for_month(club, year, month)
+    _ensure_invoice_nets(rows, stripe_account)
+    _ensure_reservation_nets(reservations, stripe_account)
+
+    record = ClubMonthlyIncome.objects.filter(club=club, month=start).first()
+    if record is None:
+        invoice_total = sum(_invoice_settled(invoice) for invoice in rows)
+        reservation_total = sum(
+            int(row.get("net_yen") if row.get("net_yen") is not None else row.get("amount") or 0)
+            for row in reservations
+        )
+        total = invoice_total + reservation_total
+        prev_year, prev_month = previous_month(start)
+        platform_fee = platform_amount_paid_in_month(user, prev_year, prev_month)
+        expense_total = _expense_total_for_month(club, year, month)
+        try:
+            record = ClubMonthlyIncome.objects.create(
+                club=club,
+                month=start,
+                total_yen=total,
+                platform_fee_yen=platform_fee,
+                receipt_total_yen=expense_total,
+            )
+        except IntegrityError:
+            record = ClubMonthlyIncome.objects.get(club=club, month=start)
+
+    total = int(record.total_yen or 0)
+    platform_fee = int(record.platform_fee_yen or 0)
+    expense_total = int(record.receipt_total_yen or 0)
     return {
         "year": year,
         "month": month,
         "invoice_count": len(rows),
         "reservation_count": len(reservations),
-        "invoice_total_yen": invoice_total,
-        "reservation_total_yen": reservation_total,
+        "invoice_total_yen": sum(_invoice_settled(invoice) for invoice in rows),
+        "reservation_total_yen": sum(
+            int(row.get("net_yen") if row.get("net_yen") is not None else row.get("amount") or 0)
+            for row in reservations
+        ),
         "total_yen": total,
         "platform_fee_yen": platform_fee,
         "expense_total_yen": expense_total,

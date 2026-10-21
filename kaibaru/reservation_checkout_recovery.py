@@ -149,6 +149,9 @@ def record_stripe_payment(reservation, view):
         update_fields.append("stripe_checkout_session_id")
 
     reservation.save(update_fields=update_fields)
+    from .service_member_income import persist_reservation_net
+
+    persist_reservation_net(reservation)
     return reservation
 
 

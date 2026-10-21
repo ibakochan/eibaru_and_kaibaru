@@ -1,7 +1,11 @@
-from .models import Invoice, InvoiceItem, Payment, Member
+import logging
 
 from django.db import transaction
 from django.utils import timezone
+
+from .models import Invoice, InvoiceItem, Payment, Member
+
+logger = logging.getLogger(__name__)
 
 def create_local_invoice_from_stripe_invoice(
     *,
@@ -158,4 +162,13 @@ def mark_local_invoice_paid(
                 ]
             )
 
+    from .service_member_income import persist_invoice_net
+
+    try:
+        persist_invoice_net(local_invoice)
+    except Exception:
+        logger.exception(
+            "[INVOICE] Could not store net for invoice %s",
+            local_invoice.id,
+        )
     return local_invoice, payment

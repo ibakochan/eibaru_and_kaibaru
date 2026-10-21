@@ -896,6 +896,11 @@ class Invoice(models.Model):
     
     amount_due = models.IntegerField()
     amount_paid = models.IntegerField(default=0)
+    net_yen = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Yen that reached the club after Stripe's fee. Set when the invoice is paid.",
+    )
 
     number = models.CharField(max_length=50, unique=True, blank=True, null=True)
 
@@ -1287,6 +1292,11 @@ class Reservation(models.Model):
     # This should be stored rather than calculated from Lesson later.
     amount = models.PositiveIntegerField(
         default=0
+    )
+    net_yen = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Yen that reached the club after Stripe's fee.",
     )
 
     currency = models.CharField(
@@ -1963,6 +1973,11 @@ class EventReservation(models.Model):
     email = models.EmailField()
     phone_number = models.CharField(max_length=30, blank=True, default="")
     amount = models.PositiveIntegerField(default=0)
+    net_yen = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Yen that reached the club after Stripe's fee.",
+    )
     price_name = models.CharField(max_length=80, blank=True, default="")
     currency = models.CharField(max_length=10, default="jpy")
 
@@ -2673,7 +2688,11 @@ class ExpenseReceipt(models.Model):
         storage=PrivateMediaStorage(),
     )
     title = models.CharField(max_length=200, blank=True, default="")
-    amount = models.PositiveIntegerField(null=True, blank=True)
+    amount = models.PositiveIntegerField(
+        null=True,
+        blank=False,
+        help_text="Required when saving. Older rows may still be empty.",
+    )
     description = models.TextField(blank=True, default="")
     purchased_on = models.DateField()
     created_at = models.DateTimeField(auto_now_add=True)
@@ -2687,3 +2706,33 @@ class ExpenseReceipt(models.Model):
     def __str__(self):
         label = self.title or "経費"
         return f"{self.club_id} {self.purchased_on} {label}"
+
+
+class ClubMonthlyIncome(models.Model):
+    """Stored income snapshot for one club and one calendar month.
+
+    Created the first time that month is opened in 収納歴. Later opens read
+    these amounts instead of calling Stripe again.
+    """
+
+    club = models.ForeignKey(
+        Club,
+        on_delete=models.CASCADE,
+        related_name="monthly_incomes",
+    )
+    month = models.DateTimeField()
+    total_yen = models.IntegerField(default=0)
+    platform_fee_yen = models.IntegerField(default=0)
+    receipt_total_yen = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["club", "month"],
+                name="unique_club_income_month",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.club_id} {self.month}"

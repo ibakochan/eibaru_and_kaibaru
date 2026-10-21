@@ -3812,17 +3812,20 @@ def _parse_expense_fields(request, *, image_required):
     description = description.strip()
 
     raw_amount = request.data.get("amount")
-    amount = None
-    if raw_amount not in (None, ""):
-        try:
-            amount = int(str(raw_amount).strip())
-        except (TypeError, ValueError):
-            amount = -1
-        if amount < 0:
-            return None, Response(
-                {"detail": "金額は0以上の整数で入力してください。"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+    if raw_amount in (None, ""):
+        return None, Response(
+            {"detail": "金額を入力してください。"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    try:
+        amount = int(str(raw_amount).strip())
+    except (TypeError, ValueError):
+        amount = -1
+    if amount < 0:
+        return None, Response(
+            {"detail": "金額は0以上の整数で入力してください。"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     return {
         "image": image,
