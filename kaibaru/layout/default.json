@@ -962,8 +962,19 @@
                     "bold": true
                   },
                   {
-                    "text": "〒000-0000 〇〇県〇〇市〇〇 0-0-0 〇〇ビル 1F",
-                    "fontSize": 18
+                    "type": "link",
+                    "url": "https://www.google.com/maps",
+                    "children": [
+                      {
+                        "fontSize": 18,
+                        "text": "〒000-0000 〇〇県〇〇市〇〇 0-0-0 〇〇ビル 1F",
+                        "color": "#ffffff"
+                      }
+                    ]
+                  },
+                  {
+                    "text": " ",
+                    "color": "#ffffff"
                   }
                 ]
               },
@@ -977,8 +988,19 @@
                     "bold": true
                   },
                   {
-                    "text": "000-0000-0000",
-                    "fontSize": 18
+                    "type": "link",
+                    "url": "tel:00000000000",
+                    "children": [
+                      {
+                        "fontSize": 18,
+                        "text": "000-0000-0000",
+                        "color": "#ffffff"
+                      }
+                    ]
+                  },
+                  {
+                    "text": " ",
+                    "color": "#ffffff"
                   }
                 ]
               },
@@ -1022,8 +1044,19 @@
                     "bold": true
                   },
                   {
-                    "text": "〇〇駅 〇〇口より徒歩〇分",
-                    "fontSize": 18
+                    "type": "link",
+                    "url": "https://www.google.com/maps",
+                    "children": [
+                      {
+                        "fontSize": 18,
+                        "text": "〇〇駅 〇〇口より徒歩〇分",
+                        "color": "#ffffff"
+                      }
+                    ]
+                  },
+                  {
+                    "text": " ",
+                    "color": "#ffffff"
                   }
                 ]
               }
@@ -1083,6 +1116,7 @@
                   {
                     "type": "icon",
                     "icon": "x",
+                    "url": "https://x.com",
                     "size": 40,
                     "color": "#f6efe9",
                     "children": [
@@ -1129,6 +1163,7 @@
                   {
                     "type": "icon",
                     "icon": "facebook",
+                    "url": "https://www.facebook.com",
                     "size": 40,
                     "color": "#f6efe9",
                     "children": [
@@ -1175,6 +1210,7 @@
                   {
                     "type": "icon",
                     "icon": "youtube",
+                    "url": "https://www.youtube.com",
                     "size": 40,
                     "color": "#f6efe9",
                     "children": [
@@ -1221,6 +1257,7 @@
                   {
                     "type": "icon",
                     "icon": "instagram",
+                    "url": "https://www.instagram.com",
                     "size": 40,
                     "color": "#f6efe9",
                     "children": [
@@ -1262,7 +1299,7 @@
                 "paragraphSize": 0.2,
                 "children": [
                   {
-                    "text": "空のリンクです。レイアウト編集でアイコンをクリックし、自分のURLを貼ってください。無ければ枠の青い鉛筆から「ボックスを削除」。",
+                    "text": "今は各サイトのホームへのリンクです。自分のページがあれば、レイアウト編集でアイコンをクリックしてURLを貼ってください。無ければ枠の青い鉛筆から「ボックスを削除」。",
                     "fontSize": 15,
                     "italic": true
                   }
