@@ -14,10 +14,16 @@ import logging
 import stripe
 from django.conf import settings
 from django.core.cache import cache
+from django.db.models import Q, Sum
 from django.utils import timezone
 
-from .models import Invoice
-from .service_paid_reservations import paid_reservations_for_clubs
+from .models import ExpenseReceipt, Invoice
+from .service_cash_platform_fee import month_bounds
+from .service_platform_billing_history import platform_amount_paid_in_month
+from .service_paid_reservations import (
+    paid_reservation_counts_by_month,
+    paid_reservations_for_clubs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +86,15 @@ def allocate_fee_shares(amounts, fee):
             remaining -= share
         shares.append(share)
     return shares
+
+
+def income_remainder(total_yen, platform_fee_yen, expense_total_yen):
+    """Cash left after the platform bill and expense receipts for that month."""
+    return (
+        int(total_yen or 0)
+        - int(platform_fee_yen or 0)
+        - int(expense_total_yen or 0)
+    )
 
 
 def settled_yen(gross, payment_method, fee_yen):
@@ -152,20 +167,105 @@ def _fee_from_payment_intent(stripe_account, payment_intent_id):
     return _cached_fee(stripe_account, f"pi:{payment_intent_id}", load)
 
 
+def _payment_object_fee(payment, stripe_account):
+    """Fee on one InvoicePayment.payment object.
+
+    Subscription cycle invoices no longer carry charge or payment_intent.
+    The fee lives on the invoice payment's charge balance transaction.
+    """
+    if not payment:
+        return None
+    intent = payment.get("payment_intent")
+    if isinstance(intent, str):
+        if not stripe_account:
+            return None
+        return _fee_from_payment_intent(stripe_account, intent)
+    if intent:
+        fee = _fee_from_charge(intent.get("latest_charge"), stripe_account)
+        if fee is not None:
+            return fee
+        intent_id = intent.get("id")
+        if intent_id and stripe_account:
+            return _fee_from_payment_intent(stripe_account, intent_id)
+        return None
+    charge = payment.get("charge")
+    if isinstance(charge, str) and not stripe_account:
+        return None
+    return _fee_from_charge(charge, stripe_account)
+
+
+def fee_from_invoice_payments(rows, stripe_account=None):
+    """Sum Stripe fees on paid invoice payments.
+
+    None means a payment was there but its fee could not be read, so the
+    invoice stays at the billed amount instead of a partial net.
+    """
+    if not rows:
+        return None
+    total = 0
+    saw_payment = False
+    for row in rows:
+        status = row.get("status")
+        if status not in (None, "paid"):
+            continue
+        payment = row.get("payment") or {}
+        if not payment:
+            continue
+        fee = _payment_object_fee(payment, stripe_account)
+        if fee is None:
+            return None
+        saw_payment = True
+        total += int(fee)
+    if not saw_payment:
+        return None
+    return total
+
+
+def _invoice_payment_rows(stripe_account, stripe_invoice_id, expand):
+    kwargs = {
+        "invoice": stripe_invoice_id,
+        "status": "paid",
+        "limit": 20,
+        "stripe_account": stripe_account,
+    }
+    if expand:
+        kwargs["expand"] = expand
+    payments = stripe.InvoicePayment.list(**kwargs)
+    return list(payments.get("data") or [])
+
+
 def _fee_from_stripe_invoice(stripe_account, stripe_invoice_id):
     def load():
         stripe.api_key = settings.STRIPE_SECRET_KEY
-        stripe_invoice = stripe.Invoice.retrieve(
-            stripe_invoice_id,
-            expand=[
-                "charge.balance_transaction",
-                "payment_intent.latest_charge.balance_transaction",
-            ],
-            stripe_account=stripe_account,
-        )
-        fee = _fee_from_charge(stripe_invoice.get("charge"), stripe_account)
+        rows = []
+        try:
+            rows = _invoice_payment_rows(
+                stripe_account,
+                stripe_invoice_id,
+                [
+                    "data.payment.payment_intent.latest_charge.balance_transaction",
+                    "data.payment.charge.balance_transaction",
+                ],
+            )
+        except Exception:
+            logger.exception(
+                "[INCOME] Invoice payment expand failed for %s",
+                stripe_invoice_id,
+            )
+        fee = fee_from_invoice_payments(rows, stripe_account)
         if fee is not None:
             return fee
+        rows = _invoice_payment_rows(stripe_account, stripe_invoice_id, None)
+        fee = fee_from_invoice_payments(rows, stripe_account)
+        if fee is not None:
+            return fee
+        stripe_invoice = stripe.Invoice.retrieve(
+            stripe_invoice_id,
+            stripe_account=stripe_account,
+        )
+        legacy = _fee_from_charge(stripe_invoice.get("charge"), stripe_account)
+        if legacy is not None:
+            return legacy
         intent = stripe_invoice.get("payment_intent")
         if isinstance(intent, str):
             return _fee_from_payment_intent(stripe_account, intent)
@@ -234,57 +334,121 @@ def _apply_reservation_fees(reservations, stripe_account):
             reservation.pop("payment_intent_id", None)
 
 
-def member_income_for_club(club):
-    invoices = (
-        Invoice.objects.filter(club=club, status="paid")
-        .select_related("subscription", "payer", "club")
-        .prefetch_related("items", "payment_set")
-    )
-    months = {}
-    for invoice in invoices:
-        paid_at = _income_at(invoice)
-        invoice.income_at = paid_at
-        local = timezone.localtime(paid_at) if paid_at else None
-        if not local:
-            continue
-        months.setdefault((local.year, local.month), []).append(invoice)
+def _month_of(paid_at):
+    local = timezone.localtime(paid_at) if paid_at else None
+    if not local:
+        return None
+    return local.year, local.month
 
-    reservation_months = {}
-    for reservation in paid_reservations_for_clubs([club.id]):
-        income_at = reservation.get("income_at")
-        local = timezone.localtime(income_at) if income_at else None
-        if not local:
+
+def _expense_total_for_month(club, year, month):
+    total = ExpenseReceipt.objects.filter(
+        club=club,
+        purchased_on__year=year,
+        purchased_on__month=month,
+    ).aggregate(total=Sum("amount"))["total"]
+    return int(total or 0)
+
+
+def member_income_index(club):
+    """Months that have income, with counts only. No Stripe calls."""
+    counts = {}
+    invoices = Invoice.objects.filter(club=club, status="paid").prefetch_related(
+        "payment_set"
+    )
+    for invoice in invoices:
+        key = _month_of(_income_at(invoice))
+        if not key:
             continue
-        reservation.pop("income_at", None)
-        reservation_months.setdefault((local.year, local.month), []).append(reservation)
+        bucket = counts.setdefault(key, {"invoice_count": 0, "reservation_count": 0})
+        bucket["invoice_count"] += 1
+
+    for key, count in paid_reservation_counts_by_month([club.id]).items():
+        bucket = counts.setdefault(key, {"invoice_count": 0, "reservation_count": 0})
+        bucket["reservation_count"] += count
 
     entries = []
-    keys = sorted(set(months) | set(reservation_months), reverse=True)[:MONTH_LIMIT]
-    for year, month in keys:
-        rows = months.get((year, month), [])
-        reservations = reservation_months.get((year, month), [])
-        rows.sort(
-            key=lambda invoice: (invoice.income_at or invoice.issued_at, invoice.id),
-            reverse=True,
-        )
-        reservations.sort(key=lambda row: (row.get("paid_on") or "", row["id"]), reverse=True)
-        stripe_account = getattr(club, "stripe_account_id", None)
-        _apply_invoice_fees(rows, stripe_account)
-        _apply_reservation_fees(reservations, stripe_account)
-        invoice_total = sum(
-            settled_yen(_amount(invoice), invoice.payment_method, invoice.fee_yen)
-            for invoice in rows
-        )
-        reservation_total = sum(int(row.get("net_yen") or 0) for row in reservations)
+    for year, month in sorted(counts, reverse=True)[:MONTH_LIMIT]:
+        bucket = counts[(year, month)]
         entries.append({
             "year": year,
             "month": month,
-            "invoice_count": len(rows),
-            "reservation_count": len(reservations),
-            "invoice_total_yen": invoice_total,
-            "reservation_total_yen": reservation_total,
-            "total_yen": invoice_total + reservation_total,
-            "invoices": rows,
-            "reservations": reservations,
+            "invoice_count": bucket["invoice_count"],
+            "reservation_count": bucket["reservation_count"],
         })
     return entries
+
+
+def _invoices_for_month(club, year, month):
+    start, end = month_bounds(year, month)
+    candidates = (
+        Invoice.objects.filter(club=club, status="paid")
+        .filter(
+            Q(
+                payment__status="succeeded",
+                payment__paid_at__gte=start,
+                payment__paid_at__lt=end,
+            )
+            | Q(
+                payment__status="succeeded",
+                payment__paid_at__isnull=True,
+                payment__issued_at__gte=start,
+                payment__issued_at__lt=end,
+            )
+            | Q(issued_at__gte=start, issued_at__lt=end)
+        )
+        .distinct()
+        .select_related("subscription", "payer", "club")
+        .prefetch_related("items", "payment_set")
+    )
+    rows = []
+    for invoice in candidates:
+        paid_at = _income_at(invoice)
+        if _month_of(paid_at) != (year, month):
+            continue
+        invoice.income_at = paid_at
+        rows.append(invoice)
+    rows.sort(
+        key=lambda invoice: (invoice.income_at or invoice.issued_at, invoice.id),
+        reverse=True,
+    )
+    return rows
+
+
+def member_income_month(club, user, year, month):
+    """One month: Stripe nets, then minus the platform bill and expenses."""
+    year = int(year)
+    month = int(month)
+    rows = _invoices_for_month(club, year, month)
+    reservations = paid_reservations_for_clubs([club.id], year, month)
+    for reservation in reservations:
+        reservation.pop("income_at", None)
+    reservations.sort(
+        key=lambda row: (row.get("paid_on") or "", row["id"]),
+        reverse=True,
+    )
+    stripe_account = getattr(club, "stripe_account_id", None)
+    _apply_invoice_fees(rows, stripe_account)
+    _apply_reservation_fees(reservations, stripe_account)
+    invoice_total = sum(
+        settled_yen(_amount(invoice), invoice.payment_method, invoice.fee_yen)
+        for invoice in rows
+    )
+    reservation_total = sum(int(row.get("net_yen") or 0) for row in reservations)
+    total = invoice_total + reservation_total
+    platform_fee = platform_amount_paid_in_month(user, year, month)
+    expense_total = _expense_total_for_month(club, year, month)
+    return {
+        "year": year,
+        "month": month,
+        "invoice_count": len(rows),
+        "reservation_count": len(reservations),
+        "invoice_total_yen": invoice_total,
+        "reservation_total_yen": reservation_total,
+        "total_yen": total,
+        "platform_fee_yen": platform_fee,
+        "expense_total_yen": expense_total,
+        "remainder_yen": income_remainder(total, platform_fee, expense_total),
+        "invoices": rows,
+        "reservations": reservations,
+    }

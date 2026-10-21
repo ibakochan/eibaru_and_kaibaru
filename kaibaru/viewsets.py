@@ -4123,7 +4123,7 @@ class ClubViewSet(viewsets.ModelViewSet):
     )
     def member_income(self, request, subdomain=None):
         from .serializers import MemberIncomeInvoiceSerializer
-        from .service_member_income import member_income_for_club
+        from .service_member_income import member_income_index, member_income_month
 
         club = Club.objects.filter(is_deleted=False, subdomain=subdomain).first()
         if not club:
@@ -4131,23 +4131,42 @@ class ClubViewSet(viewsets.ModelViewSet):
         if not request.user.is_authenticated or club.owner_id != request.user.id:
             return Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
 
-        entries = []
-        for month in member_income_for_club(club):
-            entries.append({
-                "year": month["year"],
-                "month": month["month"],
-                "invoice_count": month["invoice_count"],
-                "reservation_count": month["reservation_count"],
-                "invoice_total_yen": month["invoice_total_yen"],
-                "reservation_total_yen": month["reservation_total_yen"],
-                "total_yen": month["total_yen"],
+        year = request.query_params.get("year")
+        month = request.query_params.get("month")
+        if year or month:
+            try:
+                year_n = int(year)
+                month_n = int(month)
+            except (TypeError, ValueError):
+                return Response(
+                    {"detail": "year と month が必要です。"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if month_n < 1 or month_n > 12:
+                return Response(
+                    {"detail": "month が不正です。"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            detail = member_income_month(club, request.user, year_n, month_n)
+            return Response({
+                "year": detail["year"],
+                "month": detail["month"],
+                "invoice_count": detail["invoice_count"],
+                "reservation_count": detail["reservation_count"],
+                "invoice_total_yen": detail["invoice_total_yen"],
+                "reservation_total_yen": detail["reservation_total_yen"],
+                "total_yen": detail["total_yen"],
+                "platform_fee_yen": detail["platform_fee_yen"],
+                "expense_total_yen": detail["expense_total_yen"],
+                "remainder_yen": detail["remainder_yen"],
                 "invoices": MemberIncomeInvoiceSerializer(
-                    month["invoices"],
+                    detail["invoices"],
                     many=True,
                 ).data,
-                "reservations": month["reservations"],
+                "reservations": detail["reservations"],
             })
-        return Response({"entries": entries})
+
+        return Response({"entries": member_income_index(club)})
 
     @action(
         detail=False,

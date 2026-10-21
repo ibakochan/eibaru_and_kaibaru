@@ -67,6 +67,33 @@ def _title(reservation):
     return ""
 
 
+def paid_reservation_counts_by_month(club_ids):
+    """Paid reservation counts per calendar month, without building row payloads."""
+    if not club_ids:
+        return {}
+    counts = {}
+    for model in (Reservation, EventReservation):
+        stamps = (
+            model.objects.filter(
+                club_id__in=list(club_ids),
+                status="paid",
+                is_deleted=False,
+                refunded_at__isnull=True,
+                amount__gt=0,
+            )
+            .exclude(payment_method="ticket")
+            .annotate(income_at=Coalesce("paid_at", "created_at"))
+            .values_list("income_at", flat=True)
+        )
+        for income_at in stamps:
+            local = timezone.localtime(income_at) if income_at else None
+            if not local:
+                continue
+            key = (local.year, local.month)
+            counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
 def paid_reservations_for_clubs(club_ids, year=None, month=None):
     start = end = None
     if year and month:

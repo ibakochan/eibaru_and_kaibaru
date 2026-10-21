@@ -470,7 +470,33 @@ def _stripe_member_fee_totals_local_only(club_ids, year, month):
     }
 
 
-def _list_platform_stripe_invoices(platform_sub):
+def platform_amount_paid_in_month(user, year, month):
+    """Yen the owner paid Kaibaru in this calendar month.
+
+    Dated by the platform invoice's paid_at. That bill covers the owner's
+    clubs together, and the cash 1% inside it is for the previous month.
+    """
+    if not user or not getattr(user, "id", None) or not year or not month:
+        return 0
+    year = int(year)
+    month = int(month)
+    platform_sub = PlatformSubscription.objects.filter(user_id=user.id).first()
+    total = 0
+    for invoice in _list_platform_stripe_invoices(platform_sub, expand_lines=False):
+        paid_at = _ts_to_local_date(
+            (invoice.get("status_transitions") or {}).get("paid_at")
+            or invoice.get("created")
+        )
+        if not paid_at or paid_at.year != year or paid_at.month != month:
+            continue
+        try:
+            total += int(invoice.get("amount_paid") or invoice.get("amount_due") or 0)
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
+def _list_platform_stripe_invoices(platform_sub, *, expand_lines=True):
     _stripe()
     if not platform_sub or not platform_sub.stripe_subscription_id:
         return []
@@ -481,8 +507,9 @@ def _list_platform_stripe_invoices(platform_sub):
             "subscription": platform_sub.stripe_subscription_id,
             "status": "paid",
             "limit": min(24, HISTORY_LIMIT - len(invoices)),
-            "expand": ["data.lines"],
         }
+        if expand_lines:
+            kwargs["expand"] = ["data.lines"]
         if starting_after:
             kwargs["starting_after"] = starting_after
         page = stripe.Invoice.list(**kwargs)
