@@ -96,15 +96,13 @@ def _owner_billing_scope(user):
     if platform_sub and platform_sub.stripe_subscription_id:
         clubs = _covered_clubs(platform_sub)
     else:
+        clubs = []
+    # The preview is for every club this owner has. A subscription with no
+    # covered link still bills from the owner's clubs, not from zero members.
+    if not clubs:
         clubs = list(
             Club.objects.filter(owner_id=user.id, is_deleted=False)
-            .exclude(stripe_subscription_id__isnull=True)
-            .exclude(stripe_subscription_id="")
         )
-        if not clubs:
-            clubs = list(
-                Club.objects.filter(owner_id=user.id, is_deleted=False)
-            )
     cash_club_ids = list(
         Club.objects.filter(owner_id=user.id, is_deleted=False)
         .values_list("id", flat=True)
@@ -394,6 +392,10 @@ def _covered_clubs(platform_sub):
 
 def _desired_quantities(platform_sub):
     clubs = _covered_clubs(platform_sub)
+    if not clubs and platform_sub.user_id:
+        clubs = list(
+            Club.objects.filter(owner_id=platform_sub.user_id, is_deleted=False)
+        )
     if not clubs:
         return {}
     member_count = Member.objects.filter(club__in=clubs).count()
@@ -619,9 +621,9 @@ def _apply_local(mutation):
 def _apply_quantities(platform_sub, mutation):
     if not platform_sub.stripe_subscription_id:
         raise _Wait()
-    if not _covered_clubs(platform_sub):
-        return
     desired = _desired_quantities(platform_sub)
+    if not desired:
+        return
     stripe_sub = stripe.Subscription.retrieve(platform_sub.stripe_subscription_id)
     existing = {
         _price_id_of(item): item

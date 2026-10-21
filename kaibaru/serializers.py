@@ -1382,9 +1382,15 @@ class MemberIncomeInvoiceSerializer(PlatformBillingCashInvoiceSerializer):
     """A paid member invoice on the club income history."""
 
     paid_on = serializers.SerializerMethodField()
+    fee_yen = serializers.IntegerField(read_only=True, allow_null=True)
+    net_yen = serializers.IntegerField(read_only=True, allow_null=True)
 
     class Meta(PlatformBillingCashInvoiceSerializer.Meta):
-        fields = PlatformBillingCashInvoiceSerializer.Meta.fields + ["paid_on"]
+        fields = PlatformBillingCashInvoiceSerializer.Meta.fields + [
+            "paid_on",
+            "fee_yen",
+            "net_yen",
+        ]
 
     def get_paid_on(self, obj):
         paid_at = getattr(obj, "income_at", None)

@@ -39,38 +39,64 @@ def sync_member_quantity(club):
     ).count()
 
     billable_members = max(active_members, 1)
+    full_members = min(billable_members, 100)
+    reduced_members = max(billable_members - 100, 0)
 
     if not club.stripe_subscription_id:
         return
 
     sub = stripe.Subscription.retrieve(club.stripe_subscription_id)
+    items = list(sub["items"]["data"])
 
-    member_item = next(
-        (
-            item for item in sub["items"]["data"]
-            if item["price"]["id"] == settings.STRIPE_MEMBER_PRICE_ID
-        ),
-        None
-    )
+    def price_id_of(item):
+        price = item.get("price")
+        if isinstance(price, str):
+            return price
+        if isinstance(price, dict) and price.get("id"):
+            return price["id"]
+        details = (item.get("pricing") or {}).get("price_details") or {}
+        return details.get("price")
 
+    def find_item(price_id):
+        return next(
+            (item for item in items if price_id_of(item) == price_id),
+            None,
+        )
+
+    changes = []
+    member_item = find_item(settings.STRIPE_MEMBER_PRICE_ID)
+    reduced_item = find_item(settings.STRIPE_MEMBER_PRICE_ID_REDUCED)
     if member_item:
-        stripe.Subscription.modify(
-            sub.id,
-            items=[{
-                "id": member_item.id,
-                "quantity": billable_members,
-            }],
-            proration_behavior="none",
-        )
+        if member_item["quantity"] != full_members:
+            changes.append({"id": member_item["id"], "quantity": full_members})
     else:
-        stripe.Subscription.modify(
-            sub.id,
-            items=[{
-                "price": settings.STRIPE_MEMBER_PRICE_ID,
-                "quantity": billable_members,
-            }],
-            proration_behavior="none",
-        )
+        changes.append({
+            "price": settings.STRIPE_MEMBER_PRICE_ID,
+            "quantity": full_members,
+        })
+    if reduced_members:
+        if reduced_item:
+            if reduced_item["quantity"] != reduced_members:
+                changes.append({
+                    "id": reduced_item["id"],
+                    "quantity": reduced_members,
+                })
+        else:
+            changes.append({
+                "price": settings.STRIPE_MEMBER_PRICE_ID_REDUCED,
+                "quantity": reduced_members,
+            })
+    elif reduced_item:
+        changes.append({"id": reduced_item["id"], "deleted": True})
+
+    if not changes:
+        return
+
+    stripe.Subscription.modify(
+        sub.id,
+        items=changes,
+        proration_behavior="none",
+    )
 
 
 

@@ -262,15 +262,23 @@ def create_checkout_session(request, club_id):
     ).count()
 
     billable_members = max(active_members, 1)
+    full_members = min(billable_members, 100)
+    reduced_members = max(billable_members - 100, 0)
+    line_items = [
+        {"price": settings.STRIPE_BASE_PRICE_ID, "quantity": 1},
+        {"price": settings.STRIPE_MEMBER_PRICE_ID, "quantity": full_members},
+    ]
+    if reduced_members:
+        line_items.append({
+            "price": settings.STRIPE_MEMBER_PRICE_ID_REDUCED,
+            "quantity": reduced_members,
+        })
 
     session = stripe.checkout.Session.create(
         customer=customer.id,
         mode="subscription",
         payment_method_types=["card"],
-        line_items=[
-            {"price": settings.STRIPE_BASE_PRICE_ID, "quantity": 1},
-            {"price": settings.STRIPE_MEMBER_PRICE_ID, "quantity": billable_members},
-        ],
+        line_items=line_items,
         metadata={"club_id": club.id},
         success_url=f"https://{club.subdomain}.kaibaru.jp/?payment=success",
         cancel_url=f"https://{club.subdomain}.kaibaru.jp/?payment=cancel",

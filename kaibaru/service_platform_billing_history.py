@@ -30,6 +30,7 @@ from .service_cash_platform_fee import (
 from .service_platform_subscription import (
     CLUB_BASE_YEN,
     CLUB_EXTRA_YEN,
+    MEMBER_FULL_CAP,
     MEMBER_FULL_YEN,
     MEMBER_REDUCED_YEN,
 )
@@ -219,7 +220,31 @@ def _price_id(line):
     price = line.get("price")
     if isinstance(price, dict):
         return price.get("id")
-    return None
+    if isinstance(price, str):
+        return price
+    details = (line.get("pricing") or {}).get("price_details") or {}
+    return details.get("price")
+
+
+def present_member_tiers(full, reduced, full_yen, reduced_yen):
+    """First 100 members are ¥100, and every member after that is ¥50.
+
+    Older invoices put the whole headcount on the ¥100 price. Split that
+    so the receipt shows both tiers.
+    """
+    try:
+        full = int(full or 0)
+        reduced = int(reduced or 0)
+        full_yen = int(full_yen or 0)
+        reduced_yen = int(reduced_yen or 0)
+    except (TypeError, ValueError):
+        return 0, 0, 0, 0
+    if full > MEMBER_FULL_CAP and reduced == 0:
+        reduced = full - MEMBER_FULL_CAP
+        full = MEMBER_FULL_CAP
+        full_yen = full * MEMBER_FULL_YEN
+        reduced_yen = reduced * MEMBER_REDUCED_YEN
+    return full, reduced, full_yen, reduced_yen
 
 
 def _parse_platform_invoice_lines(lines):
@@ -292,6 +317,15 @@ def _parse_platform_invoice_lines(lines):
     club_count = 1 + extra_clubs if club_base_yen or extra_clubs else extra_clubs
     if club_base_yen and club_count < 1:
         club_count = 1
+
+    full_price_members, reduced_members, member_full_yen, member_reduced_yen = (
+        present_member_tiers(
+            full_price_members,
+            reduced_members,
+            member_full_yen,
+            member_reduced_yen,
+        )
+    )
 
     subscription_yen = (
         club_base_yen
@@ -522,20 +556,27 @@ def format_platform_cycle_receipt(entry):
         lines.append(f"請求書番号：{entry['invoice_number']}")
     lines.append("")
 
+    full_members, reduced_members, full_yen, reduced_yen = present_member_tiers(
+        entry.get("full_price_members"),
+        entry.get("reduced_members"),
+        entry.get("member_full_yen"),
+        entry.get("member_reduced_yen"),
+    )
+
     lines.append("クラブ基本料")
     lines.append(_yen(entry.get("club_base_yen")))
     if (entry.get("extra_clubs") or 0) > 0:
         lines.append("")
         lines.append(f"追加クラブ × {entry['extra_clubs']}")
         lines.append(_yen(entry.get("club_extra_yen")))
-    if (entry.get("full_price_members") or 0) > 0:
+    if full_members > 0:
         lines.append("")
-        lines.append(f"会員（〜100名）× {entry['full_price_members']}")
-        lines.append(_yen(entry.get("member_full_yen")))
-    if (entry.get("reduced_members") or 0) > 0:
+        lines.append(f"会員 {full_members}名 × ¥{MEMBER_FULL_YEN}")
+        lines.append(_yen(full_yen))
+    if reduced_members > 0:
         lines.append("")
-        lines.append(f"会員（超過）× {entry['reduced_members']}")
-        lines.append(_yen(entry.get("member_reduced_yen")))
+        lines.append(f"会員 {reduced_members}名 × ¥{MEMBER_REDUCED_YEN}")
+        lines.append(_yen(reduced_yen))
     if (entry.get("cash_fee_yen") or 0) > 0 or (entry.get("cash_invoice_base_yen") or 0) > 0:
         lines.append("")
         lines.append(f"現金・振込手数料1%（{fee_month}分の請求に対する手数料）")
