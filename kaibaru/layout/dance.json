@@ -2236,8 +2236,217 @@
                 ]
               }
             ]
+          },
+          {
+            "id": "62f38827-1e48-599d-a78a-6ae713264b3f",
+            "x": 50,
+            "y": 596.1,
+            "width": 260,
+            "height": 88,
+            "order": 4,
+            "content": [
+              {
+                "type": "block",
+                "align": "center",
+                "paragraphSize": 0.15,
+                "children": [
+                  {
+                    "text": ""
+                  },
+                  {
+                    "type": "icon",
+                    "icon": "x",
+                    "size": 40,
+                    "color": "#f6efe9",
+                    "children": [
+                      {
+                        "text": ""
+                      }
+                    ]
+                  },
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "align": "center",
+                "paragraphSize": 0.1,
+                "children": [
+                  {
+                    "text": "X",
+                    "fontSize": 16,
+                    "bold": true
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "b9bb6c48-40f1-59bf-9f14-f7f26a723303",
+            "x": 325,
+            "y": 596.1,
+            "width": 260,
+            "height": 88,
+            "order": 5,
+            "content": [
+              {
+                "type": "block",
+                "align": "center",
+                "paragraphSize": 0.15,
+                "children": [
+                  {
+                    "text": ""
+                  },
+                  {
+                    "type": "icon",
+                    "icon": "facebook",
+                    "size": 40,
+                    "color": "#f6efe9",
+                    "children": [
+                      {
+                        "text": ""
+                      }
+                    ]
+                  },
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "align": "center",
+                "paragraphSize": 0.1,
+                "children": [
+                  {
+                    "text": "Facebook",
+                    "fontSize": 16,
+                    "bold": true
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "def67aa2-3f27-53b5-85ce-e13726ee0513",
+            "x": 600,
+            "y": 596.1,
+            "width": 260,
+            "height": 88,
+            "order": 6,
+            "content": [
+              {
+                "type": "block",
+                "align": "center",
+                "paragraphSize": 0.15,
+                "children": [
+                  {
+                    "text": ""
+                  },
+                  {
+                    "type": "icon",
+                    "icon": "youtube",
+                    "size": 40,
+                    "color": "#f6efe9",
+                    "children": [
+                      {
+                        "text": ""
+                      }
+                    ]
+                  },
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "align": "center",
+                "paragraphSize": 0.1,
+                "children": [
+                  {
+                    "text": "YouTube",
+                    "fontSize": 16,
+                    "bold": true
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "85dbb048-774f-59e1-9b0c-f4df93801d0b",
+            "x": 875,
+            "y": 596.1,
+            "width": 260,
+            "height": 88,
+            "order": 7,
+            "content": [
+              {
+                "type": "block",
+                "align": "center",
+                "paragraphSize": 0.15,
+                "children": [
+                  {
+                    "text": ""
+                  },
+                  {
+                    "type": "icon",
+                    "icon": "instagram",
+                    "size": 40,
+                    "color": "#f6efe9",
+                    "children": [
+                      {
+                        "text": ""
+                      }
+                    ]
+                  },
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "align": "center",
+                "paragraphSize": 0.1,
+                "children": [
+                  {
+                    "text": "Instagram",
+                    "fontSize": 16,
+                    "bold": true
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "16c287ea-3ca2-5932-82c4-69ce46ab9d26",
+            "x": 50,
+            "y": 696.1,
+            "width": 1100,
+            "height": 72,
+            "order": 8,
+            "content": [
+              {
+                "type": "block",
+                "align": "center",
+                "paragraphSize": 0.2,
+                "children": [
+                  {
+                    "text": "空のリンクです。レイアウト編集でアイコンをクリックし、自分のURLを貼ってください。無ければ枠の青い鉛筆から「ボックスを削除」。",
+                    "fontSize": 15,
+                    "italic": true
+                  }
+                ]
+              }
+            ]
           }
         ]
+      },
+      "style": {
+        "backgroundColor": "#2c1824"
       }
     },
     "14": {
