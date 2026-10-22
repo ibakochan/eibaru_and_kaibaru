@@ -994,6 +994,10 @@ class MemberReservationService:
                             ]
                         )
 
+                        from .service_member_income import persist_reservation_net
+
+                        persist_reservation_net(reservation)
+
                         send_visitor_reservation_confirmation_email.delay(
                             reservation.id
                         )

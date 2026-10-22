@@ -3161,6 +3161,10 @@ class MemberReservationPaymentReconciler:
                 ]
             )
 
+            from .service_member_income import persist_reservation_net
+
+            persist_reservation_net(reservation)
+
             logger.warning(
                 "[MEMBER RESERVATION RECONCILE] "
                 "Recovered successful PaymentIntent. "
@@ -3473,6 +3477,10 @@ class MemberReservationPaymentReconciler:
                     "is_deleted",
                 ]
             )
+
+            from .service_member_income import persist_reservation_net
+
+            persist_reservation_net(reservation)
 
             logger.warning(
                 "[MEMBER RESERVATION RECONCILE] "
