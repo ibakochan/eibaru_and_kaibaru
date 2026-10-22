@@ -55,59 +55,168 @@ MEMBER_REDUCED_YEN = 50
 MEMBER_FULL_CAP = 100
 
 
-def _subtract_one_calendar_month(day):
-    import calendar
-
-    year = day.year
-    month = day.month - 1
-    if month < 1:
-        month = 12
-        year -= 1
-    last = calendar.monthrange(year, month)[1]
-    return day.replace(year=year, month=month, day=min(day.day, last))
+def _next_calendar_month(day):
+    if day.month == 12:
+        return day.year + 1, 1
+    return day.year, day.month + 1
 
 
-def platform_cycle_received_this_month(platform_sub, today=None):
-    """True when this calendar month's platform renewal has already paid.
+def period_end_is_next_month(platform_sub, today=None):
+    """True when the next platform charge is in the next calendar month.
 
-    After a cycle payment, current_period_end moves forward, so the current
-    period starts in this calendar month. Before that payment, the period
-    still started last month (or earlier).
+    Before that, current_period_end is still this month, so the next invoice
+    uses the previous month's cash. Once the period end has moved into next
+    month, the next invoice uses this month's cash so far.
     """
     today = today or timezone.localdate()
     if not platform_sub or not platform_sub.current_period_end:
         return False
     period_end = timezone.localtime(platform_sub.current_period_end).date()
-    period_start = _subtract_one_calendar_month(period_end)
-    return (
-        period_start.year == today.year
-        and period_start.month == today.month
+    year, month = _next_calendar_month(today)
+    return period_end.year == year and period_end.month == month
+
+
+def _legacy_period(club):
+    return club.subscription_current_period_end or club.expiration_date
+
+
+def _legacy_subscribed_club(user):
+    """An owned club that already pays Kaibaru, from before platform rows existed."""
+    clubs = [
+        club
+        for club in Club.objects.filter(owner_id=user.id, is_deleted=False)
+        if club.stripe_subscription_id
+    ]
+    if not clubs:
+        return None
+    return max(
+        clubs,
+        key=lambda club: (
+            1 if club.subscription_active else 0,
+            _legacy_period(club) or datetime.min.replace(tzinfo=dt_timezone.utc),
+        ),
     )
 
 
-def _owner_billing_scope(user):
-    """Covered clubs (member seats) + all owned clubs (cash 1%)."""
+def _fill_period_from_stripe(platform_sub):
+    _stripe()
+    try:
+        stripe_sub = stripe.Subscription.retrieve(platform_sub.stripe_subscription_id)
+    except Exception:
+        logger.exception(
+            "[PLATFORM SUB] could not read subscription %s",
+            platform_sub.stripe_subscription_id,
+        )
+        return
+    customer = stripe_sub.get("customer")
+    if isinstance(customer, dict):
+        customer = customer.get("id")
+    if customer and platform_sub.stripe_customer_id != customer:
+        platform_sub.stripe_customer_id = customer
+        platform_sub.save(update_fields=["stripe_customer_id", "updated_at"])
+    _remember_period(platform_sub, stripe_sub)
+
+
+def _link_clubs_on_subscription(platform_sub):
+    """Attach owned clubs that already sit on this Stripe subscription."""
+    if not platform_sub.stripe_subscription_id:
+        return
+    period = platform_sub.current_period_end
+    clubs = Club.objects.filter(
+        owner_id=platform_sub.user_id,
+        is_deleted=False,
+        stripe_subscription_id=platform_sub.stripe_subscription_id,
+    )
+    for club in clubs:
+        link, _created = PlatformClub.objects.get_or_create(
+            club=club,
+            defaults={
+                "platform_subscription": platform_sub,
+                "access_until": period,
+            },
+        )
+        if link.platform_subscription_id != platform_sub.id:
+            continue
+        update_fields = []
+        if link.awaiting_checkout:
+            link.awaiting_checkout = False
+            update_fields.append("awaiting_checkout")
+        if period and link.access_until != period:
+            link.access_until = period
+            update_fields.append("access_until")
+        if update_fields:
+            link.save(update_fields=update_fields)
+        if (
+            _created
+            or club.stripe_subscription_id != platform_sub.stripe_subscription_id
+            or club.subscription_current_period_end != period
+        ):
+            _mirror_club(
+                club,
+                platform_sub,
+                canceling=bool(
+                    platform_sub.cancel_at_period_end or link.pending_removal
+                ),
+            )
+
+
+def ensure_platform_subscription(user):
+    """Get the owner's platform subscription, creating it from a legacy club if needed.
+
+    The first checkout creates the row. An owner who subscribed before that
+    row existed gets one filled from the club's Stripe subscription, including
+    current_period_end and each link's access_until.
+    """
     platform_sub = (
         PlatformSubscription.objects
         .filter(user_id=user.id)
-        .prefetch_related("clubs")
         .first()
     )
+    if platform_sub and platform_sub.stripe_subscription_id:
+        if not platform_sub.current_period_end:
+            _fill_period_from_stripe(platform_sub)
+        _link_clubs_on_subscription(platform_sub)
+        return platform_sub
+
+    legacy = _legacy_subscribed_club(user)
+    if platform_sub is None and legacy is None:
+        return None
+    if platform_sub is None:
+        platform_sub = PlatformSubscription.objects.create(user=user)
+    if legacy and not platform_sub.stripe_subscription_id:
+        taken = PlatformSubscription.objects.filter(
+            stripe_subscription_id=legacy.stripe_subscription_id,
+        ).exclude(pk=platform_sub.pk).exists()
+        if not taken:
+            platform_sub.stripe_subscription_id = legacy.stripe_subscription_id
+            platform_sub.stripe_customer_id = legacy.stripe_customer_id
+            platform_sub.current_period_end = _legacy_period(legacy)
+            platform_sub.cancel_at_period_end = bool(
+                legacy.subscription_cancel_at_period_end
+            )
+            platform_sub.status = "active" if legacy.subscription_active else platform_sub.status
+            platform_sub.save()
+            _fill_period_from_stripe(platform_sub)
+    if platform_sub.stripe_subscription_id:
+        _link_clubs_on_subscription(platform_sub)
+    return platform_sub
+
+
+def _next_payment_on(platform_sub):
+    if not platform_sub or not platform_sub.current_period_end:
+        return None
+    return timezone.localtime(platform_sub.current_period_end).date().isoformat()
+
+
+def _owner_billing_scope(user):
+    """Subscribed clubs only. Unsubscribed clubs stay out of the next invoice."""
+    platform_sub = ensure_platform_subscription(user) if user else None
     if platform_sub and platform_sub.stripe_subscription_id:
         clubs = _covered_clubs(platform_sub)
     else:
         clubs = []
-    # The preview is for every club this owner has. A subscription with no
-    # covered link still bills from the owner's clubs, not from zero members.
-    if not clubs:
-        clubs = list(
-            Club.objects.filter(owner_id=user.id, is_deleted=False)
-        )
-    cash_club_ids = list(
-        Club.objects.filter(owner_id=user.id, is_deleted=False)
-        .values_list("id", flat=True)
-    )
-    use_current = platform_cycle_received_this_month(platform_sub)
+    cash_club_ids = [club.id for club in clubs]
+    use_current = period_end_is_next_month(platform_sub)
     return platform_sub, clubs, cash_club_ids, use_current
 
 
@@ -154,14 +263,16 @@ def estimate_platform_bill_for_owner(user):
         "subscription_yen": 0,
         "total_yen": 0,
         "stripe_application_fee_yen": 0,
+        "next_payment_on": None,
         **empty_cash,
     }
     if not user or not getattr(user, "id", None):
         return empty
 
-    _platform_sub, clubs, cash_club_ids, use_current = _owner_billing_scope(user)
-    # After this month's platform cycle, next invoice is next month and uses
-    # this month's cash volume; before that, next invoice still bills last month.
+    platform_sub, clubs, cash_club_ids, use_current = _owner_billing_scope(user)
+    next_payment_on = _next_payment_on(platform_sub)
+    # Period end in the next month: this month's non-Stripe invoices, plus an
+    # estimate for cash subscriptions that have no cycle invoice yet.
     cash_fees = estimate_cash_platform_fees_for_clubs(
         cash_club_ids,
         next_invoice_uses_current_month=use_current,
@@ -172,6 +283,7 @@ def estimate_platform_bill_for_owner(user):
         return {
             **empty,
             **cash_fees,
+            "next_payment_on": next_payment_on,
             "total_yen": cash_fees.get("cash_fee_next_yen", 0),
             "stripe_application_fee_yen": _stripe_take_yen(cash_club_ids, cash_fees),
         }
@@ -205,6 +317,7 @@ def estimate_platform_bill_for_owner(user):
         "subscription_yen": subscription_yen,
         "total_yen": subscription_yen + cash_fee_next_yen,
         "stripe_application_fee_yen": stripe_fee_yen,
+        "next_payment_on": next_payment_on,
         **cash_fees,
     }
 
@@ -392,10 +505,6 @@ def _covered_clubs(platform_sub):
 
 def _desired_quantities(platform_sub):
     clubs = _covered_clubs(platform_sub)
-    if not clubs and platform_sub.user_id:
-        clubs = list(
-            Club.objects.filter(owner_id=platform_sub.user_id, is_deleted=False)
-        )
     if not clubs:
         return {}
     member_count = Member.objects.filter(club__in=clubs).count()
@@ -538,7 +647,7 @@ def _apply_local(mutation):
             link.awaiting_checkout = False
             link.pending_removal = False
             link.removal_kind = ""
-            link.access_until = None
+            link.access_until = platform_sub.current_period_end
             link.save(
                 update_fields=[
                     "awaiting_checkout",
@@ -821,7 +930,7 @@ def start_club_subscription(club, user):
         raise PlatformActionError(FIRST_OF_MONTH_BLOCKED)
 
     _stripe()
-    platform_sub = _get_or_create_platform_sub(user)
+    platform_sub = ensure_platform_subscription(user) or _get_or_create_platform_sub(user)
     existing_link = PlatformClub.objects.filter(club=club).first()
     if existing_link and existing_link.platform_subscription_id != platform_sub.id:
         raise PlatformActionError("このクラブは別の契約に入っています。")
@@ -1073,7 +1182,7 @@ def _checkout_completed_locked(session):
         link.awaiting_checkout = False
         link.pending_removal = False
         link.removal_kind = ""
-        link.access_until = None
+        link.access_until = platform_sub.current_period_end
         link.save(
             update_fields=[
                 "awaiting_checkout",
