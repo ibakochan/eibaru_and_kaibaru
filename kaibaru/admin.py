@@ -180,11 +180,12 @@ class ClubMonthlyIncomeAdmin(admin.ModelAdmin):
         "total_yen",
         "platform_fee_yen",
         "receipt_total_yen",
+        "calculated_at",
         "created_at",
     )
     search_fields = ("club__subdomain", "club__title")
     raw_id_fields = ("club",)
-    readonly_fields = ("created_at",)
+    readonly_fields = ("calculated_at", "created_at",)
     date_hierarchy = "month"
 
 

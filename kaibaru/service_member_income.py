@@ -18,7 +18,7 @@ from django.db import IntegrityError
 from django.db.models import Q, Sum
 from django.utils import timezone
 
-from .models import ClubMonthlyIncome, ExpenseReceipt, Invoice
+from .models import ClubMonthlyIncome, EventReservation, ExpenseReceipt, Invoice, Reservation
 from .service_cash_platform_fee import month_bounds, previous_month
 from .service_platform_billing_history import platform_amount_paid_in_month
 from .service_paid_reservations import (
@@ -536,12 +536,68 @@ def _invoice_settled(invoice):
     return gross
 
 
+def _reservation_ids(reservations):
+    lesson_ids = []
+    event_ids = []
+    for row in reservations:
+        parts = str(row.get("id") or "").split("-", 1)
+        if len(parts) != 2:
+            continue
+        kind, pk = parts
+        try:
+            pk_n = int(pk)
+        except (TypeError, ValueError):
+            continue
+        if kind == "event":
+            event_ids.append(pk_n)
+        else:
+            lesson_ids.append(pk_n)
+    return lesson_ids, event_ids
+
+
+def _income_changed_since(calculated_at, invoices, reservations):
+    """True when this month has an invoice or reservation newer than the snapshot."""
+    if calculated_at is None:
+        return True
+    for invoice in invoices:
+        issued_at = getattr(invoice, "issued_at", None)
+        if issued_at and issued_at > calculated_at:
+            return True
+    lesson_ids, event_ids = _reservation_ids(reservations)
+    if lesson_ids and Reservation.objects.filter(
+        pk__in=lesson_ids,
+        created_at__gt=calculated_at,
+    ).exists():
+        return True
+    if event_ids and EventReservation.objects.filter(
+        pk__in=event_ids,
+        created_at__gt=calculated_at,
+    ).exists():
+        return True
+    return False
+
+
+def _month_figures(club, user, year, month, start, invoices, reservations):
+    invoice_total = sum(_invoice_settled(invoice) for invoice in invoices)
+    reservation_total = sum(
+        int(row.get("net_yen") if row.get("net_yen") is not None else row.get("amount") or 0)
+        for row in reservations
+    )
+    prev_year, prev_month = previous_month(start)
+    return (
+        invoice_total + reservation_total,
+        platform_amount_paid_in_month(user, prev_year, prev_month),
+        _expense_total_for_month(club, year, month),
+    )
+
+
 def member_income_month(club, user, year, month):
     """One month of 収納歴.
 
     The first open stores the income total, the previous month's Kaibaru
-    bill, and that month's receipt total. Later opens read those numbers.
-    Stripe invoices missing a net are filled in and saved.
+    bill, and that month's receipt total. A later open recalculates those
+    when an invoice issued after calculated_at, or a reservation created
+    after it, is part of this month. Stripe rows missing a net are filled in.
     """
     year = int(year)
     month = int(month)
@@ -559,26 +615,34 @@ def member_income_month(club, user, year, month):
     _ensure_reservation_nets(reservations, stripe_account)
 
     record = ClubMonthlyIncome.objects.filter(club=club, month=start).first()
-    if record is None:
-        invoice_total = sum(_invoice_settled(invoice) for invoice in rows)
-        reservation_total = sum(
-            int(row.get("net_yen") if row.get("net_yen") is not None else row.get("amount") or 0)
-            for row in reservations
+    if record is None or _income_changed_since(record.calculated_at, rows, reservations):
+        total, platform_fee, expense_total = _month_figures(
+            club, user, year, month, start, rows, reservations,
         )
-        total = invoice_total + reservation_total
-        prev_year, prev_month = previous_month(start)
-        platform_fee = platform_amount_paid_in_month(user, prev_year, prev_month)
-        expense_total = _expense_total_for_month(club, year, month)
-        try:
-            record = ClubMonthlyIncome.objects.create(
-                club=club,
-                month=start,
-                total_yen=total,
-                platform_fee_yen=platform_fee,
-                receipt_total_yen=expense_total,
-            )
-        except IntegrityError:
-            record = ClubMonthlyIncome.objects.get(club=club, month=start)
+        calculated_at = timezone.now()
+        if record is None:
+            try:
+                record = ClubMonthlyIncome.objects.create(
+                    club=club,
+                    month=start,
+                    total_yen=total,
+                    platform_fee_yen=platform_fee,
+                    receipt_total_yen=expense_total,
+                    calculated_at=calculated_at,
+                )
+            except IntegrityError:
+                record = ClubMonthlyIncome.objects.get(club=club, month=start)
+        else:
+            record.total_yen = total
+            record.platform_fee_yen = platform_fee
+            record.receipt_total_yen = expense_total
+            record.calculated_at = calculated_at
+            record.save(update_fields=[
+                "total_yen",
+                "platform_fee_yen",
+                "receipt_total_yen",
+                "calculated_at",
+            ])
 
     total = int(record.total_yen or 0)
     platform_fee = int(record.platform_fee_yen or 0)

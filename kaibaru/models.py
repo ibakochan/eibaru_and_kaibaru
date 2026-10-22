@@ -2711,8 +2711,9 @@ class ExpenseReceipt(models.Model):
 class ClubMonthlyIncome(models.Model):
     """Stored income snapshot for one club and one calendar month.
 
-    Created the first time that month is opened in 収納歴. Later opens read
-    these amounts instead of calling Stripe again.
+    Created the first time that month is opened in 収納歴. A later open
+    recalculates when an invoice or reservation newer than calculated_at
+    is part of the month.
     """
 
     club = models.ForeignKey(
@@ -2724,6 +2725,11 @@ class ClubMonthlyIncome(models.Model):
     total_yen = models.IntegerField(default=0)
     platform_fee_yen = models.IntegerField(default=0)
     receipt_total_yen = models.IntegerField(default=0)
+    calculated_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When these totals were last calculated.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
