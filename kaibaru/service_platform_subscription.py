@@ -271,12 +271,15 @@ def estimate_platform_bill_for_owner(user):
 
     platform_sub, clubs, cash_club_ids, use_current = _owner_billing_scope(user)
     next_payment_on = _next_payment_on(platform_sub)
-    # Period end in the next month: this month's non-Stripe invoices, plus an
-    # estimate for cash subscriptions that have no cycle invoice yet.
-    cash_fees = estimate_cash_platform_fees_for_clubs(
-        cash_club_ids,
-        next_invoice_uses_current_month=use_current,
-    )
+    # While the next charge is still next month, this month's cash is unfinished.
+    # The preview shows that fee only after the calendar month changes.
+    if use_current:
+        cash_fees = empty_cash
+    else:
+        cash_fees = estimate_cash_platform_fees_for_clubs(
+            cash_club_ids,
+            next_invoice_uses_current_month=False,
+        )
 
     club_count = len(clubs)
     if club_count == 0:
@@ -355,10 +358,18 @@ def platform_billing_detail_for_owner(user):
         {"id": club.id, "subdomain": club.subdomain}
         for club in clubs
     ]
-    line_items = list_cash_fee_line_items_for_clubs(
-        cash_club_ids,
-        next_invoice_uses_current_month=use_current,
-    )
+    if use_current:
+        line_items = {
+            "cash_invoices": [],
+            "cash_expected": [],
+            "source_year": None,
+            "source_month": None,
+        }
+    else:
+        line_items = list_cash_fee_line_items_for_clubs(
+            cash_club_ids,
+            next_invoice_uses_current_month=False,
+        )
     return {
         "platform_bill": bill,
         "members": member_rows,
