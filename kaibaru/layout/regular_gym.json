@@ -2228,6 +2228,7 @@
       "id": 14,
       "order": 14,
       "title": "会員ページ",
+      "profile_title": "プロフィール",
       "slug": "会員ページ",
       "type": "member",
       "icon": "memberCard"

@@ -1317,6 +1317,7 @@
       "id": 12,
       "order": 12,
       "title": "会員ページ",
+      "profile_title": "プロフィール",
       "slug": "会員ページ",
       "type": "member",
       "icon": "memberCard"

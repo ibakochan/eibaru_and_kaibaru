@@ -72,7 +72,9 @@ class LayoutTemplateFileTests(SimpleTestCase):
 
         join = next(s for s in ordered if s["type"] == "join")
         self.assertEqual(join["slug"], "join")
-        self.assertLess(join["order"], next(s for s in ordered if s["type"] == "member")["order"])
+        member = next(s for s in ordered if s["type"] == "member")
+        self.assertEqual(member["profile_title"], "プロフィール")
+        self.assertLess(join["order"], member["order"])
 
         for sid, section in sections.items():
             self.assertEqual(section["id"], int(sid))

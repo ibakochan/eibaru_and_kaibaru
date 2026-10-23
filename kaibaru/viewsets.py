@@ -4546,6 +4546,7 @@ class ClubViewSet(viewsets.ModelViewSet):
         action_type = request.data.get("action")
         section_id = request.data.get("section")  # only for remove
         title = request.data.get("title", "")
+        profile_title = request.data.get("profile_title", "")
         style = request.data.get("style")
         requested_order = request.data.get("order")
         section_type = request.data.get("type", "custom")
@@ -4641,6 +4642,8 @@ class ClubViewSet(viewsets.ModelViewSet):
                 "type": section_type,
                 "slug": slug,
             }
+            if section_type == "member":
+                new_section["profile_title"] = (profile_title or "").strip() or "プロフィール"
             if style:
                 new_section["style"] = style
             if icon:
@@ -4746,6 +4749,9 @@ class ClubViewSet(viewsets.ModelViewSet):
             # ---- title update ----
             if title:
                 section["title"] = title
+
+            if section.get("type") == "member" and "profile_title" in request.data:
+                section["profile_title"] = (profile_title or "").strip() or "プロフィール"
 
             if section.get("type") == "event" and "event" in request.data:
                 try:
