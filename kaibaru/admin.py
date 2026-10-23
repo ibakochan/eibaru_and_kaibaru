@@ -126,12 +126,15 @@ class PlatformSubscriptionAdmin(admin.ModelAdmin):
         "current_period_end",
         "cancel_at_period_end",
         "last_paid_invoice_id",
+        "stripe_account_id",
+        "stripe_onboarding_completed",
     )
-    list_filter = ("status", "cancel_at_period_end")
+    list_filter = ("status", "cancel_at_period_end", "stripe_onboarding_completed")
     search_fields = (
         "stripe_subscription_id",
         "stripe_customer_id",
         "last_paid_invoice_id",
+        "stripe_account_id",
         "user__email",
     )
     raw_id_fields = ("user",)

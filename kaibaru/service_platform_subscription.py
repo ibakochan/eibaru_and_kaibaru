@@ -24,6 +24,7 @@ from .models import (
     PlatformClub,
     PlatformSubscription,
 )
+from .service_connected_account import mirror_connected_account
 from .tasks_emails import (
     send_club_deleted_emails,
     send_platform_cycle_paid_email,
@@ -682,6 +683,7 @@ def _apply_local(mutation):
             platform_sub.cancel_at_period_end = False
             platform_sub.save(update_fields=["cancel_at_period_end", "updated_at"])
             _mirror_club(club, platform_sub, canceling=False)
+            mirror_connected_account(platform_sub, clubs=[club])
         else:
             link.awaiting_checkout = True
             link.pending_removal = False
@@ -1203,6 +1205,7 @@ def _checkout_completed_locked(session):
             ]
         )
         _mirror_club(club, platform_sub, canceling=False)
+        mirror_connected_account(platform_sub, clubs=[club])
 
     mutation_id = metadata.get("mutation_id")
     if mutation_id:

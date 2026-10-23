@@ -1132,56 +1132,9 @@ class MembershipPlanViewSet(viewsets.ModelViewSet):
             plan_type=plan_type,
         )
 
-        # ---------------------------------------------------------
-        # Create Stripe Product
-        # ---------------------------------------------------------
-
-        product_data = {
-            "name": plan.name,
-            "metadata": {
-                "club_id": str(club.id),
-                "plan_id": str(plan.id),
-                "plan_type": plan.plan_type,
-            },
-        }
-
-        if plan.description:
-            product_data["description"] = (
-                plan.description
-            )
-
-        product = stripe.Product.create(
-            **product_data,
-            stripe_account=club.stripe_account_id
-        )
-
-        # ---------------------------------------------------------
-        # Create Stripe Price
-        # ---------------------------------------------------------
-
-        stripe_price = stripe.Price.create(
-            product=product.id,
-            unit_amount=int(plan.price),
-            currency=plan.currency,
-            recurring={
-                "interval": plan.interval
-            },
-            stripe_account=club.stripe_account_id
-        )
-
-        # ---------------------------------------------------------
-        # Save Stripe IDs
-        # ---------------------------------------------------------
-
-        plan.stripe_product_id = product.id
-        plan.stripe_price_id = stripe_price.id
-
-        plan.save(
-            update_fields=[
-                "stripe_product_id",
-                "stripe_price_id",
-            ]
-        )
+        if club.stripe_account_id:
+            from .service_connected_account import ensure_plan_price
+            ensure_plan_price(plan, club.stripe_account_id)
 
     def perform_update(self, serializer):
         plan = self.get_object()
@@ -1224,58 +1177,14 @@ class MembershipPlanViewSet(viewsets.ModelViewSet):
 
         updated_plan = serializer.save()
 
-        stripe_account = club.stripe_account_id
-
-        # ---------------------------------------------------------
-        # Update Stripe Product
-        # ---------------------------------------------------------
-
-        if (
-            updated_plan.stripe_product_id
-            and (
-                old_name != updated_plan.name
-                or old_description
-                != updated_plan.description
-            )
+        if club.stripe_account_id and (
+            old_price != updated_plan.price
+            or old_name != updated_plan.name
+            or old_description != updated_plan.description
+            or not updated_plan.stripe_price_id
         ):
-
-            stripe.Product.modify(
-                updated_plan.stripe_product_id,
-                name=updated_plan.name,
-                description=(
-                    updated_plan.description or ""
-                ),
-                stripe_account=stripe_account
-            )
-
-        # ---------------------------------------------------------
-        # Price changed → create NEW Stripe Price
-        # ---------------------------------------------------------
-
-        if old_price != updated_plan.price:
-
-            new_price = stripe.Price.create(
-                product=updated_plan.stripe_product_id,
-                unit_amount=int(
-                    updated_plan.price
-                ),
-                currency=updated_plan.currency,
-                recurring={
-                    "interval":
-                        updated_plan.interval
-                },
-                stripe_account=stripe_account
-            )
-
-            updated_plan.stripe_price_id = (
-                new_price.id
-            )
-
-            updated_plan.save(
-                update_fields=[
-                    "stripe_price_id"
-                ]
-            )
+            from .service_connected_account import ensure_plan_price
+            ensure_plan_price(updated_plan, club.stripe_account_id)
 
 
 class SlateImageViewSet(viewsets.ModelViewSet):

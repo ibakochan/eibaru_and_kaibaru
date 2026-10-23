@@ -35,7 +35,12 @@ from .service_cash_subscription import MemberCashSubscriptionService
 from .service_add_plan_cash import CashAddPlanService
 from .service_reservation import MemberReservationService
 
-from .models import TicketType, TicketPackage, Club, Member, MembershipPlan, SubscriptionItem, Subscription, StripeCustomer, Lesson, PlatformClub
+from .models import TicketType, TicketPackage, Club, Member, MembershipPlan, SubscriptionItem, Subscription, StripeCustomer, Lesson, PlatformClub, PlatformSubscription
+from .service_connected_account import (
+    mirror_connected_account,
+    platform_subscription_for_owner,
+    save_connected_account,
+)
 from .service_platform_subscription import (
     PlatformActionError,
     PlatformBusy,
@@ -1263,6 +1268,20 @@ def create_stripe_account_link(request, club_id):
 
     if not club_has_platform_subscription(club):
         return JsonResponse({"error": CONNECT_REQUIRES_SUBSCRIPTION}, status=400)
+
+    platform_sub = platform_subscription_for_owner(request.user)
+    if platform_sub and platform_sub.stripe_account_id:
+        mirror_connected_account(platform_sub)
+        club.refresh_from_db()
+        if club.stripe_onboarding_completed:
+            return JsonResponse({"message": "Stripe already connected"})
+        account_link = stripe.AccountLink.create(
+            account=platform_sub.stripe_account_id,
+            refresh_url=f"https://{club.subdomain}.kaibaru.jp/owner/settings",
+            return_url=f"https://{club.subdomain}.kaibaru.jp/owner/settings",
+            type="account_onboarding",
+        )
+        return JsonResponse({"url": account_link.url})
 
     if club.stripe_onboarding_completed:
         return JsonResponse({"message": "Stripe already connected"})
@@ -2588,10 +2607,12 @@ def stripe_oauth_callback(request):
     if club.owner != request.user:
         return JsonResponse({"error": "この操作を行う権限がありません。"}, status=403)
 
-    if club.stripe_account_id and club.stripe_onboarding_completed:
-        return JsonResponse({"message": "Stripe already connected"})
-
-    
+    platform_sub, _created = PlatformSubscription.objects.get_or_create(
+        user=club.owner,
+    )
+    if platform_sub.stripe_account_id and platform_sub.stripe_onboarding_completed:
+        mirror_connected_account(platform_sub)
+        return redirect(f"https://{club.subdomain}.kaibaru.jp/owner/settings")
 
     try:
         # Exchange code for access token
@@ -2604,27 +2625,14 @@ def stripe_oauth_callback(request):
         if not stripe_account_id:
             return JsonResponse({"error": "Stripeアカウントが無効です。"}, status=400)
 
-        if Club.objects.filter(stripe_account_id=stripe_account_id).exclude(id=club.id).exists():
-            return JsonResponse(
-                {"error": "このStripeアカウントは別のクラブにすでに接続されています。"},
-                status=400
-            )
-
-        # Save to Club
-        club.stripe_account_id = stripe_account_id
-
         account = stripe.Account.retrieve(stripe_account_id)
+        try:
+            save_connected_account(platform_sub, account)
+        except ValueError as exc:
+            return JsonResponse({"error": str(exc)}, status=400)
 
-        club.stripe_charges_enabled = account.get("charges_enabled", False)
-        club.stripe_payouts_enabled = account.get("payouts_enabled", False)
-        club.stripe_details_submitted = account.get("details_submitted", False)
-        
-        # ✅ SAFER: only mark onboarding complete when details_submitted
-        club.stripe_onboarding_completed = club.stripe_details_submitted
-        club.save()
-        
         # If onboarding not finished, create AccountLink
-        if not club.stripe_onboarding_completed:
+        if not platform_sub.stripe_onboarding_completed:
             account_link = stripe.AccountLink.create(
                 account=stripe_account_id,
                 refresh_url=f"https://{club.subdomain}.kaibaru.jp/owner/settings",

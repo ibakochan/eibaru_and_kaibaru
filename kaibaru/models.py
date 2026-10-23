@@ -197,7 +197,12 @@ class Club(models.Model):
     objects = ActiveClubManager()  
     all_objects = models.Manager()
 
-    stripe_account_id = models.CharField(max_length=255, null=True, blank=True, unique=True)
+    stripe_account_id = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text="Copy of the owner's platform subscription connected account.",
+    )
     stripe_charges_enabled = models.BooleanField(default=False)
     stripe_payouts_enabled = models.BooleanField(default=False)
     stripe_onboarding_completed = models.BooleanField(default=False)
@@ -258,6 +263,11 @@ class PlatformSubscription(models.Model):
     current_period_end = models.DateTimeField(null=True, blank=True)
     cancel_at_period_end = models.BooleanField(default=False)
     last_paid_invoice_id = models.CharField(max_length=255, null=True, blank=True)
+    stripe_account_id = models.CharField(max_length=255, null=True, blank=True, unique=True)
+    stripe_charges_enabled = models.BooleanField(default=False)
+    stripe_payouts_enabled = models.BooleanField(default=False)
+    stripe_onboarding_completed = models.BooleanField(default=False)
+    stripe_details_submitted = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

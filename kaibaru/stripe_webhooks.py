@@ -1900,17 +1900,14 @@ def stripe_platform_webhook(request):
         send_subscription_activated_emails.delay(club.id, invoice["id"])
 
     elif event["type"] == "account.updated":
+        from .service_connected_account import record_connected_account_update
         account = event["data"]["object"]
-        stripe_account_id = account["id"]
-
-        club = Club.all_objects.filter(stripe_account_id=stripe_account_id).first()
-        if club:
-            club.stripe_charges_enabled = account.get("charges_enabled", False)
-            club.stripe_payouts_enabled = account.get("payouts_enabled", False)
-            club.stripe_details_submitted = account.get("details_submitted", False)
-            club.stripe_onboarding_completed = club.stripe_details_submitted
-            club.save()
-            logger.info(f"[PLATFORM WEBHOOK] Updated Stripe onboarding for club {club.subdomain}")
+        platform_sub = record_connected_account_update(account)
+        if platform_sub:
+            logger.info(
+                "[PLATFORM WEBHOOK] Updated Stripe onboarding for user %s",
+                platform_sub.user_id,
+            )
 
     elif event["type"] == "customer.subscription.deleted":
 
