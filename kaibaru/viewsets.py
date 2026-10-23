@@ -1575,6 +1575,28 @@ class MemberViewSet(viewsets.ModelViewSet):
             sync_member_quantity(club)
         return response
 
+    def perform_create(self, serializer):
+        subdomain = self.request.data.get("club_subdomain")
+        if not subdomain:
+            raise serializers.ValidationError({
+                "club_subdomain": "この項目は必須です。",
+            })
+        club = Club.objects.filter(
+            subdomain=subdomain,
+            is_deleted=False,
+        ).first()
+        if not club:
+            raise serializers.ValidationError({
+                "club_subdomain": "クラブが見つかりません。",
+            })
+        if club.owner_id != self.request.user.id:
+            raise serializers.ValidationError({"detail": "許可なし"})
+        serializer.save(
+            club=club,
+            user=self.request.user,
+            owner=self.request.user,
+        )
+
 
     @action(detail=True, methods=["delete"])
     def remove(self, request, pk=None):

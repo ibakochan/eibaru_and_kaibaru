@@ -1821,10 +1821,13 @@ class MemberSerializer(serializers.ModelSerializer):
             data.pop("subscription_items", None)
     
 
-        members = getattr(instance, "_prefetched_objects_cache", {}).get(
-            "members",
-            instance.club.members.all()
-        )
+        if club is None:
+            members = []
+        else:
+            members = getattr(instance, "_prefetched_objects_cache", {}).get(
+                "members",
+                club.members.all(),
+            )
 
         user_member = next((m for m in members if m.user_id == user.id), None)
 
