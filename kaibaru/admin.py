@@ -4,6 +4,7 @@ from .models import (
     Club,
     ClubMonthlyIncome,
     InstructorPay,
+    ClubManager,
     TeacherInvoice,
     TeacherInvoiceLesson,
     Lesson,
@@ -241,6 +242,24 @@ class TeacherInvoiceAdmin(admin.ModelAdmin):
     inlines = (TeacherInvoiceLessonInline,)
 
 
+class ClubManagerAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "member",
+        "members",
+        "plans",
+        "lessons",
+        "site",
+        "events",
+        "teacher_pay",
+        "member_payments",
+        "expenses",
+        "income",
+    )
+    raw_id_fields = ("member",)
+
+
+admin.site.register(ClubManager, ClubManagerAdmin)
 admin.site.register(InstructorPay, InstructorPayAdmin)
 admin.site.register(TeacherInvoice, TeacherInvoiceAdmin)
 admin.site.register(PlatformSubscription, PlatformSubscriptionAdmin)

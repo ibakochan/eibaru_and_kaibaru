@@ -51,7 +51,9 @@ def update_club_billing_settings(request, club_id):
     """
     club = get_object_or_404(Club, id=club_id, is_deleted=False)
 
-    if club.owner != request.user:
+    from .manager_permissions import has_permission
+
+    if not has_permission(request.user, club, "plans"):
         return HttpResponseForbidden("You do not own this club")
 
     if not club.stripe_onboarding_completed:
@@ -236,11 +238,12 @@ def bulk_mark_cash_invoices_paid(request):
         )
 
 
+    from .manager_permissions import has_permission, manages_own_invoice
+
     invoices = (
         Invoice.objects
         .filter(
             id__in=invoice_ids,
-            club__owner=request.user,
             status="open",
             subscription__billing_method__in=[
                 "cash",
@@ -251,8 +254,20 @@ def bulk_mark_cash_invoices_paid(request):
         .select_related(
             "subscription",
             "club",
+            "payer",
         )
     )
+    allowed = []
+    for invoice in invoices:
+        if not has_permission(request.user, invoice.club, "member_payments"):
+            return JsonResponse({"error": "許可なし"}, status=403)
+        if manages_own_invoice(request.user, invoice):
+            return JsonResponse(
+                {"error": "自分の請求は確認できません。"},
+                status=403,
+            )
+        allowed.append(invoice)
+    invoices = allowed
 
 
     result = (

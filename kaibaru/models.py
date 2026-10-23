@@ -2754,6 +2754,32 @@ class ClubMonthlyIncome(models.Model):
         return f"{self.club_id} {self.month}"
 
 
+class ClubManager(models.Model):
+    """What a manager may do for one club.
+
+    The row exists while the member is a manager. A manager cannot be
+    given permission over their own pay or their own bills.
+    """
+
+    member = models.OneToOneField(
+        Member,
+        on_delete=models.CASCADE,
+        related_name="manager_role",
+    )
+    members = models.BooleanField(default=False)
+    plans = models.BooleanField(default=False)
+    lessons = models.BooleanField(default=False)
+    site = models.BooleanField(default=False)
+    events = models.BooleanField(default=False)
+    teacher_pay = models.BooleanField(default=False)
+    member_payments = models.BooleanField(default=False)
+    expenses = models.BooleanField(default=False)
+    income = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"{self.member_id}"
+
+
 class InstructorPay(models.Model):
     """How one club pays one instructor.
 
@@ -2771,7 +2797,7 @@ class InstructorPay(models.Model):
         Member,
         on_delete=models.CASCADE,
         related_name="instructor_pays",
-        limit_choices_to={"is_instructor": True},
+        limit_choices_to=Q(is_instructor=True) | Q(is_manager=True),
     )
     monthly_amount = models.PositiveIntegerField(
         null=True,
@@ -2798,9 +2824,9 @@ class InstructorPay(models.Model):
                 raise ValidationError(
                     {"instructor": "この指導者はこのクラブの会員ではありません。"}
                 )
-            if not self.instructor.is_instructor:
+            if not self.instructor.is_instructor and not self.instructor.is_manager:
                 raise ValidationError(
-                    {"instructor": "会員を指導者にしてから給与を設定してください。"}
+                    {"instructor": "会員を指導者か管理人にしてから給与を設定してください。"}
                 )
 
     def __str__(self):

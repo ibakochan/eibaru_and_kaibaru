@@ -1571,6 +1571,7 @@ class MemberSerializer(serializers.ModelSerializer):
     subscription_items = serializers.SerializerMethodField()
     tickets = serializers.SerializerMethodField()
     other_owned_club_subdomains = serializers.SerializerMethodField()
+    manager_permissions = serializers.SerializerMethodField()
 
     class Meta:
         model = Member
@@ -1594,6 +1595,7 @@ class MemberSerializer(serializers.ModelSerializer):
             "participation_limit",
             "is_manager",
             "is_instructor",
+            "manager_permissions",
             "birth_date",
             "gender",
             "age",
@@ -1605,7 +1607,7 @@ class MemberSerializer(serializers.ModelSerializer):
             "tickets",
             "other_owned_club_subdomains",
         ]
-        read_only_fields = ["id", "user", "is_manager", "is_instructor",]
+        read_only_fields = ["id", "user", "is_manager", "is_instructor", "manager_permissions"]
 
     def _apply_role_flags(self, instance):
         request = self.context.get("request")
@@ -1614,25 +1616,89 @@ class MemberSerializer(serializers.ModelSerializer):
         if not user or not user.is_authenticated or not club:
             return
 
+        from .manager_permissions import has_permission
+
         is_owner = club.owner_id == user.id
-        is_manager = club.members.filter(user=user, is_manager=True).exists()
         data = getattr(self, "initial_data", {}) or {}
 
-        if (is_owner or is_manager) and "is_instructor" in data:
-            instance.is_instructor = str(data.get("is_instructor")).lower() in ("true", "1", "yes")
+        if (is_owner or has_permission(user, club, "members")) and "is_instructor" in data:
+            if not is_owner and instance.user_id == user.id:
+                pass
+            else:
+                instance.is_instructor = str(data.get("is_instructor")).lower() in ("true", "1", "yes")
 
         if is_owner and "is_manager" in data:
             instance.is_manager = str(data.get("is_manager")).lower() in ("true", "1", "yes")
+
+    def _sync_manager_role(self, instance):
+        from .models import ClubManager
+        from .manager_permissions import PERMISSION_FIELDS
+
+        if not instance.is_manager:
+            ClubManager.objects.filter(member=instance).delete()
+            return
+        role, _created = ClubManager.objects.get_or_create(member=instance)
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        club = instance.club
+        if not user or not club or club.owner_id != user.id:
+            return
+        raw = (getattr(self, "initial_data", {}) or {}).get("manager_permissions")
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except (TypeError, ValueError):
+                return
+        if not isinstance(raw, dict):
+            return
+        for field in PERMISSION_FIELDS:
+            if field in raw:
+                setattr(role, field, str(raw[field]).lower() in ("true", "1", "yes", "True"))
+        role.save()
+
+    def get_manager_permissions(self, obj):
+        from .manager_permissions import permission_map
+
+        if not obj.is_manager:
+            return None
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        club = obj.club
+        if not user or not getattr(user, "is_authenticated", False) or club is None:
+            return None
+        if club.owner_id != user.id and obj.user_id != user.id:
+            return None
+        try:
+            role = obj.manager_role
+        except Exception:
+            role = None
+        return permission_map(role)
 
     def create(self, validated_data):
         instance = super().create(validated_data)
         self._apply_role_flags(instance)
         instance.save(update_fields=["is_instructor", "is_manager"])
+        self._sync_manager_role(instance)
         return instance
 
     def update(self, instance, validated_data):
+        from .manager_permissions import has_permission
+
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        club = instance.club
+        if user and getattr(user, "is_authenticated", False) and club is not None:
+            is_owner = club.owner_id == user.id
+            is_self = instance.user_id == user.id or instance.owner_id == user.id
+            if not is_owner and not is_self and not has_permission(user, club, "members"):
+                raise serializers.ValidationError({"detail": "許可なし"})
+            if not is_owner and instance.user_id == user.id:
+                validated_data.pop("has_paid_joining_fee", None)
+                validated_data.pop("has_been_charged_joining_fee", None)
         self._apply_role_flags(instance)
-        return super().update(instance, validated_data)
+        updated = super().update(instance, validated_data)
+        self._sync_manager_role(updated)
+        return updated
 
     def get_tickets(self, obj):
         grants = getattr(
@@ -1802,10 +1868,15 @@ class MemberSerializer(serializers.ModelSerializer):
 
         club = getattr(instance, "club", None)
 
+        from .manager_permissions import has_permission
+
         if "viewer_is_manager" in self.context:
             viewer_is_manager = bool(self.context["viewer_is_manager"])
         elif club is not None:
-            viewer_is_manager = club.members.filter(user=user, is_manager=True).exists()
+            viewer_is_manager = (
+                has_permission(user, club, "members")
+                or has_permission(user, club, "member_payments")
+            )
         else:
             viewer_is_manager = False
 
@@ -2700,15 +2771,17 @@ class ClubSerializer(serializers.ModelSerializer):
             ]
             return self._member_data(club, visible, viewer_is_manager=False)
 
+        from .manager_permissions import has_permission
+
         user_member = next((member for member in members if member.user_id == user.id), None)
-        viewer_is_manager = any(
-            member.user_id == user.id and member.is_manager
-            for member in members
+        viewer_is_manager = (
+            has_permission(user, club, "members")
+            or has_permission(user, club, "member_payments")
         )
         if (
             club.owner_id != user.id
             and user_member
-            and (user_member.is_instructor or user_member.is_manager)
+            and (user_member.is_instructor or has_permission(user, club, "members"))
         ):
             return self._member_data(
                 club,
@@ -3043,7 +3116,9 @@ class ClubSerializer(serializers.ModelSerializer):
         if not request or not request.user.is_authenticated:
             return []
 
-        if request.user.id != club.owner_id:
+        from .manager_permissions import has_permission, manages_own_invoice
+
+        if not has_permission(request.user, club, "member_payments"):
             return []
 
         qs = Invoice.objects.filter(
@@ -3056,7 +3131,12 @@ class ClubSerializer(serializers.ModelSerializer):
             ],
         ).select_related(
             "subscription",
+            "payer",
         )
+        qs = [
+            invoice for invoice in qs
+            if not manages_own_invoice(request.user, invoice)
+        ]
 
         return InvoiceSerializer(
             qs,
@@ -3070,7 +3150,9 @@ class ClubSerializer(serializers.ModelSerializer):
         if not request or not request.user.is_authenticated:
             return []
 
-        if request.user.id != club.owner_id:
+        from .manager_permissions import has_permission
+
+        if not has_permission(request.user, club, "members"):
             return []
 
         qs = club.join_requests.order_by("-created_at")

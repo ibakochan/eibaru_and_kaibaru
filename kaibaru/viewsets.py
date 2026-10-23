@@ -4,6 +4,7 @@ from rest_framework.decorators import action
 from rest_framework.viewsets import ViewSet
 from rest_framework.response import Response
 from .models import TicketGrant, TicketType, TicketPackage, Reservation, Event, EventReservation, MemberRecord, Invoice, MemberPricingAdjustment, Discount, DiscountCondition, SubscriptionItem, Member, Club, Lesson, Participation, SlateImage, JoinRequest, MembershipPlan, Subscription, ExpenseReceipt
+from .manager_permissions import has_permission, manages_own_money, SELF_PAYMENT_MESSAGE
 from accounts.models import CustomUser
 from django.contrib.auth import login
 import re
@@ -140,10 +141,8 @@ def build_pricing_map(club, request_user=None, preview_member=None):
     # -------------------------
     # ROLE LOGIC
     # -------------------------
-    is_club_owner = (request_user and club.owner_id == request_user.id)
     user_member = Member.objects.filter(club=club, user=request_user).first()
-    is_manager = user_member.is_manager if user_member else False
-    can_view_all = is_club_owner or is_manager
+    can_view_all = has_permission(request_user, club, "members")
     is_authenticated = (
         request_user.is_authenticated
         if request_user
@@ -805,7 +804,7 @@ class MemberPricingAdjustmentViewSet(viewsets.ModelViewSet):
             raise serializers.ValidationError({"club": "クラブが見つかりません。"})
 
         # permission check (same pattern as your other viewsets)
-        if club.owner_id != self.request.user.id:
+        if not has_permission(self.request.user, club, "plans"):
             raise serializers.ValidationError({"detail": "この操作を行う権限がありません。"})
 
         member = Member.objects.filter(id=member_id, club=club).first()
@@ -820,7 +819,7 @@ class MemberPricingAdjustmentViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         obj = self.get_object()
 
-        if obj.club.owner_id != self.request.user.id:
+        if not has_permission(self.request.user, obj.club, "plans"):
             raise serializers.ValidationError({"detail": "この操作を行う権限がありません。"})
 
         # optional safety: prevent cross-club reassignment
@@ -830,7 +829,7 @@ class MemberPricingAdjustmentViewSet(viewsets.ModelViewSet):
     # DELETE
     # -------------------------
     def perform_destroy(self, instance):
-        if instance.club.owner_id != self.request.user.id:
+        if not has_permission(self.request.user, instance.club, "plans"):
             raise serializers.ValidationError({"detail": "この操作を行う権限がありません。"})
 
         instance.delete()
@@ -857,7 +856,7 @@ class DiscountViewSet(viewsets.ModelViewSet):
         if not club:
             raise serializers.ValidationError({"club": "クラブが見つかりません。"})
 
-        if club.owner != self.request.user:
+        if not has_permission(self.request.user, club, "plans"):
             raise serializers.ValidationError({"detail": "この操作を行う権限がありません。"})
 
         serializer.save(club=club)
@@ -865,13 +864,13 @@ class DiscountViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         discount = self.get_object()
 
-        if discount.club.owner != self.request.user:
+        if not has_permission(self.request.user, discount.club, "plans"):
             raise serializers.ValidationError({"detail": "この操作を行う権限がありません。"})
 
         serializer.save()
 
     def perform_destroy(self, instance):
-        if instance.club.owner != self.request.user:
+        if not has_permission(self.request.user, instance.club, "plans"):
             raise serializers.ValidationError({"detail": "この操作を行う権限がありません。"})
 
         instance.delete()
@@ -914,9 +913,9 @@ class MembershipPlanViewSet(viewsets.ModelViewSet):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     def perform_destroy(self, instance):
-        if self.request.user != instance.club.owner:
+        if not has_permission(self.request.user, instance.club, "plans"):
             raise serializers.ValidationError(
-                {"detail": "プランを削除できるのはオーナーのみです。"}
+                {"detail": "許可なし"}
             )
 
         if would_break_any_bundle(instance):
@@ -1020,9 +1019,9 @@ class MembershipPlanViewSet(viewsets.ModelViewSet):
                 "club_subdomain": "クラブが見つかりません。"
             })
 
-        if self.request.user != club.owner:
+        if not has_permission(self.request.user, club, "plans"):
             raise serializers.ValidationError({
-                "detail": "プランを作成できるのはオーナーのみです。"
+                "detail": "許可なし"
             })
 
         name = serializer.validated_data.get(
@@ -1140,9 +1139,9 @@ class MembershipPlanViewSet(viewsets.ModelViewSet):
         plan = self.get_object()
         club = plan.club
 
-        if self.request.user != club.owner:
+        if not has_permission(self.request.user, club, "plans"):
             raise serializers.ValidationError({
-                "detail": "プランを更新できるのはオーナーのみです。"
+                "detail": "許可なし"
             })
 
         # ---------------------------------------------------------
@@ -1200,6 +1199,9 @@ class SlateImageViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         club_id = request.data.get("club")
         image_file = request.FILES.get("image")
+        club = Club.objects.filter(id=club_id, is_deleted=False).first()
+        if club is None or not has_permission(request.user, club, "site"):
+            return Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
 
         if not club_id or not image_file:
             return Response(
@@ -1345,7 +1347,10 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
     
         join_requests = JoinRequest.objects.filter(id__in=ids).select_related("club")
 
-        if join_requests.exclude(club__owner_id=request.user.id).exists():
+        if any(
+            not has_permission(request.user, join_request.club, "members")
+            for join_request in join_requests
+        ):
             return Response({"detail": "この操作を行う権限がありません。"}, status=403)
     
         if not join_requests.exists():
@@ -1446,7 +1451,10 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
             )
     
         # ❗ validate ownership BEFORE delete
-        if join_requests.exclude(club__owner_id=request.user.id).exists():
+        if any(
+            not has_permission(request.user, join_request.club, "members")
+            for join_request in join_requests
+        ):
             return Response(
                 {"detail": "一部の申請に対してこの操作を行う権限がありません。"},
                 status=status.HTTP_403_FORBIDDEN
@@ -1498,11 +1506,12 @@ class MemberViewSet(viewsets.ModelViewSet):
             raise serializers.ValidationError({
                 "club_subdomain": "クラブが見つかりません。",
             })
-        if club.owner_id != self.request.user.id:
+        if not has_permission(self.request.user, club, "members"):
             raise serializers.ValidationError({"detail": "許可なし"})
+        is_owner = club.owner_id == self.request.user.id
         serializer.save(
             club=club,
-            user=self.request.user,
+            user=self.request.user if is_owner else None,
             owner=self.request.user,
         )
 
@@ -1512,9 +1521,14 @@ class MemberViewSet(viewsets.ModelViewSet):
         """Delete a member"""
         member = self.get_object()
 
-        if member.club.owner_id != request.user.id:
+        if not has_permission(request.user, member.club, "members"):
             return Response(
                 {"detail": "許可なし"},
+                status=403
+            )
+        if manages_own_money(request.user, member):
+            return Response(
+                {"detail": "自分の会員記録は削除できません。"},
                 status=403
             )
         
@@ -1621,9 +1635,9 @@ class TicketTypeViewSet(viewsets.ModelViewSet):
                 "club_subdomain": "クラブが見つかりません。"
             })
 
-        if club.owner_id != self.request.user.id:
+        if not has_permission(self.request.user, club, "plans"):
             raise serializers.ValidationError({
-                "detail": "チケット種類を作成できるのはオーナーのみです。"
+                "detail": "許可なし"
             })
 
         serializer.save(club=club)
@@ -1631,17 +1645,17 @@ class TicketTypeViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         ticket_type = self.get_object()
 
-        if ticket_type.club.owner_id != self.request.user.id:
+        if not has_permission(self.request.user, ticket_type.club, "plans"):
             raise serializers.ValidationError({
-                "detail": "チケット種類を更新できるのはオーナーのみです。"
+                "detail": "許可なし"
             })
 
         serializer.save(club=ticket_type.club)
 
     def perform_destroy(self, instance):
-        if instance.club.owner_id != self.request.user.id:
+        if not has_permission(self.request.user, instance.club, "plans"):
             raise serializers.ValidationError({
-                "detail": "チケット種類を削除できるのはオーナーのみです。"
+                "detail": "許可なし"
             })
 
         # Don't actually delete it if packages/grants may reference it.
@@ -1716,9 +1730,9 @@ class TicketPackageViewSet(viewsets.ModelViewSet):
                 "club_subdomain": "クラブが見つかりません。"
             })
 
-        if club.owner_id != self.request.user.id:
+        if not has_permission(self.request.user, club, "plans"):
             raise serializers.ValidationError({
-                "detail": "チケットパッケージを作成できるのはオーナーのみです。"
+                "detail": "許可なし"
             })
 
         package = serializer.save(
@@ -1779,9 +1793,9 @@ class TicketPackageViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         package = self.get_object()
 
-        if package.club.owner_id != self.request.user.id:
+        if not has_permission(self.request.user, package.club, "plans"):
             raise serializers.ValidationError({
-                "detail": "チケットパッケージを更新できるのはオーナーのみです。"
+                "detail": "許可なし"
             })
 
         old_name = package.name
@@ -1875,9 +1889,9 @@ class TicketPackageViewSet(viewsets.ModelViewSet):
                 )
 
     def perform_destroy(self, instance):
-        if instance.club.owner_id != self.request.user.id:
+        if not has_permission(self.request.user, instance.club, "plans"):
             raise serializers.ValidationError({
-                "detail": "チケットパッケージを削除できるのはオーナーのみです。"
+                "detail": "許可なし"
             })
     
         instance.active = False
@@ -2350,7 +2364,7 @@ class EventReservationViewSet(viewsets.ViewSet):
             .filter(id=reservation_id, is_deleted=False)
             .first()
         )
-        if reservation is None or reservation.club.owner_id != request.user.id:
+        if reservation is None or not has_permission(request.user, reservation.club, "events"):
             return Response(
                 {"detail": "予約が見つかりません。"},
                 status=status.HTTP_404_NOT_FOUND,
@@ -2408,7 +2422,7 @@ class EventReservationViewSet(viewsets.ViewSet):
             .filter(id=reservation_id, is_deleted=False)
             .first()
         )
-        if reservation is None or reservation.club.owner_id != request.user.id:
+        if reservation is None or not has_permission(request.user, reservation.club, "events"):
             return Response(
                 {"detail": "予約が見つかりません。"},
                 status=status.HTTP_404_NOT_FOUND,
@@ -2453,7 +2467,7 @@ class DuelViewSet(viewsets.ViewSet):
             .filter(id=pk)
             .first()
         )
-        if duel is None or duel.event.club.owner_id != request.user.id:
+        if duel is None or not has_permission(request.user, duel.event.club, "events"):
             return None, Response(
                 {"detail": "対戦が見つかりません。"},
                 status=status.HTTP_404_NOT_FOUND,
@@ -2554,7 +2568,7 @@ class TournamentViewSet(viewsets.ViewSet):
             .filter(id=pk)
             .first()
         )
-        if tournament is None or tournament.event.club.owner_id != request.user.id:
+        if tournament is None or not has_permission(request.user, tournament.event.club, "events"):
             return None, Response(
                 {"detail": "トーナメントが見つかりません。"},
                 status=status.HTTP_404_NOT_FOUND,
@@ -2776,7 +2790,7 @@ class CompetitionViewSet(viewsets.ViewSet):
             .filter(id=pk)
             .first()
         )
-        if competition is None or competition.event.club.owner_id != request.user.id:
+        if competition is None or not has_permission(request.user, competition.event.club, "events"):
             return None, Response(
                 {"detail": "競技が見つかりません。"},
                 status=status.HTTP_404_NOT_FOUND,
@@ -2917,7 +2931,7 @@ class TeamBattleViewSet(viewsets.ViewSet):
             .filter(id=pk)
             .first()
         )
-        if battle is None or battle.event.club.owner_id != request.user.id:
+        if battle is None or not has_permission(request.user, battle.event.club, "events"):
             return None, Response(
                 {"detail": "団体戦が見つかりません。"},
                 status=status.HTTP_404_NOT_FOUND,
@@ -3074,7 +3088,7 @@ class TeamTournamentViewSet(viewsets.ViewSet):
             .filter(id=pk)
             .first()
         )
-        if tournament is None or tournament.event.club.owner_id != request.user.id:
+        if tournament is None or not has_permission(request.user, tournament.event.club, "events"):
             return None, Response(
                 {"detail": "団体トーナメントが見つかりません。"},
                 status=status.HTTP_404_NOT_FOUND,
@@ -3338,12 +3352,12 @@ class MemberRecordViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if not user.is_authenticated:
             return False
-        if member.club_id and member.club.owner_id == user.id:
+        if member.club_id and has_permission(user, member.club, "members"):
             return True
         return member.owner_id == user.id or member.user_id == user.id
 
     def _require_owner(self, club):
-        if club.owner_id != self.request.user.id:
+        if not has_permission(self.request.user, club, "members"):
             return Response(
                 {"detail": "許可なし"},
                 status=status.HTTP_403_FORBIDDEN,
@@ -3440,6 +3454,8 @@ class LessonViewSet(viewsets.ModelViewSet):
         club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
         if not club:
             raise serializers.ValidationError({"club_subdomain": "クラブが見つかりません。"})
+        if not has_permission(self.request.user, club, "lessons"):
+            raise serializers.ValidationError({"detail": "許可なし"})
         
         section_id = self.request.data.get("section_id")
 
@@ -3460,6 +3476,17 @@ class LessonViewSet(viewsets.ModelViewSet):
                 raise serializers.ValidationError({"instructor_id": "Instructor not found or not valid."})
 
         serializer.save(club=club, instructor=instructor, section_id=section_id)
+
+    def perform_update(self, serializer):
+        lesson = serializer.instance
+        if not has_permission(self.request.user, lesson.club, "lessons"):
+            raise serializers.ValidationError({"detail": "許可なし"})
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        if not has_permission(self.request.user, instance.club, "lessons"):
+            raise serializers.ValidationError({"detail": "許可なし"})
+        instance.delete()
 
 
 
@@ -3492,12 +3519,11 @@ class ParticipationViewSet(viewsets.ModelViewSet):
             )
 
         club = lesson.club
-        allowed = club.owner_id == request.user.id or Member.objects.filter(
+        allowed = has_permission(request.user, club, "lessons") or Member.objects.filter(
             club=club,
+            is_instructor=True,
         ).filter(
             Q(user=request.user) | Q(owner=request.user),
-        ).filter(
-            Q(is_instructor=True) | Q(is_manager=True),
         ).exists()
         if not allowed:
             return Response(
@@ -3561,7 +3587,13 @@ class ParticipationViewSet(viewsets.ModelViewSet):
                 )
 
             # permission
-            if lesson.club.owner_id != request.user.id:
+            instructor_here = Member.objects.filter(
+                club=lesson.club,
+                is_instructor=True,
+            ).filter(
+                Q(user=request.user) | Q(owner=request.user),
+            ).exists()
+            if not has_permission(request.user, lesson.club, "lessons") and not instructor_here:
                 return Response(
                     {"detail": "許可されていません"},
                     status=status.HTTP_403_FORBIDDEN
@@ -3699,6 +3731,17 @@ def _owner_club(request, subdomain):
     return club, None
 
 
+def _staff_club(request, subdomain, permission):
+    from .manager_permissions import has_permission
+
+    club = Club.objects.filter(is_deleted=False, subdomain=subdomain).first()
+    if not club:
+        return None, Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+    if not has_permission(request.user, club, permission):
+        return None, Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
+    return club, None
+
+
 def _parse_expense_fields(request, *, image_required):
     from datetime import date as date_cls
 
@@ -3832,6 +3875,48 @@ def _expense_months(club):
 class ClubViewSet(viewsets.ModelViewSet):
     serializer_class = ClubSerializer
     queryset = Club.objects.all()
+
+    def perform_update(self, serializer):
+        club = serializer.instance
+        user = self.request.user
+        if club.owner_id != getattr(user, "id", None):
+            if not has_permission(user, club, "site") and not has_permission(user, club, "plans"):
+                raise serializers.ValidationError({"detail": "許可なし"})
+            owner_only = {
+                "subscription_active",
+                "subscription_cancel_at_period_end",
+                "subscription_current_period_end",
+                "stripe_charges_enabled",
+                "stripe_payouts_enabled",
+                "stripe_onboarding_completed",
+                "stripe_details_submitted",
+                "stripe_account_id",
+                "stripe_subscription_id",
+                "expiration_date",
+                "joining_fee",
+                "owner",
+            }
+            plan_fields = {
+                "subscription_mode",
+                "stripe_anchor_date",
+                "trial_price",
+                "trials_disabled",
+                "visitor_reservation_price",
+                "visitor_reservations_disabled",
+                "member_reservation_price",
+                "member_reservations_disabled",
+            }
+            for field in owner_only:
+                serializer.validated_data.pop(field, None)
+            if not has_permission(user, club, "plans"):
+                for field in plan_fields:
+                    serializer.validated_data.pop(field, None)
+            if not has_permission(user, club, "site"):
+                kept = owner_only | plan_fields
+                for field in list(serializer.validated_data):
+                    if field not in kept:
+                        serializer.validated_data.pop(field, None)
+        serializer.save()
 
     def get_queryset(self):
         return self._club_queryset(boards=False)
@@ -4059,11 +4144,9 @@ class ClubViewSet(viewsets.ModelViewSet):
         from .serializers import MemberIncomeInvoiceSerializer
         from .service_member_income import member_income_index, member_income_month
 
-        club = Club.objects.filter(is_deleted=False, subdomain=subdomain).first()
-        if not club:
-            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
-        if not request.user.is_authenticated or club.owner_id != request.user.id:
-            return Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
+        club, error = _staff_club(request, subdomain, "income")
+        if error:
+            return error
 
         year = request.query_params.get("year")
         month = request.query_params.get("month")
@@ -4110,7 +4193,7 @@ class ClubViewSet(viewsets.ModelViewSet):
     def expenses(self, request, subdomain=None):
         from .serializers import ExpenseReceiptSerializer
 
-        club, error = _owner_club(request, subdomain)
+        club, error = _staff_club(request, subdomain, "expenses")
         if error:
             return error
 
@@ -4137,7 +4220,7 @@ class ClubViewSet(viewsets.ModelViewSet):
     def expense_record(self, request, subdomain=None, receipt_id=None):
         from .serializers import ExpenseReceiptSerializer
 
-        club, error = _owner_club(request, subdomain)
+        club, error = _staff_club(request, subdomain, "expenses")
         if error:
             return error
         receipt = ExpenseReceipt.objects.filter(club=club, id=receipt_id).first()
@@ -4177,7 +4260,7 @@ class ClubViewSet(viewsets.ModelViewSet):
     def teacher_pay(self, request, subdomain=None):
         from .service_instructor_pay import teacher_pay_overview
 
-        club, error = _owner_club(request, subdomain)
+        club, error = _staff_club(request, subdomain, "teacher_pay")
         if error:
             return error
         return Response(teacher_pay_overview(club))
@@ -4190,10 +4273,10 @@ class ClubViewSet(viewsets.ModelViewSet):
     def instructor_pays(self, request, subdomain=None):
         from .service_instructor_pay import save_instructor_pay
 
-        club, error = _owner_club(request, subdomain)
+        club, error = _staff_club(request, subdomain, "teacher_pay")
         if error:
             return error
-        payload, message = save_instructor_pay(club, request.data)
+        payload, message = save_instructor_pay(club, request.data, request.user)
         if message:
             return Response({"detail": message}, status=status.HTTP_400_BAD_REQUEST)
         return Response(payload)
@@ -4206,10 +4289,10 @@ class ClubViewSet(viewsets.ModelViewSet):
     def teacher_invoices(self, request, subdomain=None):
         from .service_instructor_pay import create_teacher_invoice
 
-        club, error = _owner_club(request, subdomain)
+        club, error = _staff_club(request, subdomain, "teacher_pay")
         if error:
             return error
-        payload, message = create_teacher_invoice(club, request.data)
+        payload, message = create_teacher_invoice(club, request.data, request.user)
         if message:
             return Response({"detail": message}, status=status.HTTP_400_BAD_REQUEST)
         return Response(payload, status=status.HTTP_201_CREATED)
@@ -4222,14 +4305,17 @@ class ClubViewSet(viewsets.ModelViewSet):
     def teacher_invoice_record(self, request, subdomain=None, invoice_id=None):
         from .service_instructor_pay import delete_teacher_invoice, update_teacher_invoice
 
-        club, error = _owner_club(request, subdomain)
+        club, error = _staff_club(request, subdomain, "teacher_pay")
         if error:
             return error
         if request.method == "DELETE":
-            if not delete_teacher_invoice(club, invoice_id):
+            deleted, message = delete_teacher_invoice(club, invoice_id, request.user)
+            if message:
+                return Response({"detail": message}, status=status.HTTP_400_BAD_REQUEST)
+            if not deleted:
                 return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
             return Response(status=status.HTTP_204_NO_CONTENT)
-        payload, message = update_teacher_invoice(club, invoice_id, request.data)
+        payload, message = update_teacher_invoice(club, invoice_id, request.data, request.user)
         if payload is None and message is None:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
         if message:
@@ -4328,11 +4414,7 @@ class ClubViewSet(viewsets.ModelViewSet):
         club = self.get_object()
         if not request.user.is_authenticated:
             return Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
-        is_owner = club.owner_id == request.user.id
-        is_manager = Member.objects.filter(
-            club=club, user=request.user, is_manager=True
-        ).exists()
-        if not is_owner and not is_manager:
+        if not has_permission(request.user, club, "site"):
             return Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
 
         template = request.data.get("template") or ""
@@ -4380,6 +4462,8 @@ class ClubViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["patch"], url_path="update_section_layout")
     def update_section_layout(self, request, pk=None):
         club = self.get_object()
+        if not has_permission(request.user, club, "site"):
+            return Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
 
         section_id = request.data.get("section_id")
         layout = request.data.get("layout")
@@ -4425,7 +4509,7 @@ class ClubViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="finish-event")
     def finish_event(self, request, pk=None):
         club = self.get_object()
-        if not request.user.is_authenticated or club.owner_id != request.user.id:
+        if not has_permission(request.user, club, "events"):
             return Response(
                 {"detail": "このイベントを終了する権限がありません。"},
                 status=status.HTTP_403_FORBIDDEN,
@@ -4443,7 +4527,7 @@ class ClubViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="pause-event")
     def pause_event(self, request, pk=None):
         club = self.get_object()
-        if not request.user.is_authenticated or club.owner_id != request.user.id:
+        if not has_permission(request.user, club, "events"):
             return Response(
                 {"detail": "予約受付を変更する権限がありません。"},
                 status=status.HTTP_403_FORBIDDEN,
@@ -4461,7 +4545,7 @@ class ClubViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="cancel-event")
     def cancel_event(self, request, pk=None):
         club = self.get_object()
-        if not request.user.is_authenticated or club.owner_id != request.user.id:
+        if not has_permission(request.user, club, "events"):
             return Response(
                 {"detail": "このイベントを中止する権限がありません。"},
                 status=status.HTTP_403_FORBIDDEN,
@@ -4480,7 +4564,7 @@ class ClubViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="update-cancellation")
     def update_cancellation(self, request, pk=None):
         club = self.get_object()
-        if not request.user.is_authenticated or club.owner_id != request.user.id:
+        if not has_permission(request.user, club, "events"):
             return Response(
                 {"detail": "中止の内容を変更する権限がありません。"},
                 status=status.HTTP_403_FORBIDDEN,
@@ -4499,7 +4583,7 @@ class ClubViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="event-visibility")
     def event_visibility(self, request, pk=None):
         club = self.get_object()
-        if not request.user.is_authenticated or club.owner_id != request.user.id:
+        if not has_permission(request.user, club, "events"):
             return Response(
                 {"detail": "公開範囲を変更する権限がありません。"},
                 status=status.HTTP_403_FORBIDDEN,
@@ -4556,6 +4640,14 @@ class ClubViewSet(viewsets.ModelViewSet):
 
         sections = page_content.setdefault("sections", {})
         next_id = page_content.setdefault("next_section_id", 1)
+        target = sections.get(str(section_id)) if section_id else None
+        touches_event = (
+            (action_type == "add" and section_type == "event")
+            or (target and target.get("type") == "event")
+        )
+        needed = "events" if touches_event else "site"
+        if not has_permission(request.user, club, needed):
+            return Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
 
         # Convert to list for ordering logic
         section_list = list(sections.values())

@@ -3,8 +3,10 @@ import logging
 from datetime import timedelta
 
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.utils import timezone
 
+from .manager_permissions import SELF_PAYMENT_MESSAGE, manages_own_money
 from .models import InstructorPay, Lesson, Member, TeacherInvoice, TeacherInvoiceLesson
 
 logger = logging.getLogger(__name__)
@@ -29,8 +31,10 @@ def create_monthly_teacher_invoices(year=None, month=None):
         .filter(
             active=True,
             monthly_amount__gt=0,
-            instructor__is_instructor=True,
             club__is_deleted=False,
+        )
+        .filter(
+            Q(instructor__is_instructor=True) | Q(instructor__is_manager=True)
         )
         .select_related("club", "instructor")
     )
@@ -150,16 +154,23 @@ def _lesson_lines(club, raw):
     return parsed, None
 
 
-def _instructor(club, instructor_id):
+def _payable_member(club, instructor_id):
     try:
         instructor_id = int(instructor_id)
     except (TypeError, ValueError):
         return None
-    return Member.objects.filter(
-        club=club,
-        id=instructor_id,
-        is_instructor=True,
-    ).first()
+    member = Member.objects.filter(club=club, id=instructor_id).first()
+    if member is None:
+        return None
+    if not member.is_instructor and not member.is_manager:
+        return None
+    return member
+
+
+def _self_pay_block(actor, member):
+    if manages_own_money(actor, member):
+        return SELF_PAYMENT_MESSAGE
+    return None
 
 
 def _line_payload(line):
@@ -247,10 +258,13 @@ def teacher_pay_overview(club):
     }
 
 
-def save_instructor_pay(club, payload):
-    member = _instructor(club, payload.get("instructor_id"))
+def save_instructor_pay(club, payload, actor=None):
+    member = _payable_member(club, payload.get("instructor_id"))
     if not member:
         return None, "指導者が見つかりません。"
+    blocked = _self_pay_block(actor, member)
+    if blocked:
+        return None, blocked
     amount, error = _yen(payload.get("monthly_amount"), required=False)
     if error:
         return None, error
@@ -262,10 +276,13 @@ def save_instructor_pay(club, payload):
     return _pay_payload(pay), None
 
 
-def create_teacher_invoice(club, payload):
-    member = _instructor(club, payload.get("instructor_id"))
+def create_teacher_invoice(club, payload, actor=None):
+    member = _payable_member(club, payload.get("instructor_id"))
     if not member:
         return None, "指導者が見つかりません。"
+    blocked = _self_pay_block(actor, member)
+    if blocked:
+        return None, blocked
     year, month, error = _year_month(payload)
     if error:
         return None, error
@@ -293,7 +310,7 @@ def create_teacher_invoice(club, payload):
     return _invoice_payload(invoice), None
 
 
-def update_teacher_invoice(club, invoice_id, payload):
+def update_teacher_invoice(club, invoice_id, payload, actor=None):
     invoice = (
         TeacherInvoice.objects
         .filter(club=club, id=invoice_id)
@@ -302,10 +319,13 @@ def update_teacher_invoice(club, invoice_id, payload):
     if not invoice:
         return None, None
     if "instructor_id" in payload:
-        member = _instructor(club, payload.get("instructor_id"))
+        member = _payable_member(club, payload.get("instructor_id"))
         if not member:
             return None, "指導者が見つかりません。"
         invoice.instructor = member
+    blocked = _self_pay_block(actor, invoice.instructor)
+    if blocked:
+        return None, blocked
     if "year" in payload or "month" in payload:
         year, month, error = _year_month({
             "year": payload.get("year", invoice.year),
@@ -343,6 +363,12 @@ def update_teacher_invoice(club, invoice_id, payload):
     return _invoice_payload(invoice), None
 
 
-def delete_teacher_invoice(club, invoice_id):
-    deleted, _counts = TeacherInvoice.objects.filter(club=club, id=invoice_id).delete()
-    return deleted > 0
+def delete_teacher_invoice(club, invoice_id, actor=None):
+    invoice = TeacherInvoice.objects.filter(club=club, id=invoice_id).select_related("instructor").first()
+    if invoice is None:
+        return False, None
+    blocked = _self_pay_block(actor, invoice.instructor)
+    if blocked:
+        return False, blocked
+    invoice.delete()
+    return True, None
