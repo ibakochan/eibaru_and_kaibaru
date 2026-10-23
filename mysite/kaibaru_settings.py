@@ -230,6 +230,13 @@ CRISPY_TEMPLATE_PACK = "bootstrap5"
 
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 
+CELERY_BEAT_SCHEDULE = {
+    "create-monthly-instructor-invoices": {
+        "task": "kaibaru.tasks.create_monthly_instructor_invoices",
+        "schedule": crontab(minute=0, hour=6, day_of_month="1"),
+    },
+}
+
 
 STRIPE_SECRET_KEY = env('STRIPE_SECRET_KEY')
 STRIPE_PUBLISHABLE_KEY = env('STRIPE_PUBLISHABLE_KEY')

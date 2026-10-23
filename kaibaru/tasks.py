@@ -12,6 +12,7 @@ from .tasks_emails import send_subscription_activated_emails, send_club_deleted_
 logger = logging.getLogger(__name__)
 
 from .models import Participation, Club, Subscription, Invoice, MembershipPlan, PlatformClub
+from .service_instructor_pay import create_monthly_teacher_invoices
 from .service_platform_subscription import (
     delete_overdue_platform_subscriptions,
     reconcile_open_platform_mutations,
@@ -967,3 +968,16 @@ def reconcile_scheduled_plan_deletions():
     )
 
     return results
+
+
+@shared_task
+def create_monthly_instructor_invoices():
+    """Create last month's statement for each instructor on a fixed salary."""
+    logger.info("[TEACHER PAY] Starting monthly statements")
+    try:
+        result = create_monthly_teacher_invoices()
+    except Exception:
+        logger.exception("[TEACHER PAY] Monthly statements failed")
+        raise
+    logger.info("[TEACHER PAY] Finished monthly statements result=%s", result)
+    return result

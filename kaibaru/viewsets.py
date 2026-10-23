@@ -4169,6 +4169,73 @@ class ClubViewSet(viewsets.ModelViewSet):
             ExpenseReceiptSerializer(receipt, context={"request": request}).data
         )
 
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/teacher-pay",
+    )
+    def teacher_pay(self, request, subdomain=None):
+        from .service_instructor_pay import teacher_pay_overview
+
+        club, error = _owner_club(request, subdomain)
+        if error:
+            return error
+        return Response(teacher_pay_overview(club))
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/instructor-pays",
+    )
+    def instructor_pays(self, request, subdomain=None):
+        from .service_instructor_pay import save_instructor_pay
+
+        club, error = _owner_club(request, subdomain)
+        if error:
+            return error
+        payload, message = save_instructor_pay(club, request.data)
+        if message:
+            return Response({"detail": message}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(payload)
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/teacher-invoices",
+    )
+    def teacher_invoices(self, request, subdomain=None):
+        from .service_instructor_pay import create_teacher_invoice
+
+        club, error = _owner_club(request, subdomain)
+        if error:
+            return error
+        payload, message = create_teacher_invoice(club, request.data)
+        if message:
+            return Response({"detail": message}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(payload, status=status.HTTP_201_CREATED)
+
+    @action(
+        detail=False,
+        methods=["patch", "delete"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/teacher-invoices/(?P<invoice_id>\d+)",
+    )
+    def teacher_invoice_record(self, request, subdomain=None, invoice_id=None):
+        from .service_instructor_pay import delete_teacher_invoice, update_teacher_invoice
+
+        club, error = _owner_club(request, subdomain)
+        if error:
+            return error
+        if request.method == "DELETE":
+            if not delete_teacher_invoice(club, invoice_id):
+                return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        payload, message = update_teacher_invoice(club, invoice_id, request.data)
+        if payload is None and message is None:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        if message:
+            return Response({"detail": message}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(payload)
+
     @action(detail=True, methods=["post"], url_path="pricing_preview")
     def pricing_preview(self, request, pk=None):
     

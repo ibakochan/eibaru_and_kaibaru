@@ -3,6 +3,9 @@ from .models import (
     Member,
     Club,
     ClubMonthlyIncome,
+    InstructorPay,
+    TeacherInvoice,
+    TeacherInvoiceLesson,
     Lesson,
     Event,
     EventPrice,
@@ -192,6 +195,54 @@ class ClubMonthlyIncomeAdmin(admin.ModelAdmin):
     date_hierarchy = "month"
 
 
+class TeacherInvoiceLessonInline(admin.TabularInline):
+    model = TeacherInvoiceLesson
+    extra = 0
+    raw_id_fields = ("lesson",)
+
+
+class InstructorPayAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "club",
+        "instructor",
+        "monthly_amount",
+        "active",
+        "updated_at",
+    )
+    list_filter = ("active",)
+    search_fields = (
+        "club__subdomain",
+        "instructor__full_name",
+    )
+    raw_id_fields = ("club", "instructor")
+    readonly_fields = ("created_at", "updated_at")
+
+
+class TeacherInvoiceAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "club",
+        "instructor",
+        "year",
+        "month",
+        "amount",
+        "paid_at",
+        "created_at",
+    )
+    list_filter = ("year", "month")
+    search_fields = (
+        "club__subdomain",
+        "instructor__full_name",
+        "note",
+    )
+    raw_id_fields = ("club", "instructor", "instructor_pay")
+    readonly_fields = ("created_at",)
+    inlines = (TeacherInvoiceLessonInline,)
+
+
+admin.site.register(InstructorPay, InstructorPayAdmin)
+admin.site.register(TeacherInvoice, TeacherInvoiceAdmin)
 admin.site.register(PlatformSubscription, PlatformSubscriptionAdmin)
 admin.site.register(PlatformClub, PlatformClubAdmin)
 admin.site.register(ClubSubscriptionMutation, ClubSubscriptionMutationAdmin)

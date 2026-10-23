@@ -2752,3 +2752,157 @@ class ClubMonthlyIncome(models.Model):
 
     def __str__(self):
         return f"{self.club_id} {self.month}"
+
+
+class InstructorPay(models.Model):
+    """How one club pays one instructor.
+
+    monthly_amount is a fixed salary. The monthly task writes one
+    TeacherInvoice for the previous month. Leave it empty when the owner
+    writes the statement by hand from the classes that were taught.
+    """
+
+    club = models.ForeignKey(
+        Club,
+        on_delete=models.CASCADE,
+        related_name="instructor_pays",
+    )
+    instructor = models.ForeignKey(
+        Member,
+        on_delete=models.CASCADE,
+        related_name="instructor_pays",
+        limit_choices_to={"is_instructor": True},
+    )
+    monthly_amount = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Fixed yen per month. Empty means no automatic statement.",
+    )
+    active = models.BooleanField(default=True)
+    note = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["club", "instructor"],
+                name="unique_instructor_pay_per_club",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.instructor_id and self.club_id:
+            if self.instructor.club_id != self.club_id:
+                raise ValidationError(
+                    {"instructor": "この指導者はこのクラブの会員ではありません。"}
+                )
+            if not self.instructor.is_instructor:
+                raise ValidationError(
+                    {"instructor": "会員を指導者にしてから給与を設定してください。"}
+                )
+
+    def __str__(self):
+        return f"{self.club_id} {self.instructor_id}"
+
+
+class TeacherInvoice(models.Model):
+    """What the club owes one instructor.
+
+    amount is typed by the owner, or copied from the fixed monthly salary.
+    Lesson lines say which classes were taught and how many times. They do
+    not add up to amount.
+    """
+
+    club = models.ForeignKey(
+        Club,
+        on_delete=models.CASCADE,
+        related_name="teacher_invoices",
+    )
+    instructor = models.ForeignKey(
+        Member,
+        on_delete=models.PROTECT,
+        related_name="teacher_invoices",
+    )
+    instructor_pay = models.ForeignKey(
+        InstructorPay,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="invoices",
+        help_text="Set by the monthly task. Empty on a hand-written statement.",
+    )
+    year = models.PositiveIntegerField()
+    month = models.PositiveIntegerField()
+    amount = models.PositiveIntegerField()
+    note = models.TextField(blank=True, default="")
+    paid_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Empty until the owner marks this statement paid.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-year", "-month", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["instructor_pay", "year", "month"],
+                name="unique_monthly_teacher_invoice",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.month < 1 or self.month > 12:
+            raise ValidationError({"month": "月は1から12にしてください。"})
+        if self.instructor_id and self.club_id and self.instructor.club_id != self.club_id:
+            raise ValidationError(
+                {"instructor": "この指導者はこのクラブの会員ではありません。"}
+            )
+        if (
+            self.instructor_pay_id
+            and self.club_id
+            and self.instructor_pay.club_id != self.club_id
+        ):
+            raise ValidationError(
+                {"instructor_pay": "給与設定が別のクラブのものです。"}
+            )
+
+    def __str__(self):
+        return f"{self.club_id} {self.instructor_id} {self.year}-{self.month}"
+
+
+class TeacherInvoiceLesson(models.Model):
+    """One class on a teacher statement, and how many times it was taught."""
+
+    invoice = models.ForeignKey(
+        TeacherInvoice,
+        on_delete=models.CASCADE,
+        related_name="lessons",
+    )
+    lesson = models.ForeignKey(
+        "Lesson",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="teacher_invoice_lines",
+    )
+    lesson_title = models.CharField(max_length=200, blank=True, default="")
+    times_taught = models.PositiveIntegerField()
+
+    def clean(self):
+        super().clean()
+        if self.times_taught < 1:
+            raise ValidationError({"times_taught": "回数は1以上にしてください。"})
+        if self.lesson_id and self.invoice_id and self.lesson.club_id != self.invoice.club_id:
+            raise ValidationError({"lesson": "このレッスンは別のクラブのものです。"})
+
+    def save(self, *args, **kwargs):
+        if self.lesson_id and not self.lesson_title:
+            self.lesson_title = self.lesson.title
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.lesson_title} x{self.times_taught}"
