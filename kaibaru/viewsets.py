@@ -4,7 +4,7 @@ from rest_framework.decorators import action
 from rest_framework.viewsets import ViewSet
 from rest_framework.response import Response
 from .models import TicketGrant, TicketType, TicketPackage, Reservation, Event, EventReservation, MemberRecord, Invoice, MemberPricingAdjustment, Discount, DiscountCondition, SubscriptionItem, Member, Club, Lesson, Participation, SlateImage, JoinRequest, MembershipPlan, Subscription, ExpenseReceipt
-from .manager_permissions import has_permission, manages_own_money, SELF_PAYMENT_MESSAGE
+from .manager_permissions import has_permission
 from accounts.models import CustomUser
 from django.contrib.auth import login
 import re
@@ -1347,10 +1347,7 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
     
         join_requests = JoinRequest.objects.filter(id__in=ids).select_related("club")
 
-        if any(
-            not has_permission(request.user, join_request.club, "members")
-            for join_request in join_requests
-        ):
+        if any(join_request.club.owner_id != request.user.id for join_request in join_requests):
             return Response({"detail": "この操作を行う権限がありません。"}, status=403)
     
         if not join_requests.exists():
@@ -1451,10 +1448,7 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
             )
     
         # ❗ validate ownership BEFORE delete
-        if any(
-            not has_permission(request.user, join_request.club, "members")
-            for join_request in join_requests
-        ):
+        if any(join_request.club.owner_id != request.user.id for join_request in join_requests):
             return Response(
                 {"detail": "一部の申請に対してこの操作を行う権限がありません。"},
                 status=status.HTTP_403_FORBIDDEN
@@ -1506,12 +1500,11 @@ class MemberViewSet(viewsets.ModelViewSet):
             raise serializers.ValidationError({
                 "club_subdomain": "クラブが見つかりません。",
             })
-        if not has_permission(self.request.user, club, "members"):
+        if club.owner_id != self.request.user.id:
             raise serializers.ValidationError({"detail": "許可なし"})
-        is_owner = club.owner_id == self.request.user.id
         serializer.save(
             club=club,
-            user=self.request.user if is_owner else None,
+            user=self.request.user,
             owner=self.request.user,
         )
 
@@ -1521,14 +1514,9 @@ class MemberViewSet(viewsets.ModelViewSet):
         """Delete a member"""
         member = self.get_object()
 
-        if not has_permission(request.user, member.club, "members"):
+        if member.club.owner_id != request.user.id:
             return Response(
                 {"detail": "許可なし"},
-                status=403
-            )
-        if manages_own_money(request.user, member):
-            return Response(
-                {"detail": "自分の会員記録は削除できません。"},
                 status=403
             )
         

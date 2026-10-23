@@ -1621,6 +1621,11 @@ class MemberSerializer(serializers.ModelSerializer):
         is_owner = club.owner_id == user.id
         data = getattr(self, "initial_data", {}) or {}
 
+        if not is_owner and ("is_manager" in data or "manager_permissions" in data):
+            raise serializers.ValidationError(
+                {"detail": "管理人の設定はオーナーだけが変更できます。"}
+            )
+
         if (is_owner or has_permission(user, club, "members")) and "is_instructor" in data:
             if not is_owner and instance.user_id == user.id:
                 pass
@@ -3150,9 +3155,7 @@ class ClubSerializer(serializers.ModelSerializer):
         if not request or not request.user.is_authenticated:
             return []
 
-        from .manager_permissions import has_permission
-
-        if not has_permission(request.user, club, "members"):
+        if request.user.id != club.owner_id:
             return []
 
         qs = club.join_requests.order_by("-created_at")
