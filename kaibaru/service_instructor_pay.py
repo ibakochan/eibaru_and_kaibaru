@@ -220,7 +220,7 @@ def _replace_lines(invoice, parsed):
 
 def teacher_pay_overview(club):
     instructors = list(
-        club.members.filter(is_instructor=True).order_by("full_name", "id")
+        club.members.filter(Q(is_instructor=True) | Q(is_manager=True)).order_by("full_name", "id")
     )
     pays = {
         pay.instructor_id: pay
@@ -250,6 +250,7 @@ def teacher_pay_overview(club):
             {
                 "id": member.id,
                 "full_name": member.full_name,
+                "picture": member.picture.url if member.picture else None,
                 "pay": _pay_payload(pays.get(member.id)),
                 "invoices": grouped.get(member.id, []),
             }
