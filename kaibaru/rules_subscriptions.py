@@ -233,25 +233,27 @@ def validate_subscription_transition(
         club=new_plan.club,
     )
 
+ANCHOR_WINDOW_BLOCKED = (
+    "このクラブの請求日の前後1日は、サブスクリプションの変更ができません。"
+)
+
+
+def subscription_day_block(today, anchor_day):
+    """Why a subscription change is blocked on this date, or None."""
+    if is_near_anchor(today, anchor_day):
+        return ANCHOR_WINDOW_BLOCKED
+    if not is_valid_billing_day(today):
+        return "毎月2日〜27日のみ変更可能です。"
+    return None
+
+
 def validate_plan_change_window(today, subscription):
     """
     Returns:
         None if allowed
         error message string if blocked
     """
-
-    # Only allow day 2-27
-    if today.day < 0 or today.day > 32:
-        return "この期間はプランの変更ができません。毎月2日〜27日のみ変更可能です。"
-
-    anchor_day = subscription.billing_anchor_day
-    current_period_end = subscription.current_period_end
-
-    # Near anchor block
-    if is_near_anchor(today, anchor_day) or not is_valid_billing_day(today):
-        return "毎月2日〜27日のみ変更可能です。また、請求日の前後1日は変更できません。別の日にお試しください。"
-
-    return None
+    return subscription_day_block(today, subscription.billing_anchor_day)
 
 def is_valid_billing_day(today):
     return 0 <= today.day <= 32

@@ -103,8 +103,7 @@ from .rules_subscriptions import (
     validate_bundle_rule,
     validate_subscription_transition,
     validate_plan_change_window,
-    is_valid_billing_day,
-    is_near_anchor,
+    subscription_day_block,
     can_resume_subscription,
     item_state,
     get_resume_error_message,
@@ -1404,17 +1403,15 @@ def create_member_checkout_session(request, club_id, plan_id):
     today = timezone.localtime().date()
 
     if sub:
-        if is_near_anchor(today, sub.billing_anchor_day) or not is_valid_billing_day(today):
-            return JsonResponse({
-                "error": "毎月2日〜27日のみ変更可能です。また、請求日の前後1日は変更できません。別の日にお試しください。"
-            }, status=400)
+        blocked = subscription_day_block(today, sub.billing_anchor_day)
+        if blocked:
+            return JsonResponse({"error": blocked}, status=400)
 
 
     else:
-        if is_near_anchor(today, club.stripe_anchor_date) or not is_valid_billing_day(today):
-            return JsonResponse({
-                "error": "毎月2日〜27日のみ変更可能です。また、請求日の前後1日は変更できません。別の日にお試しください。"
-            }, status=400)
+        blocked = subscription_day_block(today, club.stripe_anchor_date)
+        if blocked:
+            return JsonResponse({"error": blocked}, status=400)
 
     existing_stripe_subs = stripe.Subscription.list(
         customer=stripe_customer_obj.stripe_customer_id,
@@ -1575,17 +1572,11 @@ def create_member_cash_subscription(
 
     if sub:
 
-        if (
-            is_near_anchor(
-                today,
-                sub.billing_anchor_day
-            )
-            or not is_valid_billing_day(today)
-        ):
+        blocked = subscription_day_block(today, sub.billing_anchor_day)
+        if blocked:
             return JsonResponse(
                 {
-                    "error":
-                    "毎月2日〜27日のみ変更可能です"
+                    "error": blocked
                 },
                 status=400
             )
@@ -1593,17 +1584,11 @@ def create_member_cash_subscription(
 
     else:
 
-        if (
-            is_near_anchor(
-                today,
-                club.stripe_anchor_date
-            )
-            or not is_valid_billing_day(today)
-        ):
+        blocked = subscription_day_block(today, club.stripe_anchor_date)
+        if blocked:
             return JsonResponse(
                 {
-                    "error":
-                    "毎月2日〜27日のみ変更可能です"
+                    "error": blocked
                 },
                 status=400
             )
@@ -1748,16 +1733,14 @@ def add_plan_to_subscription_view(request, club_id, plan_id):
     today = timezone.localtime().date()
 
     if sub:
-        if is_near_anchor(today, sub.billing_anchor_day) or not is_valid_billing_day(today):
-            return JsonResponse({
-                "error": "毎月2日〜27日のみ変更可能です。また、請求日の前後1日は変更できません。別の日にお試しください。"
-            }, status=400)
+        blocked = subscription_day_block(today, sub.billing_anchor_day)
+        if blocked:
+            return JsonResponse({"error": blocked}, status=400)
 
     else:
-        if is_near_anchor(today, club.stripe_anchor_date) or not is_valid_billing_day(today):
-            return JsonResponse({
-                "error": "毎月2日〜27日のみ変更可能です。また、請求日の前後1日は変更できません。別の日にお試しください。"
-            }, status=400)
+        blocked = subscription_day_block(today, club.stripe_anchor_date)
+        if blocked:
+            return JsonResponse({"error": blocked}, status=400)
 
     try:
         with subscription_lock(sub.id, timeout=300):

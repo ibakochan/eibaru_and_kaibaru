@@ -46,8 +46,9 @@ logger = logging.getLogger(__name__)
 def update_club_billing_settings(request, club_id):
     """
     Updates the club's subscription_mode or stripe_anchor_date.
-    Only visible/usable by the club owner and if Stripe is connected.
-    Enforces an anchor day for monthly mode (defaults to 25 if not set).
+    Cash clubs can set these without a connected Stripe account.
+    The joining fee still requires Stripe. Monthly mode needs an anchor
+    day and defaults to 25.
     """
     club = get_object_or_404(Club, id=club_id, is_deleted=False)
 
@@ -55,9 +56,6 @@ def update_club_billing_settings(request, club_id):
 
     if not has_permission(request.user, club, "plans"):
         return HttpResponseForbidden("You do not own this club")
-
-    if not club.stripe_onboarding_completed:
-        return JsonResponse({"error": "Stripeアカウントが接続されていません"}, status=400)
 
     try:
         data = json.loads(request.body)
@@ -142,6 +140,9 @@ def update_club_billing_settings(request, club_id):
                     )
             except (ValueError, TypeError):
                 return JsonResponse({"error": "無効な数字形式"}, status=400)
+
+    if "joining_fee" in data and not club.stripe_onboarding_completed:
+        return JsonResponse({"error": "Stripeアカウントが接続されていません"}, status=400)
 
     if "joining_fee" in data:
         try:

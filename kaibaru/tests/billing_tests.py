@@ -22,6 +22,7 @@ from kaibaru.rules_subscriptions import (
     validate_group_rule,
     validate_bundle_rule,
     validate_subscription_transition,
+    ANCHOR_WINDOW_BLOCKED,
     validate_plan_change_window,
     is_valid_billing_day,
     is_near_anchor,
@@ -251,13 +252,13 @@ class BillingRulesTests(SimpleTestCase):
             is_valid_billing_day(date(2026, 4, 10))
         )
 
-    def test_is_valid_billing_day_false_day_1(self):
-        self.assertFalse(
+    def test_is_valid_billing_day_allows_day_1(self):
+        self.assertTrue(
             is_valid_billing_day(date(2026, 4, 1))
         )
 
-    def test_is_valid_billing_day_false_day_28(self):
-        self.assertFalse(
+    def test_is_valid_billing_day_allows_day_28(self):
+        self.assertTrue(
             is_valid_billing_day(date(2026, 4, 28))
         )
 
@@ -298,10 +299,7 @@ class BillingRulesTests(SimpleTestCase):
             subscription=subscription,
         )
 
-        self.assertEqual(
-            result,
-            "この期間はプランの変更ができません。毎月2日〜27日のみ変更可能です。"
-        )
+        self.assertIsNone(result)
 
     def test_cancel_window_blocks_day_28(self):
         subscription = SimpleNamespace(
@@ -315,7 +313,21 @@ class BillingRulesTests(SimpleTestCase):
             subscription=subscription,
         )
 
-        self.assertIsNotNone(result)
+        self.assertIsNone(result)
+
+    def test_cancel_window_blocks_day_around_payment_date(self):
+        subscription = SimpleNamespace(
+            billing_anchor_day=20,
+            current_period_end=None,
+            billing_mode="monthly",
+        )
+
+        result = validate_plan_change_window(
+            today=date(2026, 4, 19),
+            subscription=subscription,
+        )
+
+        self.assertEqual(result, ANCHOR_WINDOW_BLOCKED)
 
     def test_cancel_window_blocks_monthly_processing(self):
         subscription = SimpleNamespace(
@@ -325,14 +337,11 @@ class BillingRulesTests(SimpleTestCase):
         )
 
         result = validate_plan_change_window(
-            today=date(2026, 4, 25),
+            today=date(2026, 4, 21),
             subscription=subscription,
         )
 
-        self.assertEqual(
-            result,
-            "請求処理中のため、この期間はプランの変更ができません。しばらくしてからお試しください。"
-        )
+        self.assertEqual(result, ANCHOR_WINDOW_BLOCKED)
 
     def test_cancel_window_allows_valid_day(self):
         subscription = SimpleNamespace(
