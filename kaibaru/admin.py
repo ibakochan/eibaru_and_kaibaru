@@ -187,6 +187,7 @@ class ClubMonthlyIncomeAdmin(admin.ModelAdmin):
         "total_yen",
         "platform_fee_yen",
         "receipt_total_yen",
+        "teacher_pay_yen",
         "calculated_at",
         "created_at",
     )

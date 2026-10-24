@@ -18,7 +18,15 @@ from django.db import IntegrityError
 from django.db.models import Q, Sum
 from django.utils import timezone
 
-from .models import ClubMonthlyIncome, EventReservation, ExpenseReceipt, Invoice, Reservation
+from .models import (
+    Club,
+    ClubMonthlyIncome,
+    EventReservation,
+    ExpenseReceipt,
+    Invoice,
+    Reservation,
+    TeacherInvoice,
+)
 from .service_cash_platform_fee import month_bounds, previous_month
 from .service_platform_billing_history import platform_amount_paid_in_month
 from .service_paid_reservations import (
@@ -89,12 +97,13 @@ def allocate_fee_shares(amounts, fee):
     return shares
 
 
-def income_remainder(total_yen, platform_fee_yen, expense_total_yen):
-    """Cash left after the platform bill and expense receipts for that month."""
+def income_remainder(total_yen, platform_fee_yen, expense_total_yen, teacher_pay_yen=0):
+    """Cash left after the platform bill, receipts, and teacher payments."""
     return (
         int(total_yen or 0)
         - int(platform_fee_yen or 0)
         - int(expense_total_yen or 0)
+        - int(teacher_pay_yen or 0)
     )
 
 
@@ -464,6 +473,28 @@ def _expense_total_for_month(club, year, month):
     return int(total or 0)
 
 
+def _teacher_pay_for_month(club, year, month):
+    """Teacher statements marked paid during this calendar month."""
+    start, end = month_bounds(year, month)
+    total = TeacherInvoice.objects.filter(
+        club=club,
+        paid_at__gte=start,
+        paid_at__lt=end,
+    ).aggregate(total=Sum("amount"))["total"]
+    return int(total or 0)
+
+
+def _is_current_month(year, month):
+    today = timezone.localdate()
+    return today.year == int(year) and today.month == int(month)
+
+
+def _owned_clubs(club):
+    return list(
+        Club.objects.filter(owner_id=club.owner_id, is_deleted=False).order_by("id")
+    )
+
+
 def member_income_index(club):
     """Months that have income, with counts only. No Stripe calls."""
     counts = {}
@@ -577,31 +608,16 @@ def _income_changed_since(calculated_at, invoices, reservations):
     return False
 
 
-def _month_figures(club, user, year, month, start, invoices, reservations):
+def _income_total(invoices, reservations):
     invoice_total = sum(_invoice_settled(invoice) for invoice in invoices)
     reservation_total = sum(
         int(row.get("net_yen") if row.get("net_yen") is not None else row.get("amount") or 0)
         for row in reservations
     )
-    prev_year, prev_month = previous_month(start)
-    return (
-        invoice_total + reservation_total,
-        platform_amount_paid_in_month(user, prev_year, prev_month),
-        _expense_total_for_month(club, year, month),
-    )
+    return invoice_total + reservation_total
 
 
-def member_income_month(club, user, year, month):
-    """One month of 収納歴.
-
-    The first open stores the income total, the previous month's Kaibaru
-    bill, and that month's receipt total. A later open recalculates those
-    when an invoice issued after calculated_at, or a reservation created
-    after it, is part of this month. Stripe rows missing a net are filled in.
-    """
-    year = int(year)
-    month = int(month)
-    start, _end = month_bounds(year, month)
+def _load_month_rows(club, year, month):
     rows = _invoices_for_month(club, year, month)
     reservations = paid_reservations_for_clubs([club.id], year, month)
     for reservation in reservations:
@@ -613,43 +629,135 @@ def member_income_month(club, user, year, month):
     stripe_account = getattr(club, "stripe_account_id", None)
     _ensure_invoice_nets(rows, stripe_account)
     _ensure_reservation_nets(reservations, stripe_account)
+    return rows, reservations
 
+
+def _save_month_snapshot(club, year, month, start, invoices, reservations, platform_fee):
+    """Store this club's month. Income is recalculated only when it changed.
+
+    Expenses and teacher payments are local totals, so they are refreshed
+    on every open. calculated_at stays put unless the income total changes,
+    so a later invoice is still noticed.
+    """
+    expense_total = _expense_total_for_month(club, year, month)
+    teacher_pay = _teacher_pay_for_month(club, year, month)
     record = ClubMonthlyIncome.objects.filter(club=club, month=start).first()
-    if record is None or _income_changed_since(record.calculated_at, rows, reservations):
-        total, platform_fee, expense_total = _month_figures(
-            club, user, year, month, start, rows, reservations,
-        )
+    income_changed = (
+        record is None
+        or _income_changed_since(record.calculated_at, invoices, reservations)
+    )
+    if income_changed:
+        total = _income_total(invoices, reservations)
         calculated_at = timezone.now()
-        if record is None:
-            try:
-                record = ClubMonthlyIncome.objects.create(
-                    club=club,
-                    month=start,
-                    total_yen=total,
-                    platform_fee_yen=platform_fee,
-                    receipt_total_yen=expense_total,
-                    calculated_at=calculated_at,
-                )
-            except IntegrityError:
-                record = ClubMonthlyIncome.objects.get(club=club, month=start)
-        else:
-            record.total_yen = total
-            record.platform_fee_yen = platform_fee
-            record.receipt_total_yen = expense_total
-            record.calculated_at = calculated_at
-            record.save(update_fields=[
-                "total_yen",
-                "platform_fee_yen",
-                "receipt_total_yen",
-                "calculated_at",
-            ])
+    else:
+        total = int(record.total_yen or 0)
+        calculated_at = record.calculated_at
 
-    total = int(record.total_yen or 0)
-    platform_fee = int(record.platform_fee_yen or 0)
-    expense_total = int(record.receipt_total_yen or 0)
+    if record is None:
+        try:
+            record = ClubMonthlyIncome.objects.create(
+                club=club,
+                month=start,
+                total_yen=total,
+                platform_fee_yen=platform_fee,
+                receipt_total_yen=expense_total,
+                teacher_pay_yen=teacher_pay,
+                calculated_at=calculated_at,
+            )
+        except IntegrityError:
+            record = ClubMonthlyIncome.objects.get(club=club, month=start)
+            income_changed = True
+            total = _income_total(invoices, reservations)
+            calculated_at = timezone.now()
+    if record.pk and (
+        income_changed
+        or int(record.platform_fee_yen or 0) != int(platform_fee)
+        or int(record.receipt_total_yen or 0) != expense_total
+        or int(record.teacher_pay_yen or 0) != teacher_pay
+    ):
+        record.total_yen = total
+        record.platform_fee_yen = platform_fee
+        record.receipt_total_yen = expense_total
+        record.teacher_pay_yen = teacher_pay
+        record.calculated_at = calculated_at
+        record.save(update_fields=[
+            "total_yen",
+            "platform_fee_yen",
+            "receipt_total_yen",
+            "teacher_pay_yen",
+            "calculated_at",
+        ])
+    return {
+        "total_yen": int(record.total_yen or 0),
+        "platform_fee_yen": int(platform_fee or 0),
+        "expense_total_yen": int(record.receipt_total_yen or 0),
+        "teacher_pay_yen": int(record.teacher_pay_yen or 0),
+    }
+
+
+def _snapshot_other_club(owned, year, month, start, platform_fee):
+    rows, reservations = _load_month_rows(owned, year, month)
+    return _save_month_snapshot(
+        owned, year, month, start, rows, reservations, platform_fee,
+    )
+
+
+def member_income_month(club, user, year, month):
+    """One month of 収納歴.
+
+    The first open stores the income total, the Kaibaru bill paid in the
+    previous month, that month's receipts, and teacher payments marked
+    paid in the month. A later open recalculates income when an invoice
+    issued after calculated_at, or a reservation created after it, is
+    part of this month. The Kaibaru bill covers every club the owner has,
+    so it is subtracted once on the all-clubs total.
+    """
+    year = int(year)
+    month = int(month)
+    start, _end = month_bounds(year, month)
+    rows, reservations = _load_month_rows(club, year, month)
+    is_current = _is_current_month(year, month)
+    if is_current:
+        platform_fee = 0
+    else:
+        prev_year, prev_month = previous_month(start)
+        platform_fee = platform_amount_paid_in_month(user, prev_year, prev_month)
+    figures = _save_month_snapshot(
+        club, year, month, start, rows, reservations, platform_fee,
+    )
+    owned = [] if is_current else _owned_clubs(club)
+    single_club = len(owned) <= 1
+    account = None
+    if not is_current and not single_club:
+        total_yen = 0
+        expense_total = 0
+        teacher_pay = 0
+        for owned_club in owned:
+            if owned_club.id == club.id:
+                club_figures = figures
+            else:
+                club_figures = _snapshot_other_club(
+                    owned_club, year, month, start, platform_fee,
+                )
+            total_yen += club_figures["total_yen"]
+            expense_total += club_figures["expense_total_yen"]
+            teacher_pay += club_figures["teacher_pay_yen"]
+        account = {
+            "club_count": len(owned),
+            "total_yen": total_yen,
+            "platform_fee_yen": platform_fee,
+            "expense_total_yen": expense_total,
+            "teacher_pay_yen": teacher_pay,
+            "remainder_yen": income_remainder(
+                total_yen, platform_fee, expense_total, teacher_pay,
+            ),
+        }
+
+    club_platform_fee = platform_fee if single_club else 0
     return {
         "year": year,
         "month": month,
+        "is_current": is_current,
         "invoice_count": len(rows),
         "reservation_count": len(reservations),
         "invoice_total_yen": sum(_invoice_settled(invoice) for invoice in rows),
@@ -657,10 +765,17 @@ def member_income_month(club, user, year, month):
             int(row.get("net_yen") if row.get("net_yen") is not None else row.get("amount") or 0)
             for row in reservations
         ),
-        "total_yen": total,
+        "total_yen": figures["total_yen"],
         "platform_fee_yen": platform_fee,
-        "expense_total_yen": expense_total,
-        "remainder_yen": income_remainder(total, platform_fee, expense_total),
+        "expense_total_yen": figures["expense_total_yen"],
+        "teacher_pay_yen": figures["teacher_pay_yen"],
+        "remainder_yen": income_remainder(
+            figures["total_yen"],
+            club_platform_fee,
+            figures["expense_total_yen"],
+            figures["teacher_pay_yen"],
+        ),
+        "account": account,
         "invoices": rows,
         "reservations": reservations,
     }

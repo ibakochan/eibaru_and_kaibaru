@@ -60,3 +60,4 @@ class MemberIncomeSettlementTests(SimpleTestCase):
 
     def test_remainder_subtracts_platform_fee_and_expenses(self):
         self.assertEqual(income_remainder(100000, 14080, 3200), 82720)
+        self.assertEqual(income_remainder(100000, 14080, 3200, 5000), 77720)

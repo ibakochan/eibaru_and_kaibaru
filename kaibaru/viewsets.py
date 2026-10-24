@@ -4161,9 +4161,12 @@ class ClubViewSet(viewsets.ModelViewSet):
                 "invoice_total_yen": detail["invoice_total_yen"],
                 "reservation_total_yen": detail["reservation_total_yen"],
                 "total_yen": detail["total_yen"],
+                "is_current": detail["is_current"],
                 "platform_fee_yen": detail["platform_fee_yen"],
                 "expense_total_yen": detail["expense_total_yen"],
+                "teacher_pay_yen": detail["teacher_pay_yen"],
                 "remainder_yen": detail["remainder_yen"],
+                "account": detail["account"],
                 "invoices": MemberIncomeInvoiceSerializer(
                     detail["invoices"],
                     many=True,

@@ -2723,7 +2723,9 @@ class ClubMonthlyIncome(models.Model):
 
     Created the first time that month is opened in 収納歴. A later open
     recalculates when an invoice or reservation newer than calculated_at
-    is part of the month.
+    is part of the month. teacher_pay_yen is what this club paid
+    instructors during the month. The Kaibaru fee is the owner's bill
+    for every club, stored here so a one-club month can show it.
     """
 
     club = models.ForeignKey(
@@ -2735,6 +2737,7 @@ class ClubMonthlyIncome(models.Model):
     total_yen = models.IntegerField(default=0)
     platform_fee_yen = models.IntegerField(default=0)
     receipt_total_yen = models.IntegerField(default=0)
+    teacher_pay_yen = models.IntegerField(default=0)
     calculated_at = models.DateTimeField(
         null=True,
         blank=True,
