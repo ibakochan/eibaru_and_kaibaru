@@ -54,7 +54,8 @@
       {
         "id": {{ user.id }},
         "username": "{{ user.username|escapejs }}",
-        "email": "{{ user.email|escapejs }}"
+        "email": "{{ user.email|escapejs }}",
+        "google_connected": {% if has_google %}true{% else %}false{% endif %}
       }
     </script>
   {% else %}

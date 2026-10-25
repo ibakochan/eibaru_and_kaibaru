@@ -1,3 +1,5 @@
+from urllib.parse import urlparse
+
 from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
 from django.contrib.sites.models import Site
 from allauth.account.adapter import DefaultAccountAdapter
@@ -15,6 +17,22 @@ class DynamicSocialAccountAdapter(DefaultSocialAccountAdapter):
             return f"https://{next_subdomain}.kaibaru.jp"
         # Default fallback
         return "https://g.kaibaru.jp"
+
+    def get_connect_redirect_url(self, request, socialaccount):
+        next_url = request.session.get("next_subdomain")
+        if _is_kaibaru_url(next_url):
+            return next_url
+        return "https://kaibaru.jp/"
+
+
+def _is_kaibaru_url(url):
+    if not url:
+        return False
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    return parsed.scheme == "https" and (
+        host == "kaibaru.jp" or host.endswith(".kaibaru.jp")
+    )
 
 
 

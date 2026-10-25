@@ -182,7 +182,9 @@ def start_google_login(request):
     if next_url:
         request.session['next_subdomain'] = next_url
     else:
-        request.session['next_subdomain'] = "https://kaibaru.jp/"  
+        request.session['next_subdomain'] = "https://kaibaru.jp/"
+    if request.GET.get("process") == "connect" and request.user.is_authenticated:
+        return redirect("/account/google/login/?process=connect")
     return redirect("/account/google/login/")
 
 
