@@ -21,4 +21,14 @@ urlpatterns = [
         views.VerifyEmailView.as_view(),
         name="verify_email",
     ),
+    path(
+        "saas/password-reset/",
+        views.PasswordResetRequestView.as_view(),
+        name="saas-password-reset",
+    ),
+    path(
+        "password/reset/<uidb64>/<token>/",
+        views.PasswordResetConfirmView.as_view(),
+        name="password-reset-confirm",
+    ),
 ]

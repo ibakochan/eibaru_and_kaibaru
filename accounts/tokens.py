@@ -5,3 +5,4 @@ class EmailVerificationTokenGenerator(PasswordResetTokenGenerator):
         return f"{user.pk}{timestamp}{user.is_active}"
 
 email_verification_token = EmailVerificationTokenGenerator()
+password_reset_token = PasswordResetTokenGenerator()

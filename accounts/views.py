@@ -18,8 +18,8 @@ import requests
 from django.utils.http import urlsafe_base64_decode
 from django.utils.encoding import force_str
 from django.http import HttpResponse
-from .tokens import email_verification_token
-from .tasks_emails import send_verification_email
+from .tokens import email_verification_token, password_reset_token
+from .tasks_emails import send_password_reset_email, send_verification_email
 
 import logging
 logger = logging.getLogger(__name__)
@@ -218,3 +218,82 @@ class VerifyEmailView(View):
         )
 
         return redirect("https://kaibaru.jp/?verified=true")
+
+
+def _user_from_uid(uidb64):
+    try:
+        uid = force_str(urlsafe_base64_decode(uidb64))
+        return CustomUser.objects.get(pk=uid)
+    except Exception:
+        return None
+
+
+class PasswordResetRequestView(View):
+    """Email a password form when the address belongs to a regular account."""
+
+    def post(self, request):
+        try:
+            data = json.loads(request.body)
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "無効なリクエストです。"}, status=400)
+
+        email = (data.get("email") or "").strip().lower()
+        if not email or "@" not in email:
+            return JsonResponse(
+                {"detail": "メールアドレスを入力してください。"},
+                status=400,
+            )
+
+        user = CustomUser.objects.filter(email__iexact=email).first()
+        if user and user.has_usable_password() and user.email:
+            send_password_reset_email.delay(user.id)
+
+        return JsonResponse({
+            "detail": (
+                "ご入力のメールアドレスにアカウントがある場合、"
+                "パスワード再設定のご案内を送信しました。"
+            ),
+        })
+
+
+class PasswordResetConfirmView(View):
+    template_name = "accounts/password_reset_confirm.html"
+
+    def get(self, request, uidb64, token):
+        user = _user_from_uid(uidb64)
+        valid = bool(user and password_reset_token.check_token(user, token))
+        return render(request, self.template_name, {
+            "valid": valid,
+            "done": False,
+        })
+
+    def post(self, request, uidb64, token):
+        user = _user_from_uid(uidb64)
+        if not user or not password_reset_token.check_token(user, token):
+            return render(request, self.template_name, {
+                "valid": False,
+                "done": False,
+            })
+
+        password = request.POST.get("password") or ""
+        confirm = request.POST.get("confirm") or ""
+        error = None
+        if len(password) < 8:
+            error = "パスワードは8文字以上にしてください。"
+        elif password != confirm:
+            error = "確認用のパスワードが一致しません。"
+
+        if error:
+            return render(request, self.template_name, {
+                "valid": True,
+                "done": False,
+                "error": error,
+            })
+
+        user.set_password(password)
+        user.is_active = True
+        user.save(update_fields=["password", "is_active"])
+        return render(request, self.template_name, {
+            "valid": True,
+            "done": True,
+        })
