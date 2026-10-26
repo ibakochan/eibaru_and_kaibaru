@@ -297,3 +297,17 @@ class PasswordResetConfirmView(View):
             "valid": True,
             "done": True,
         })
+
+
+class DomainSessionHandoffView(View):
+    def get(self, request, token):
+        from django.core.cache import cache
+        from kaibaru.custom_domain_hosts import handoff_cache_key
+
+        user_id = cache.get(handoff_cache_key(token))
+        cache.delete(handoff_cache_key(token))
+        user = CustomUser.objects.filter(pk=user_id, is_active=True).first() if user_id else None
+        if not user:
+            return redirect("/")
+        login(request, user, backend="allauth.account.auth_backends.AuthenticationBackend")
+        return redirect("/")

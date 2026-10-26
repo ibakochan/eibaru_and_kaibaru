@@ -3996,6 +3996,84 @@ class ClubViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(club, context={"request": request})
         return Response(serializer.data)
 
+    @action(detail=False, methods=["get"], url_path="by-host")
+    def by_host(self, request):
+        host = (request.query_params.get("host") or "").strip().lower().rstrip(".")
+        club = self.get_queryset().filter(
+            custom_domain=host,
+            custom_domain_status="active",
+        ).first()
+        if not club:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        serializer = self.get_serializer(club, context={"request": request})
+        return Response(serializer.data)
+
+    def _owned_club(self, request, subdomain):
+        if not request.user.is_authenticated:
+            return None, Response(
+                {"error": "この操作はオーナーだけが行えます。"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        club = self.get_queryset().filter(subdomain=subdomain).first()
+        if not club:
+            return None, Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        if club.owner_id != request.user.id:
+            return None, Response(
+                {"error": "この操作はオーナーだけが行えます。"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return club, None
+
+    def _domain_payload(self, club, message):
+        from django.conf import settings
+        return {
+            "custom_domain": club.custom_domain,
+            "custom_domain_status": club.custom_domain_status,
+            "custom_domain_target": getattr(settings, "CUSTOM_DOMAIN_TARGET_IP", "13.158.230.76"),
+            "message": message,
+        }
+
+    @action(
+        detail=False,
+        methods=["post", "delete"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/custom-domain",
+    )
+    def custom_domain(self, request, subdomain=None):
+        from .service_custom_domain import CustomDomainError, assign_domain, clear_domain
+
+        club, error = self._owned_club(request, subdomain)
+        if error:
+            return error
+        if request.method == "DELETE":
+            clear_domain(club)
+            return Response(self._domain_payload(club, "独自ドメインを解除しました。"))
+        try:
+            domain = assign_domain(club, request.data.get("domain"))
+        except CustomDomainError as exc:
+            return Response({"error": exc.message}, status=status.HTTP_400_BAD_REQUEST)
+        ip = self._domain_payload(club, "")["custom_domain_target"]
+        return Response(self._domain_payload(
+            club,
+            f"{domain} を保存しました。Aレコードを {ip} にしてから、確認してください。",
+        ))
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/custom-domain/check",
+    )
+    def custom_domain_check(self, request, subdomain=None):
+        from .service_custom_domain import CustomDomainError, publish_domain
+
+        club, error = self._owned_club(request, subdomain)
+        if error:
+            return error
+        try:
+            domain = publish_domain(club)
+        except CustomDomainError as exc:
+            return Response({"error": exc.message}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(self._domain_payload(club, f"https://{domain} を公開しました。"))
+
     @action(
         detail=False,
         methods=["get"],

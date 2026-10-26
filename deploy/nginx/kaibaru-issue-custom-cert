@@ -1,0 +1,30 @@
+#!/bin/bash
+# Issue a certificate for a club domain and publish it to nginx.
+# The domain's DNS must already point at this server.
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+    echo "usage: kaibaru-issue-custom-cert example.com" >&2
+    exit 1
+fi
+
+domain="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+if [[ ! "$domain" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$ ]]; then
+    echo "invalid domain: $domain" >&2
+    exit 1
+fi
+case "$domain" in
+    kaibaru.jp|*.kaibaru.jp|eibaru.jp|*.eibaru.jp)
+        echo "$domain is already served by its own nginx site" >&2
+        exit 1
+        ;;
+esac
+
+install -d -m 755 /var/www/custom-acme
+certbot certonly \
+    --webroot -w /var/www/custom-acme \
+    -d "$domain" \
+    --non-interactive \
+    --keep-until-expiring \
+    --deploy-hook /usr/local/sbin/kaibaru-install-custom-cert
+/usr/local/sbin/kaibaru-install-custom-cert "$domain"

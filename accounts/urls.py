@@ -31,4 +31,9 @@ urlpatterns = [
         views.PasswordResetConfirmView.as_view(),
         name="password-reset-confirm",
     ),
+    path(
+        "domain-session/<str:token>/",
+        views.DomainSessionHandoffView.as_view(),
+        name="domain-session",
+    ),
 ]

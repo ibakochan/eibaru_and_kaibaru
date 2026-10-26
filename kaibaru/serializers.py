@@ -2763,6 +2763,9 @@ class ClubSerializer(serializers.ModelSerializer):
     membership_plan_groups = MembershipPlanGroupSerializer(many=True, read_only=True, source="membershipplangroup_set")
     invoices = serializers.SerializerMethodField()
     has_member_subscription = serializers.SerializerMethodField()
+    custom_domain = serializers.CharField(read_only=True, allow_null=True)
+    custom_domain_status = serializers.CharField(read_only=True)
+    custom_domain_target = serializers.SerializerMethodField()
 
     def get_members(self, club):
         request = self.context.get("request")
@@ -2827,6 +2830,10 @@ class ClubSerializer(serializers.ModelSerializer):
             context["other_owned_club_subdomains"] = {}
         return MemberSerializer(members, many=True, context=context).data
 
+    def get_custom_domain_target(self, club):
+        from django.conf import settings
+        return getattr(settings, "CUSTOM_DOMAIN_TARGET_IP", "13.158.230.76")
+
     def get_events(self, club):
         request = self.context.get("request")
         visible = visible_club_events(club, request)
@@ -2839,6 +2846,9 @@ class ClubSerializer(serializers.ModelSerializer):
             "owner",
             "title",
             "subdomain",
+            "custom_domain",
+            "custom_domain_status",
+            "custom_domain_target",
             "members",
             "join_requests",
             "my_join_requests",

@@ -79,9 +79,13 @@ INSTALLED_APPS = [
 
 
 MIDDLEWARE = [
+    'kaibaru.custom_domain_middleware.CustomDomainHostMiddleware',
+
     'django_hosts.middleware.HostsRequestMiddleware',
     
     'django.middleware.security.SecurityMiddleware',
+
+    'kaibaru.custom_domain_middleware.CustomDomainSessionCookieMiddleware',
 
     'django.contrib.sessions.middleware.SessionMiddleware',
     
@@ -401,3 +405,6 @@ SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_DOMAIN = None   
 CSRF_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SECURE = True
+
+CUSTOM_DOMAIN_TARGET_IP = "13.158.230.76"
+CUSTOM_DOMAIN_ISSUE_COMMAND = "/usr/local/sbin/kaibaru-issue-custom-cert"

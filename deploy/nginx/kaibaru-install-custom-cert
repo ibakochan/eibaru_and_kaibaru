@@ -1,0 +1,37 @@
+#!/bin/bash
+# Copy a Let's Encrypt lineage into the static nginx certificate folder.
+# Certbot calls this on renew with RENEWED_LINEAGE set.
+# A manual install is: kaibaru-install-custom-cert example.com
+set -euo pipefail
+
+install_one() {
+    local lineage="$1"
+    local name
+    name="$(basename "$lineage")"
+    case "$name" in
+        kaibaru.jp|kaibaru.jp-*|eibaru.jp|eibaru.jp-*)
+            return 0
+            ;;
+    esac
+    if [[ ! "$name" =~ ^[a-z0-9.-]+$ ]]; then
+        echo "skipping $name" >&2
+        return 0
+    fi
+    if [[ ! -f "$lineage/fullchain.pem" || ! -f "$lineage/privkey.pem" ]]; then
+        echo "missing certificate files in $lineage" >&2
+        return 1
+    fi
+    install -d -m 755 /etc/nginx/custom-certs
+    install -m 644 "$lineage/fullchain.pem" "/etc/nginx/custom-certs/${name}.crt"
+    install -m 640 -o root -g www-data "$lineage/privkey.pem" "/etc/nginx/custom-certs/${name}.key"
+}
+
+if [[ -n "${RENEWED_LINEAGE:-}" ]]; then
+    install_one "$RENEWED_LINEAGE"
+elif [[ $# -eq 1 ]]; then
+    domain="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+    install_one "/etc/letsencrypt/live/${domain}"
+else
+    echo "usage: kaibaru-install-custom-cert example.com" >&2
+    exit 1
+fi

@@ -195,9 +195,19 @@ class KaibaruPageView(View):
         user = ""
         has_google = False
 
-        subdomain = request.get_host().split('.')[0]
-        
-        club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
+        from .custom_domain_hosts import is_platform_host
+
+        host = request.get_host().split(":")[0].lower().rstrip(".")
+        if is_platform_host(host):
+            subdomain = host.split(".")[0]
+            club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
+        else:
+            club = Club.objects.filter(
+                custom_domain=host,
+                custom_domain_status="active",
+                is_deleted=False,
+            ).first()
+            subdomain = club.subdomain if club else ""
 
         club_data = {
             'title': club.title if club and club.title else 'ホームページ兼会員管理システム作成',

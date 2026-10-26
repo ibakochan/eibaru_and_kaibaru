@@ -61,6 +61,19 @@ class ActiveClubManager(models.Manager):
 
 class Club(models.Model):
     subdomain = models.SlugField(max_length=50, unique=True, null=True, blank=True)
+    custom_domain = models.CharField(
+        max_length=253,
+        null=True,
+        blank=True,
+        unique=True,
+        help_text="Hostname the owner attached. Empty until they save one.",
+    )
+    custom_domain_status = models.CharField(
+        max_length=20,
+        blank=True,
+        default="",
+        help_text="pending until DNS points here and a certificate is issued. active once it is live.",
+    )
 
     owner = models.ForeignKey(CustomUser, on_delete=models.PROTECT, related_name="owned_clubs")
 
