@@ -2781,22 +2781,10 @@ class ClubSerializer(serializers.ModelSerializer):
 
         from .manager_permissions import has_permission
 
-        user_member = next((member for member in members if member.user_id == user.id), None)
         viewer_is_manager = (
             has_permission(user, club, "members")
             or has_permission(user, club, "member_payments")
         )
-        if (
-            club.owner_id != user.id
-            and user_member
-            and (user_member.is_instructor or has_permission(user, club, "members"))
-        ):
-            return self._member_data(
-                club,
-                members,
-                viewer_is_manager=viewer_is_manager,
-            )
-
         visible = [
             member for member in members
             if member.is_instructor
