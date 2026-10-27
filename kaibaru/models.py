@@ -574,37 +574,6 @@ class Member(models.Model):
 
 
 
-class OneTimeProduct(models.Model):
-    club = models.ForeignKey(Club, on_delete=models.CASCADE)
-    name = models.CharField(max_length=100)
-    price = models.IntegerField()
-    currency = models.CharField(max_length=10, default="jpy")
-    stripe_price_id = models.CharField(max_length=255)
-    active = models.BooleanField(default=True)
-
-    class Meta:
-        unique_together = ("club", "name")
-
-
-class OneTimePayment(models.Model):
-    member = models.ForeignKey(Member, on_delete=models.CASCADE)
-    product = models.ForeignKey(OneTimeProduct, on_delete=models.SET_NULL, null=True)
-    stripe_payment_intent_id = models.CharField(max_length=255, unique=True)
-    status = models.CharField(
-        max_length=20,
-        choices=[
-            ("pending", "Pending"),
-            ("succeeded", "Succeeded"),
-            ("failed", "Failed"),
-            ("refunded", "Refunded"),
-        ],
-        default="pending",
-    )
-    paid_at = models.DateTimeField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-
-
 class Subscription(models.Model):
     owner = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="subscriptions")
     club = models.ForeignKey(Club, on_delete=models.CASCADE)
@@ -1028,41 +997,6 @@ class Payment(models.Model):
 
     issued_at = models.DateTimeField(auto_now_add=True)
 
-    
-
-class PaymentMethod(models.Model):
-
-    METHOD_TYPES = [
-        ("stripe_card","Stripe Card"),
-        ("bank_transfer","Bank Transfer"),
-        ("cash","Cash"),
-    ]
-
-    member = models.ForeignKey(
-        Member,
-        on_delete=models.CASCADE,
-        related_name="payment_methods"
-    )
-
-    method_type = models.CharField(max_length=20, choices=METHOD_TYPES)
-
-    stripe_payment_method_id = models.CharField(
-        max_length=255,
-        null=True,
-        blank=True
-    )
-
-    is_default = models.BooleanField(default=False)
-
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        constraints = [
-            models.UniqueConstraint(
-                fields=["member"],
-                name="one_default_payment_method_per_member"
-            )
-        ]
 
 class Lesson(models.Model):
     club = models.ForeignKey('Club', on_delete=models.CASCADE, related_name='lessons')

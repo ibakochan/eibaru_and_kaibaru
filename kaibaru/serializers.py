@@ -1713,8 +1713,18 @@ class MemberSerializer(serializers.ModelSerializer):
             else:
                 instance.is_instructor = str(data.get("is_instructor")).lower() in ("true", "1", "yes")
 
-        if is_owner and "is_manager" in data:
-            instance.is_manager = str(data.get("is_manager")).lower() in ("true", "1", "yes")
+        is_representative = (
+            instance.user_id is not None and instance.user_id == instance.owner_id
+        )
+        wants_manager = str(data.get("is_manager", "")).lower() in ("true", "1", "yes")
+        if not is_representative:
+            if wants_manager:
+                raise serializers.ValidationError(
+                    {"is_manager": "サブ会員は管理人にできません。代表者だけが管理人になれます。"}
+                )
+            instance.is_manager = False
+        elif is_owner and "is_manager" in data:
+            instance.is_manager = wants_manager
 
     def _sync_manager_role(self, instance):
         from .models import ClubManager

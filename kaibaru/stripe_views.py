@@ -1,6 +1,6 @@
 import stripe
 from django.conf import settings
-from django.http import JsonResponse, HttpResponseForbidden
+from django.http import JsonResponse, HttpResponseForbidden, Http404
 from django.shortcuts import get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_POST
@@ -469,16 +469,31 @@ def change_member_plan(request, item_id, new_plan_id):
     })
 
 
+def subscription_item_for_cancel(request, item_id):
+    """The member who pays, or the club owner cancelling for them."""
+    item = (
+        SubscriptionItem.objects
+        .select_related("subscription__club")
+        .filter(id=item_id)
+        .first()
+    )
+    if item is None or item.subscription_id is None:
+        raise Http404
+    subscription = item.subscription
+    if subscription.owner_id == request.user.id:
+        return item
+    club = subscription.club
+    if club is not None and club.owner_id == request.user.id:
+        return item
+    raise Http404
+
+
 @login_required
 @require_POST
 @json_validation_errors
 def cancel_member_subscription(request, item_id):
 
-    item = get_object_or_404(
-        SubscriptionItem,
-        id=item_id,
-        subscription__owner=request.user
-    )
+    item = subscription_item_for_cancel(request, item_id)
 
     state = item_state(item)
 
@@ -899,11 +914,7 @@ def change_cash_member_plan(request, item_id, new_plan_id):
 @json_validation_errors
 def cancel_cash_member_subscription(request, item_id):
 
-    item = get_object_or_404(
-        SubscriptionItem,
-        id=item_id,
-        subscription__owner=request.user
-    )
+    item = subscription_item_for_cancel(request, item_id)
 
 
     state = item_state(item)

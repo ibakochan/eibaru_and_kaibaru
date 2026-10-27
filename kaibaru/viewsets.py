@@ -4144,11 +4144,20 @@ class ClubViewSet(viewsets.ModelViewSet):
         )
         if not club:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
-        if not request.user.is_authenticated or club.owner_id != request.user.id:
+        if not request.user.is_authenticated:
+            return Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
+        is_owner = club.owner_id == request.user.id
+        can_take_attendance = is_owner or has_permission(request.user, club, "lessons") or Member.objects.filter(
+            club=club,
+            is_instructor=True,
+        ).filter(
+            Q(user=request.user) | Q(owner=request.user),
+        ).exists()
+        if not can_take_attendance:
             return Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
 
         members = list(club.members.all())
-        return Response({
+        payload = {
             "members": MemberSerializer(
                 members,
                 many=True,
@@ -4161,8 +4170,10 @@ class ClubViewSet(viewsets.ModelViewSet):
                     ),
                 },
             ).data,
-            "platform_bill": estimate_platform_bill_for_owner(request.user),
-        })
+        }
+        if is_owner:
+            payload["platform_bill"] = estimate_platform_bill_for_owner(request.user)
+        return Response(payload)
 
     @action(
         detail=False,
