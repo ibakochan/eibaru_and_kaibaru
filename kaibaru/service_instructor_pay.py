@@ -234,6 +234,17 @@ def teacher_pay_overview(club):
     )
     for invoice in invoices:
         grouped.setdefault(invoice.instructor_id, []).append(_invoice_payload(invoice))
+    former = {}
+    former_invoices = (
+        TeacherInvoice.objects
+        .filter(club=club, instructor__isnull=True)
+        .prefetch_related("lessons")
+        .order_by("-year", "-month", "id")
+    )
+    for invoice in former_invoices:
+        former.setdefault(invoice.instructor_name or "削除された会員", []).append(
+            _invoice_payload(invoice)
+        )
     lessons = club.lessons.all().order_by("weekday", "start_time", "id")
     return {
         "lessons": [
@@ -255,6 +266,10 @@ def teacher_pay_overview(club):
                 "invoices": grouped.get(member.id, []),
             }
             for member in instructors
+        ],
+        "former_instructors": [
+            {"full_name": name, "invoices": rows}
+            for name, rows in former.items()
         ],
     }
 

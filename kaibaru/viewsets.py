@@ -1528,22 +1528,46 @@ class MemberViewSet(viewsets.ModelViewSet):
                 {"detail": "許可なし"},
                 status=403
             )
-        
-        active_subscription = Subscription.objects.filter(
-            owner=member.owner,
-            club=member.club,
-            status__in=[
-                "active",
-                "trialing",
-                "past_due",
-                "pending",
-            ],
-        ).exists()
-    
-        if active_subscription:
+
+        is_representative = (
+            member.user_id is not None and member.user_id == member.owner_id
+        )
+        if is_representative:
+            active_subscription = Subscription.objects.filter(
+                owner=member.owner,
+                club=member.club,
+                status__in=[
+                    "active",
+                    "trialing",
+                    "past_due",
+                    "pending",
+                ],
+            ).exists()
+
+            if active_subscription:
+                return Response(
+                    {
+                        "detail": "有効なサブスクリプションが存在するため、この会員を削除できません。"
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        grace_until = (
+            member.subscription_items
+            .filter(deleted_at__isnull=False, access_until__gt=timezone.now())
+            .order_by("-access_until")
+            .values_list("access_until", flat=True)
+            .first()
+        )
+        if grace_until is not None:
+            local = timezone.localtime(grace_until)
+            date_label = f"{local.year}年{local.month}月{local.day}日"
             return Response(
                 {
-                    "detail": "有効なサブスクリプションが存在するため、この会員を削除できません。"
+                    "detail": (
+                        f"この会員には、{date_label}まで有効なプランが残っています。"
+                        "この日を過ぎてから削除してください。"
+                    )
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -1556,12 +1580,75 @@ class MemberViewSet(viewsets.ModelViewSet):
             )
 
         club = member.club
-
+        full_name = member.full_name
+        member.ticket_purchases.update(member_name=full_name)
+        member.ticket_grants.update(member_name=full_name)
+        member.teacher_invoices.update(instructor_name=full_name)
 
         member.delete()
         sync_member_quantity(club)
 
         return Response({"status": "deleted"}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"], url_path="orphaned-ticket-grants")
+    def orphaned_ticket_grants(self, request):
+        subdomain = request.query_params.get("club_subdomain")
+        club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
+        if club is None or not request.user.is_authenticated or club.owner_id != request.user.id:
+            return Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
+        grants = (
+            TicketGrant.objects
+            .filter(
+                member__isnull=True,
+                dealt_with=False,
+                ticket_type__club=club,
+            )
+            .select_related("ticket_type")
+            .prefetch_related("usages")
+            .order_by("member_name", "id")
+        )
+        payload = []
+        for grant in grants:
+            used = sum(
+                usage.quantity
+                for usage in grant.usages.all()
+                if usage.refunded_at is None
+            )
+            remaining = grant.quantity - used
+            if remaining <= 0:
+                continue
+            payload.append({
+                "id": grant.id,
+                "member_name": grant.member_name,
+                "ticket_type_name": grant.ticket_type.name if grant.ticket_type_id else "",
+                "remaining_quantity": remaining,
+                "expires_at": grant.expires_at.isoformat() if grant.expires_at else None,
+            })
+        return Response(payload)
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path=r"orphaned-ticket-grants/(?P<grant_id>\d+)/resolve",
+    )
+    def resolve_orphaned_ticket_grant(self, request, grant_id=None):
+        grant = (
+            TicketGrant.objects
+            .select_related("ticket_type__club")
+            .filter(id=grant_id, member__isnull=True)
+            .first()
+        )
+        club = grant.ticket_type.club if grant and grant.ticket_type_id else None
+        if (
+            grant is None
+            or club is None
+            or not request.user.is_authenticated
+            or club.owner_id != request.user.id
+        ):
+            return Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
+        grant.dealt_with = True
+        grant.save(update_fields=["dealt_with"])
+        return Response({"id": grant.id, "dealt_with": True})
 
 
 class TicketTypeViewSet(viewsets.ModelViewSet):

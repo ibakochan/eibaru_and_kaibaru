@@ -1391,9 +1391,12 @@ class TicketPurchase(models.Model):
 
     member = models.ForeignKey(
         Member,
-        on_delete=models.PROTECT,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name="ticket_purchases",
     )
+    member_name = models.CharField(max_length=200, blank=True, default="")
 
     package = models.ForeignKey(
         TicketPackage,
@@ -1440,11 +1443,9 @@ class TicketPurchase(models.Model):
     )
 
     def __str__(self):
-        return (
-            f"{self.member.full_name} - "
-            f"{self.package.name} - "
-            f"{self.amount}"
-        )
+        name = self.member.full_name if self.member_id else (self.member_name or "削除された会員")
+        package = self.package.name if self.package_id else "チケット"
+        return f"{name} - {package} - {self.amount}"
 
 class TicketGrant(models.Model):
     class Source(models.TextChoices):
@@ -1454,9 +1455,13 @@ class TicketGrant(models.Model):
 
     member = models.ForeignKey(
         Member,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name="ticket_grants",
     )
+    member_name = models.CharField(max_length=200, blank=True, default="")
+    dealt_with = models.BooleanField(default=False)
 
     mutation = models.ForeignKey(
         SubscriptionMutation,
@@ -1512,11 +1517,9 @@ class TicketGrant(models.Model):
     ]
 
     def __str__(self):
-        return (
-            f"{self.member.full_name} - "
-            f"{self.ticket_type.name} - "
-            f"{self.quantity}"
-        )
+        name = self.member.full_name if self.member_id else (self.member_name or "削除された会員")
+        ticket = self.ticket_type.name if self.ticket_type_id else "チケット"
+        return f"{name} - {ticket} - {self.quantity}"
 
 
 
@@ -2833,9 +2836,12 @@ class TeacherInvoice(models.Model):
     )
     instructor = models.ForeignKey(
         Member,
-        on_delete=models.PROTECT,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name="teacher_invoices",
     )
+    instructor_name = models.CharField(max_length=200, blank=True, default="")
     instructor_pay = models.ForeignKey(
         InstructorPay,
         null=True,
