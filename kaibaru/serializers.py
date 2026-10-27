@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import TicketType, TicketPackage, Reservation, Event, EventPrice, EventReservation, MemberRecord, MembershipPlanGroup, MemberPricingAdjustment, Discount, DiscountCondition, Member, Club, Lesson, Participation, SlateImage, JoinRequest, InvoiceItem, Invoice, Subscription, SubscriptionItem
+from .models import TicketType, TicketPackage, Reservation, Event, EventPrice, EventReservation, MemberRecord, MembershipPlanGroup, MemberPricingAdjustment, Discount, DiscountCondition, Member, Club, Lesson, Participation, SlateImage, JoinRequest, JoinRequestLevel, InvoiceItem, Invoice, Subscription, SubscriptionItem, LevelSystem
 from types import SimpleNamespace
 from django.core.exceptions import ValidationError as DjangoValidationError
 
@@ -25,6 +25,14 @@ from django.db import transaction
 from .rules_plans import enforce_membership_plan_invariants
 from .rules_eligibility import assert_member_eligible_for_plan
 from .user_errors import format_validation_error
+from .level_progress import (
+    clean_level_names,
+    clean_milestones,
+    member_level_data,
+    member_levels_data,
+    sync_join_request_levels,
+    sync_member_levels,
+)
 
 from django.utils.timezone import now
 
@@ -1487,7 +1495,24 @@ class MyJoinRequestSerializer(serializers.ModelSerializer):
         ]
 
 
+class JoinRequestLevelSerializer(serializers.ModelSerializer):
+    level_system_name = serializers.CharField(source="level_system.name", read_only=True)
+
+    class Meta:
+        model = JoinRequestLevel
+        fields = [
+            "id",
+            "level_system",
+            "level_system_name",
+            "level",
+            "manual_level_counts",
+        ]
+        read_only_fields = ["id", "level_system_name"]
+
+
 class JoinRequestSerializer(serializers.ModelSerializer):
+    levels = JoinRequestLevelSerializer(many=True, read_only=True)
+
     class Meta:
         model = JoinRequest
         fields = [
@@ -1500,13 +1525,25 @@ class JoinRequestSerializer(serializers.ModelSerializer):
             "emergency_number",
             "other_information",
             "picture",
-            "level",
+            "levels",
             "created_at",
             "birth_date",
             "gender",
             "already_subscribed_plans",
         ]
-        read_only_fields = ["id", "status", "created_at"]
+        read_only_fields = ["id", "status", "created_at", "levels"]
+
+    def create(self, validated_data):
+        instance = super().create(validated_data)
+        if "levels" in getattr(self, "initial_data", {}):
+            sync_join_request_levels(instance, self.initial_data.get("levels"))
+        return instance
+
+    def update(self, instance, validated_data):
+        updated = super().update(instance, validated_data)
+        if "levels" in getattr(self, "initial_data", {}):
+            sync_join_request_levels(updated, self.initial_data.get("levels"))
+        return updated
 
     def validate(self, attrs):
         plans = attrs.get("already_subscribed_plans") or []
@@ -1552,20 +1589,66 @@ class ParticipationSerializer(serializers.ModelSerializer):
             "lesson",
             "total_count",
             "monthly_count",
-            "level_counts",
             "last_participation_date",
-            "second_last_participation_date",
             "member_name",
             "lesson_title",
         ]
         read_only_fields = ["id", "member_name", "lesson_title"]
 
 
+class LevelSystemSerializer(serializers.ModelSerializer):
+    lessons = serializers.PrimaryKeyRelatedField(
+        many=True,
+        queryset=Lesson.objects.all(),
+        required=False,
+    )
+
+    class Meta:
+        model = LevelSystem
+        fields = [
+            "id",
+            "club",
+            "name",
+            "level_names",
+            "level_milestones",
+            "lessons",
+        ]
+        read_only_fields = ["id", "club"]
+
+    def validate_name(self, value):
+        name = str(value or "").strip()
+        if not name:
+            raise serializers.ValidationError("レベル名を入力してください。")
+        return name[:40]
+
+    def validate(self, attrs):
+        club = self.instance.club if self.instance else self.context.get("club")
+        if "level_names" in attrs:
+            attrs["level_names"] = clean_level_names(attrs.get("level_names"))
+        if "level_milestones" in attrs:
+            attrs["level_milestones"] = clean_milestones(attrs.get("level_milestones"))
+        lessons = attrs.get("lessons")
+        if club is not None and lessons is not None:
+            if any(lesson.club_id != club.id for lesson in lessons):
+                raise serializers.ValidationError({
+                    "lessons": "このクラブのレッスンだけを選べます。"
+                })
+        if club is not None and "name" in attrs:
+            clash = LevelSystem.objects.filter(club=club, name=attrs["name"])
+            if self.instance is not None:
+                clash = clash.exclude(pk=self.instance.pk)
+            if clash.exists():
+                raise serializers.ValidationError({
+                    "name": "同じ名前のレベルがすでにあります。"
+                })
+        return attrs
+
+
 
 class MemberSerializer(serializers.ModelSerializer):
     total_participation = serializers.SerializerMethodField()
     this_month_participation = serializers.SerializerMethodField()
-    level_participation = serializers.SerializerMethodField()
+    levels = serializers.SerializerMethodField()
     age = serializers.SerializerMethodField()
     subscription_state = serializers.SerializerMethodField()
     subscription_items = serializers.SerializerMethodField()
@@ -1577,7 +1660,6 @@ class MemberSerializer(serializers.ModelSerializer):
         model = Member
         fields = [
             "id",
-            "level",
             "user",
             "owner",
             "introduction",
@@ -1589,9 +1671,8 @@ class MemberSerializer(serializers.ModelSerializer):
             "picture",
             "total_participation",
             "this_month_participation",
-            "level_participation",
+            "levels",
             "manual_total_participation",
-            "manual_level_counts",
             "participation_limit",
             "is_manager",
             "is_instructor",
@@ -1679,11 +1760,26 @@ class MemberSerializer(serializers.ModelSerializer):
             role = None
         return permission_map(role)
 
+    def _sync_levels(self, instance):
+        raw = getattr(self, "initial_data", {}) or {}
+        if "levels" not in raw:
+            return
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        club = instance.club
+        if not user or not getattr(user, "is_authenticated", False) or club is None:
+            return
+        from .manager_permissions import has_permission
+        if club.owner_id != user.id and not has_permission(user, club, "members"):
+            return
+        sync_member_levels(instance, raw.get("levels"))
+
     def create(self, validated_data):
         instance = super().create(validated_data)
         self._apply_role_flags(instance)
         instance.save(update_fields=["is_instructor", "is_manager"])
         self._sync_manager_role(instance)
+        self._sync_levels(instance)
         return instance
 
     def update(self, instance, validated_data):
@@ -1703,6 +1799,7 @@ class MemberSerializer(serializers.ModelSerializer):
         self._apply_role_flags(instance)
         updated = super().update(instance, validated_data)
         self._sync_manager_role(updated)
+        self._sync_levels(updated)
         return updated
 
     def get_tickets(self, obj):
@@ -1864,11 +1961,10 @@ class MemberSerializer(serializers.ModelSerializer):
                 "participations",
                 "total_participation",
                 "this_month_participation",
-                "level_participation",
                 "manual_total_participation",
-                "manual_level_counts",
             ]:
                 data.pop(field, None)
+            self._hide_level_counts(data)
             return data
 
         club = getattr(instance, "club", None)
@@ -1920,13 +2016,23 @@ class MemberSerializer(serializers.ModelSerializer):
             "participations",
             "total_participation",
             "this_month_participation",
-            "level_participation",
             "manual_total_participation",
-            "manual_level_counts",
         ]:
             data.pop(field, None)
+        self._hide_level_counts(data)
 
         return data
+
+    def _hide_level_counts(self, data):
+        levels = data.get("levels")
+        if not isinstance(levels, list):
+            return
+        for row in levels:
+            if not isinstance(row, dict):
+                continue
+            row.pop("manual_level_counts", None)
+            row.pop("level_counts", None)
+            row.pop("level_participation", None)
 
     def _participations(self, obj):
         prefetched = getattr(obj, "_prefetched_objects_cache", {}).get("participations")
@@ -1945,7 +2051,6 @@ class MemberSerializer(serializers.ModelSerializer):
                 "member_id",
                 "total_count",
                 "monthly_count",
-                "level_counts",
             )
             for row in rows:
                 grouped[row.member_id].append(row)
@@ -1960,23 +2065,11 @@ class MemberSerializer(serializers.ModelSerializer):
         parts = self._participations(obj)
         return sum(p.monthly_count for p in parts)
 
-    def get_level_participation(self, obj):
-        level_sums = defaultdict(int)
-        parts = self._participations(obj)
-
-        if obj.manual_level_counts:
-            for lvl, count in obj.manual_level_counts.items():
-                try:
-                    level_sums[int(lvl)] += int(count)
-                except ValueError:
-                    continue
-    
-        for p in parts:
-            if p.level_counts:
-                for lvl, count in p.level_counts.items():
-                    level_sums[int(lvl)] += count
-
-        return dict(level_sums)
+    def get_levels(self, obj):
+        prefetched = getattr(obj, "_prefetched_objects_cache", {}).get("levels")
+        if prefetched is not None:
+            return [member_level_data(row) for row in prefetched]
+        return member_levels_data(obj)
 
 
 class LessonSerializer(serializers.ModelSerializer):
@@ -2755,6 +2848,7 @@ class ClubSerializer(serializers.ModelSerializer):
     frozen = serializers.SerializerMethodField()
     platform_bill = serializers.SerializerMethodField()
     slate_images = SlateImageSerializer(many=True, read_only=True)
+    level_systems = LevelSystemSerializer(many=True, read_only=True)
     join_requests = serializers.SerializerMethodField()
     my_join_requests = serializers.SerializerMethodField()
     membership_plans = serializers.SerializerMethodField()
@@ -2853,10 +2947,8 @@ class ClubSerializer(serializers.ModelSerializer):
             "today",
             "home_images",
             "search_description",
-            "has_levels",
             "has_attendance",
-            "level_names",
-            "level_milestones",
+            "level_systems",
             "trial_start_date",
             "expiration_date",
 

@@ -3,7 +3,7 @@ from rest_framework import viewsets, serializers, status
 from rest_framework.decorators import action
 from rest_framework.viewsets import ViewSet
 from rest_framework.response import Response
-from .models import TicketGrant, TicketType, TicketPackage, Reservation, Event, EventReservation, MemberRecord, Invoice, MemberPricingAdjustment, Discount, DiscountCondition, SubscriptionItem, Member, Club, Lesson, Participation, SlateImage, JoinRequest, MembershipPlan, Subscription, ExpenseReceipt
+from .models import TicketGrant, TicketType, TicketPackage, Reservation, Event, EventReservation, MemberRecord, Invoice, MemberPricingAdjustment, Discount, DiscountCondition, SubscriptionItem, Member, Club, Lesson, Participation, SlateImage, JoinRequest, MembershipPlan, Subscription, ExpenseReceipt, LevelSystem
 from .manager_permissions import has_permission
 from accounts.models import CustomUser
 from django.contrib.auth import login
@@ -47,7 +47,8 @@ from .pricing import (
     get_effective_subscription_price,
 )
 
-from .serializers import TicketTypeSerializer, TicketPackageSerializer, ReservationSerializer, PaymentHistoryInvoiceSerializer, MemberPricingAdjustmentSerializer, DiscountConditionSerializer, DiscountSerializer, MembershipPlanSerializer, MemberSerializer, MemberRecordSerializer, ClubSerializer, LessonSerializer, ParticipationSerializer, SlateImageSerializer, JoinRequestSerializer
+from .serializers import TicketTypeSerializer, TicketPackageSerializer, ReservationSerializer, PaymentHistoryInvoiceSerializer, MemberPricingAdjustmentSerializer, DiscountConditionSerializer, DiscountSerializer, MembershipPlanSerializer, MemberSerializer, MemberRecordSerializer, ClubSerializer, LessonSerializer, ParticipationSerializer, SlateImageSerializer, JoinRequestSerializer, LevelSystemSerializer
+from .level_progress import copy_join_request_levels, member_levels_data, record_level_progress
 from .service_event import (
     cancel_section_event,
     dismiss_open_event_reservation,
@@ -667,15 +668,6 @@ def build_pricing_map(club, request_user=None, preview_member=None):
 
     return pricing_map
 
-
-from collections import defaultdict
-def get_level_participation(member):
-    level_sums = defaultdict(int)
-    for p in member.participations.all():
-        if p.level_counts:
-            for lvl, count in p.level_counts.items():
-                level_sums[int(lvl)] += count
-    return dict(level_sums)
 
 VALID_SUBDOMAIN_RE = re.compile(r'^[a-z0-9-]+$', re.IGNORECASE)
 
@@ -1334,6 +1326,19 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
             club=club,
         )
 
+    def update(self, request, *args, **kwargs):
+        join_request = self.get_object()
+        if not has_permission(request.user, join_request.club, "members"):
+            return Response(
+                {"detail": "許可されていません"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        kwargs["partial"] = True
+        return self.update(request, *args, **kwargs)
+
 
     @action(detail=False, methods=["post"])
     def bulk_accept(self, request):
@@ -1345,7 +1350,11 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
     
-        join_requests = JoinRequest.objects.filter(id__in=ids).select_related("club")
+        join_requests = (
+            JoinRequest.objects.filter(id__in=ids)
+            .select_related("club")
+            .prefetch_related("levels__level_system")
+        )
 
         if any(join_request.club.owner_id != request.user.id for join_request in join_requests):
             return Response({"detail": "この操作を行う権限がありません。"}, status=403)
@@ -1400,8 +1409,8 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
                     emergency_number=jr.emergency_number,
                     other_information=jr.other_information,
                     picture=new_picture,
-                    level=jr.level or 1,
                 )
+                copy_join_request_levels(jr, member)
 
                 legacy_plans = list(
                     jr.already_subscribed_plans.all()
@@ -3550,7 +3559,7 @@ class ParticipationViewSet(viewsets.ModelViewSet):
         return {
             "total_participation": total,
             "this_month_participation": monthly,
-            "level_participation": get_level_participation(member),
+            "levels": member_levels_data(member),
         }
 
     @action(detail=False, methods=["post"], url_path="bulk-create")
@@ -3566,7 +3575,11 @@ class ParticipationViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            lesson = Lesson.objects.filter(id=lesson_id).first()
+            lesson = (
+                Lesson.objects.filter(id=lesson_id)
+                .prefetch_related("level_systems")
+                .first()
+            )
 
             if not lesson:
                 return Response(
@@ -3600,16 +3613,6 @@ class ParticipationViewSet(viewsets.ModelViewSet):
 
             today = timezone.localtime(timezone.now()).date()
 
-            try:
-                milestones = lesson.club.level_milestones or {}
-
-                if isinstance(milestones, str):
-                    milestones = json.loads(milestones)
-
-            except Exception:
-                milestones = {}
-
-
             leveled_up_members = []
             created_members = []
 
@@ -3623,7 +3626,6 @@ class ParticipationViewSet(viewsets.ModelViewSet):
                     defaults={
                         "total_count": 0,
                         "monthly_count": 0,
-                        "level_counts": {},
                     }
                 )
 
@@ -3635,68 +3637,23 @@ class ParticipationViewSet(viewsets.ModelViewSet):
                     updated_members.append({
                         "id": member.id,
                         **stats,
-                        "level": member.level,
                     })
 
                     continue
 
-
-                if participation.level_counts is None:
-                    participation.level_counts = {}
-
-
-                current_level = member.level
-                level_key = str(current_level)
-
-
                 participation.total_count += 1
                 participation.monthly_count += 1
-
-                participation.level_counts[level_key] = (
-                    participation.level_counts.get(level_key, 0) + 1
-                )
-
-
                 participation.last_participation_date = today
-
                 participation.save()
 
-
                 created_members.append(member.id)
+                leveled_up_members.extend(record_level_progress(member, lesson))
 
-
-                # -------------------------
-                # LEVEL CHECK
-                # -------------------------
-
-                level_totals = get_level_participation(member)
-
-                total_for_current_level = level_totals.get(
-                    member.level,
-                    0
-                )
-
-                required = milestones.get(
-                    str(member.level)
-                )
-
-
-                if required and total_for_current_level >= required:
-
-                    member.level += 1
-                    member.save()
-
-                    leveled_up_members.append({
-                        "member_id": member.id,
-                        "new_level": member.level,
-                    })
-                
                 stats = self.get_member_stats(member)
 
                 updated_members.append({
                     "id": member.id,
                     **stats,
-                    "level": member.level,
                 })
 
 
@@ -3860,6 +3817,73 @@ def _expense_months(club):
     return months
 
 
+class LevelSystemViewSet(viewsets.ModelViewSet):
+    serializer_class = LevelSystemSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user.is_authenticated:
+            return LevelSystem.objects.none()
+        return (
+            LevelSystem.objects.filter(club__is_deleted=False)
+            .filter(
+                Q(club__owner=user)
+                | Q(club__members__user=user, club__members__is_manager=True)
+            )
+            .distinct()
+            .prefetch_related("lessons")
+        )
+
+    def _club_for_write(self, request, instance=None):
+        if instance is not None:
+            club = instance.club
+        else:
+            club = Club.objects.filter(
+                id=request.data.get("club"),
+                is_deleted=False,
+            ).first()
+        if club is None or not has_permission(request.user, club, "site"):
+            return None
+        return club
+
+    def create(self, request, *args, **kwargs):
+        club = self._club_for_write(request)
+        if club is None:
+            return Response(
+                {"detail": "許可されていません"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        serializer = self.get_serializer(
+            data=request.data,
+            context={**self.get_serializer_context(), "club": club},
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save(club=club)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if self._club_for_write(request, instance) is None:
+            return Response(
+                {"detail": "許可されていません"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        kwargs["partial"] = True
+        return self.update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if self._club_for_write(request, instance) is None:
+            return Response(
+                {"detail": "許可されていません"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return super().destroy(request, *args, **kwargs)
+
+
 class ClubViewSet(viewsets.ModelViewSet):
     serializer_class = ClubSerializer
     queryset = Club.objects.all()
@@ -3954,7 +3978,13 @@ class ClubViewSet(viewsets.ModelViewSet):
                 "events__prices__brackets",
                 *event_lookups,
                 "slate_images",
-                "join_requests",
+                "level_systems__lessons",
+                Prefetch(
+                    "join_requests",
+                    queryset=JoinRequest.objects.prefetch_related(
+                        "levels__level_system",
+                    ).order_by("-created_at"),
+                ),
                 "membership_plans",
             )
         )
@@ -3973,6 +4003,7 @@ class ClubViewSet(viewsets.ModelViewSet):
                         subscription__status__in=["active", "trialing", "pending"],
                     ),
                 ),
+                "levels__level_system",
                 Prefetch(
                     "ticket_grants",
                     queryset=(

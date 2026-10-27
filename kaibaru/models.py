@@ -195,12 +195,7 @@ class Club(models.Model):
     line_qr_code = models.ImageField(upload_to=line_qr_upload_to, null=True, blank=True)
 
 
-    has_levels = models.BooleanField(default=False)
     has_attendance = models.BooleanField(default=False)
-    
-    level_names = models.JSONField(null=True, blank=True)
-    
-    level_milestones = models.JSONField(null=True, blank=True)
 
     last_reset = models.DateField(null=True, blank=True)
 
@@ -541,10 +536,7 @@ class Member(models.Model):
 
     picture = models.ImageField(upload_to=club_member_pictures_upload_to, null=True, blank=True)
 
-    level = models.PositiveIntegerField(default=1)
-
     manual_total_participation = models.IntegerField(default=0)
-    manual_level_counts = models.JSONField(default=dict)
 
     participation_limit = models.PositiveIntegerField(null=True, blank=True, default=None)
 
@@ -1626,9 +1618,7 @@ class Participation(models.Model):
     
     total_count = models.PositiveIntegerField(default=0)
     monthly_count = models.PositiveIntegerField(default=0)
-    level_counts = models.JSONField(default=dict)
     last_participation_date = models.DateField(null=True, blank=True)
-    second_last_participation_date = models.DateField(null=True, blank=True)
     
     class Meta:
         unique_together = ('member', 'lesson')  
@@ -1658,7 +1648,6 @@ class JoinRequest(models.Model):
     phone_number = models.CharField(max_length=20, blank=True)
     emergency_number = models.CharField(max_length=20, blank=True)
     picture = models.ImageField(upload_to=club_member_pictures_upload_to, null=True, blank=True)
-    level = models.PositiveIntegerField(default=1)
     other_information = models.TextField(blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -1678,6 +1667,52 @@ class JoinRequest(models.Model):
 
     def __str__(self):
         return f"{self.full_name} → {self.club.subdomain}"
+
+
+class LevelSystem(models.Model):
+    club = models.ForeignKey(Club, on_delete=models.CASCADE, related_name="level_systems")
+    name = models.CharField(max_length=40)
+    level_names = models.JSONField(null=True, blank=True)
+    level_milestones = models.JSONField(null=True, blank=True)
+    lessons = models.ManyToManyField(
+        "Lesson",
+        blank=True,
+        related_name="level_systems",
+    )
+
+    class Meta:
+        ordering = ["id"]
+        unique_together = ("club", "name")
+
+    def __str__(self):
+        return f"{self.name} ({self.club.subdomain})"
+
+
+class MemberLevel(models.Model):
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="levels")
+    level_system = models.ForeignKey(LevelSystem, on_delete=models.CASCADE, related_name="member_levels")
+    level = models.PositiveIntegerField(default=1)
+    level_counts = models.JSONField(default=dict)
+    manual_level_counts = models.JSONField(default=dict)
+
+    class Meta:
+        unique_together = ("member", "level_system")
+
+    def __str__(self):
+        return f"{self.member.full_name} - {self.level_system.name} {self.level}"
+
+
+class JoinRequestLevel(models.Model):
+    join_request = models.ForeignKey(JoinRequest, on_delete=models.CASCADE, related_name="levels")
+    level_system = models.ForeignKey(LevelSystem, on_delete=models.CASCADE, related_name="join_request_levels")
+    level = models.PositiveIntegerField(default=1)
+    manual_level_counts = models.JSONField(default=dict)
+
+    class Meta:
+        unique_together = ("join_request", "level_system")
+
+    def __str__(self):
+        return f"{self.join_request.full_name} - {self.level_system.name} {self.level}"
 
 
 class StripeWebhookEvent(models.Model):
