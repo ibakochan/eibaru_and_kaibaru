@@ -1552,21 +1552,31 @@ class MemberViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-        grace_until = (
+        grace_items = list(
             member.subscription_items
             .filter(deleted_at__isnull=False, access_until__gt=timezone.now())
-            .order_by("-access_until")
-            .values_list("access_until", flat=True)
-            .first()
+            .select_related("plan")
+            .order_by("access_until", "id")
         )
-        if grace_until is not None:
-            local = timezone.localtime(grace_until)
-            date_label = f"{local.year}年{local.month}月{local.day}日"
+        if grace_items:
+            def grace_date(value):
+                local = timezone.localtime(value)
+                return f"{local.year}年{local.month}月{local.day}日"
+
+            lines = [
+                "・{name}（{date}まで）".format(
+                    name=item.plan.name if item.plan_id else "プラン",
+                    date=grace_date(item.access_until),
+                )
+                for item in grace_items
+            ]
+            latest = max(item.access_until for item in grace_items)
             return Response(
                 {
                     "detail": (
-                        f"この会員には、{date_label}まで有効なプランが残っています。"
-                        "この日を過ぎてから削除してください。"
+                        "この会員には、まだ利用できるプランが残っています。\n"
+                        + "\n".join(lines)
+                        + f"\n{grace_date(latest)}を過ぎてから削除してください。"
                     )
                 },
                 status=status.HTTP_400_BAD_REQUEST,
