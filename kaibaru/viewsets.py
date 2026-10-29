@@ -1626,6 +1626,20 @@ class MemberViewSet(viewsets.ModelViewSet):
 
         return Response({"status": "deleted"}, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=["post"], url_path="transfer")
+    def transfer(self, request, pk=None):
+        from .service_member_transfer import request_member_transfer
+
+        member = self.get_object()
+        if not request.user.is_authenticated:
+            return Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
+        result = request_member_transfer(
+            member=member,
+            requester=request.user,
+            email=request.data.get("email"),
+        )
+        return Response({"detail": result["detail"]}, status=result["status"])
+
     @action(detail=False, methods=["get"], url_path="orphaned-ticket-grants")
     def orphaned_ticket_grants(self, request):
         subdomain = request.query_params.get("club_subdomain")

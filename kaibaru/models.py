@@ -573,6 +573,41 @@ class Member(models.Model):
         return f"{self.full_name} ({self.club.subdomain})"
 
 
+class MemberTransfer(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        ACCEPTED = "accepted", "Accepted"
+        CANCELED = "canceled", "Canceled"
+
+    member = models.ForeignKey(
+        Member,
+        on_delete=models.CASCADE,
+        related_name="transfers",
+    )
+    from_owner = models.ForeignKey(
+        CustomUser,
+        on_delete=models.CASCADE,
+        related_name="member_transfers_sent",
+    )
+    to_user = models.ForeignKey(
+        CustomUser,
+        on_delete=models.CASCADE,
+        related_name="member_transfers_received",
+    )
+    token = models.CharField(max_length=64, unique=True)
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    accepted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["member", "status"], name="kaibaru_mem_member_status_idx"),
+        ]
+
 
 class Subscription(models.Model):
     owner = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="subscriptions")

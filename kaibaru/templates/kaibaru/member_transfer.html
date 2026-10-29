@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>会員の受け入れ</title>
+  <style>
+    body {
+      margin: 0;
+      background: #f6f7f9;
+      color: #111827;
+      font-family: "Hiragino Sans", "Noto Sans JP", sans-serif;
+    }
+    main {
+      max-width: 480px;
+      margin: 40px auto;
+      padding: 32px 28px;
+      background: #fff;
+      border-radius: 16px;
+    }
+    h1 {
+      margin: 0 0 16px;
+      font-size: 22px;
+      font-weight: 600;
+    }
+    p { line-height: 1.7; }
+    .message {
+      margin: 0 0 16px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: #fff4f2;
+      border: 1px solid #f5c2c7;
+      color: #9b1c1c;
+      white-space: pre-line;
+    }
+    .success {
+      margin: 0 0 16px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: #eefbf3;
+      border: 1px solid #b7ebc6;
+      color: #17663a;
+      line-height: 1.7;
+    }
+    button, .home {
+      display: block;
+      width: 100%;
+      box-sizing: border-box;
+      margin-top: 8px;
+      padding: 14px 16px;
+      border-radius: 999px;
+      font-size: 16px;
+      text-align: center;
+      text-decoration: none;
+    }
+    button {
+      border: 0;
+      background: #111827;
+      color: #fff;
+      cursor: pointer;
+    }
+    .home {
+      background: #f3f4f6;
+      color: #111827;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    {% if mode == "success" %}
+      <h1>移しました</h1>
+      <p class="success">{{ message }}</p>
+      <a class="home" href="{{ home_url }}">クラブへ戻る</a>
+    {% elif mode == "ready" %}
+      <h1>会員を受け入れる</h1>
+      <p>{{ club_name }}の「{{ member_name }}」さんを、あなたのアカウントに移します。</p>
+      <p>プランは引き継がれません。続ける場合は、受け入れたあと改めて加入してください。</p>
+      <form method="post">
+        {% csrf_token %}
+        <button type="submit">受け入れる</button>
+      </form>
+    {% else %}
+      <h1>手続きできません</h1>
+      <p class="message">{{ message }}</p>
+      {% if home_url %}
+        <a class="home" href="{{ home_url }}">クラブへ戻る</a>
+      {% endif %}
+    {% endif %}
+  </main>
+</body>
+</html>
