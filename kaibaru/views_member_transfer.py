@@ -1,14 +1,24 @@
-from django.contrib.auth.views import redirect_to_login
+from urllib.parse import quote
+
 from django.shortcuts import render
+from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods
 
+from .models import MemberTransfer
 from .service_member_transfer import accept_member_transfer, transfer_block_detail
 
 
+@ensure_csrf_cookie
 @require_http_methods(["GET", "POST"])
 def accept_member_transfer_view(request, token):
     if not request.user.is_authenticated:
-        return redirect_to_login(request.get_full_path())
+        transfer = _pending_transfer(token)
+        if transfer is None:
+            return _render(request, {
+                "mode": "invalid",
+                "message": "この依頼は見つからないか、すでに完了しています。",
+            })
+        return _render_login(request, transfer)
 
     if request.method == "GET":
         result = _preview(request, token)
@@ -19,9 +29,37 @@ def accept_member_transfer_view(request, token):
     return _render(request, result, status=status)
 
 
-def _preview(request, token):
-    from .models import MemberTransfer
+def _pending_transfer(token):
+    return (
+        MemberTransfer.objects
+        .select_related("member", "member__club")
+        .filter(token=token, status=MemberTransfer.Status.PENDING)
+        .first()
+    )
 
+
+def _render_login(request, transfer):
+    club = transfer.member.club
+    home_url = (
+        f"https://{club.subdomain}.kaibaru.jp/"
+        if club and club.subdomain
+        else "https://kaibaru.jp/"
+    )
+    response = render(
+        request,
+        "kaibaru/member_transfer_login.html",
+        {
+            "google_login_url": (
+                "https://kaibaru.jp/start_google_login/?next="
+                + quote(home_url, safe="")
+            ),
+        },
+    )
+    response["X-Robots-Tag"] = "noindex, nofollow"
+    return response
+
+
+def _preview(request, token):
     transfer = (
         MemberTransfer.objects
         .select_related("member", "member__club", "to_user", "from_owner")
