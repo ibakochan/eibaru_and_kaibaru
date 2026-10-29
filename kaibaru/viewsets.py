@@ -1517,6 +1517,55 @@ class MemberViewSet(viewsets.ModelViewSet):
             owner=self.request.user,
         )
 
+    def _subscription_delete_block_detail(self, member):
+        """Refuse deletion while a plan is still active or inside its grace window."""
+
+        def plan_name(item):
+            return item.plan.name if item.plan_id else "プラン"
+
+        def local_date(value):
+            local = timezone.localtime(value)
+            return f"{local.year}年{local.month}月{local.day}日"
+
+        active_items = list(
+            member.subscription_items
+            .filter(deleted_at__isnull=True)
+            .select_related("plan")
+            .order_by("id")
+        )
+        if active_items:
+            lines = [f"・{plan_name(item)}" for item in active_items]
+            return (
+                "この会員には、まだ解約されていないプランがあります。\n"
+                "メンバーを削除するには、先にサブスクを解約してください。\n"
+                + "\n".join(lines)
+            )
+
+        grace_items = list(
+            member.subscription_items
+            .filter(deleted_at__isnull=False, access_until__gt=timezone.now())
+            .select_related("plan")
+            .order_by("access_until", "id")
+        )
+        if grace_items:
+            lines = [
+                f"・{plan_name(item)}（{local_date(item.access_until)}まで）"
+                for item in grace_items
+            ]
+            latest = max(item.access_until for item in grace_items)
+            return (
+                "この会員には、まだ利用できるプランが残っています。\n"
+                + "\n".join(lines)
+                + f"\n{local_date(latest)}を過ぎてから削除してください。"
+            )
+
+        return None
+
+    def perform_destroy(self, instance):
+        detail = self._subscription_delete_block_detail(instance)
+        if detail:
+            raise serializers.ValidationError(detail)
+        instance.delete()
 
     @action(detail=True, methods=["delete"])
     def remove(self, request, pk=None):
@@ -1552,33 +1601,10 @@ class MemberViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-        grace_items = list(
-            member.subscription_items
-            .filter(deleted_at__isnull=False, access_until__gt=timezone.now())
-            .select_related("plan")
-            .order_by("access_until", "id")
-        )
-        if grace_items:
-            def grace_date(value):
-                local = timezone.localtime(value)
-                return f"{local.year}年{local.month}月{local.day}日"
-
-            lines = [
-                "・{name}（{date}まで）".format(
-                    name=item.plan.name if item.plan_id else "プラン",
-                    date=grace_date(item.access_until),
-                )
-                for item in grace_items
-            ]
-            latest = max(item.access_until for item in grace_items)
+        subscription_block = self._subscription_delete_block_detail(member)
+        if subscription_block:
             return Response(
-                {
-                    "detail": (
-                        "この会員には、まだ利用できるプランが残っています。\n"
-                        + "\n".join(lines)
-                        + f"\n{grace_date(latest)}を過ぎてから削除してください。"
-                    )
-                },
+                {"detail": subscription_block},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
