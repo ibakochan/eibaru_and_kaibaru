@@ -75,7 +75,11 @@
     {% elif mode == "ready" %}
       <h1>会員を受け入れる</h1>
       <p>{{ club_name }}の「{{ member_name }}」さんを、あなたのアカウントに移します。</p>
-      <p>プランは引き継がれません。続ける場合は、受け入れたあと改めて加入してください。</p>
+      {% if plans_follow %}
+        <p>残っているプランも一緒に移ります。今の請求は発生しません。</p>
+      {% else %}
+        <p>プランは引き継がれません。続ける場合は、受け入れたあと改めて加入してください。</p>
+      {% endif %}
       <form method="post">
         {% csrf_token %}
         <button type="submit">受け入れる</button>

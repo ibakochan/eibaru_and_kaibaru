@@ -5,7 +5,11 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods
 
 from .models import MemberTransfer
-from .service_member_transfer import accept_member_transfer, transfer_block_detail
+from .service_member_transfer import (
+    accept_member_transfer,
+    member_plans_will_move,
+    transfer_block_detail,
+)
 
 
 @ensure_csrf_cookie
@@ -79,7 +83,7 @@ def _preview(request, token):
             "transfer": transfer,
         }
 
-    blocked = transfer_block_detail(transfer.member)
+    blocked = transfer_block_detail(transfer.member, transfer.to_user)
     if blocked:
         return {"mode": "blocked", "message": blocked, "transfer": transfer}
 
@@ -87,6 +91,7 @@ def _preview(request, token):
     return {
         "mode": "ready",
         "transfer": transfer,
+        "plans_follow": member_plans_will_move(transfer.member),
         "club_name": (club.title or club.subdomain) if club else "",
         "home_url": f"https://{club.subdomain}.kaibaru.jp/" if club and club.subdomain else "/",
     }
@@ -99,6 +104,7 @@ def _render(request, result, status=200):
     context = {
         "mode": result.get("mode"),
         "message": result.get("message", ""),
+        "plans_follow": result.get("plans_follow", False),
         "member_name": member.full_name if member else "",
         "club_name": result.get("club_name") or ((club.title or club.subdomain) if club else ""),
         "home_url": (

@@ -14,7 +14,11 @@ import logging
 from django.db.models import Q, F
 from datetime import date
 from django.db.models import IntegerField, Sum, Value
-from .service_legacy_subscription import LegacySubscriptionService
+from .service_legacy_subscription import (
+    STRIPE_PRESELECTED_PLANS_MESSAGE,
+    LegacySubscriptionError,
+    LegacySubscriptionService,
+)
 from .club_access import MEMBERS_REQUIRE_SUBSCRIPTION, club_has_platform_subscription
 from .service_platform_subscription import member_deletion_block_reason
 
@@ -1319,6 +1323,19 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
                 }
             )
 
+        if is_family and selected_plans:
+            existing_subscription = Subscription.objects.filter(
+                owner=self.request.user,
+                club=club,
+            ).first()
+            if (
+                existing_subscription is not None
+                and existing_subscription.billing_method == "stripe"
+            ):
+                raise serializers.ValidationError(
+                    {"detail": STRIPE_PRESELECTED_PLANS_MESSAGE}
+                )
+
             
         serializer.save(
             user=None if is_family else self.request.user,
@@ -1371,8 +1388,6 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
     
-        created_member_ids = []
-
         club = join_requests.first().club
 
         if not club_has_platform_subscription(club):
@@ -1381,6 +1396,26 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
     
+        try:
+            created_member_ids = self._accept_join_requests(join_requests)
+        except LegacySubscriptionError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        sync_member_quantity(club)
+
+        return Response(
+            {
+                "created_member_ids": created_member_ids
+            },
+            status=status.HTTP_201_CREATED
+        )
+
+    def _accept_join_requests(self, join_requests):
+        created_member_ids = []
+
         with transaction.atomic():
             for jr in join_requests:
     
@@ -1424,18 +1459,10 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
                     )
     
                 created_member_ids.append(member.id)
-        
-            # delete after processing
+
             join_requests.delete()
-        
-        sync_member_quantity(club)
-    
-        return Response(
-            {
-                "created_member_ids": created_member_ids
-            },
-            status=status.HTTP_201_CREATED
-        )
+
+        return created_member_ids
             
             
     @action(detail=False, methods=["post"])

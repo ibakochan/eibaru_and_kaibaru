@@ -13,6 +13,24 @@ from .billing import (
 )
 from .rules_subscriptions import assert_plan_is_activatable
 
+LIVE_SUBSCRIPTION_STATUSES = (
+    "active",
+    "trialing",
+    "past_due",
+    "pending",
+)
+
+STRIPE_PRESELECTED_PLANS_MESSAGE = (
+    "クレジットカード決済の場合、会員を追加するときに加入済みプランは選べません。"
+    "すでにプランがある人は、現金払いに切り替えてから加入済みプラン付きで申請するか、"
+    "追加したあとで改めて加入し、日割り分をお支払いください。"
+)
+
+
+class LegacySubscriptionError(Exception):
+    pass
+
+
 class LegacySubscriptionService:
 
     @staticmethod
@@ -33,7 +51,7 @@ class LegacySubscriptionService:
         )
 
         if not plans:
-            raise ValueError(
+            raise LegacySubscriptionError(
                 "Legacy subscription requires at least one valid plan."
             )
 
@@ -52,28 +70,25 @@ class LegacySubscriptionService:
                 },
             )
 
+            was_live = False
+
             if not created:
-                if sub_obj.status in [
-                    "active",
-                    "trialing",
-                    "past_due",
-                    "pending",
-                ]:
-                    raise Exception(
-                        "Already has active subscription"
+                if sub_obj.billing_method == "stripe":
+                    raise LegacySubscriptionError(
+                        STRIPE_PRESELECTED_PLANS_MESSAGE
                     )
 
-                sub_obj.status = "active"
-                sub_obj.billing_method = "cash"
-                sub_obj.stripe_subscription_id = None
+                was_live = sub_obj.status in LIVE_SUBSCRIPTION_STATUSES
 
-                sub_obj.save(
-                    update_fields=[
-                        "status",
-                        "billing_method",
-                        "stripe_subscription_id",
-                    ]
-                )
+                if not was_live:
+                    sub_obj.status = "active"
+                    sub_obj.stripe_subscription_id = None
+                    sub_obj.save(
+                        update_fields=[
+                            "status",
+                            "stripe_subscription_id",
+                        ]
+                    )
 
             # -------------------------------------------------
             # Existing plans
@@ -133,25 +148,26 @@ class LegacySubscriptionService:
             # No payment is created.
             # -------------------------------------------------
 
-            period_end_ts = get_next_billing_cycle_anchor(
-                today,
-                sub_obj.billing_anchor_day,
-            )
+            if not was_live:
+                period_end_ts = get_next_billing_cycle_anchor(
+                    today,
+                    sub_obj.billing_anchor_day,
+                )
 
-            resolve_and_apply_subscription_period(
-                sub_obj,
-                period_end_ts,
-                today,
-            )
+                resolve_and_apply_subscription_period(
+                    sub_obj,
+                    period_end_ts,
+                    today,
+                )
 
-            sub_obj.status = "active"
+                sub_obj.status = "active"
 
-            sub_obj.save(
-                update_fields=[
-                    "status",
-                    "current_period_end",
-                    "access_until",
-                ]
-            )
+                sub_obj.save(
+                    update_fields=[
+                        "status",
+                        "current_period_end",
+                        "access_until",
+                    ]
+                )
 
             return sub_obj
