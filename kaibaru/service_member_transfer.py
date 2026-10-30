@@ -104,10 +104,6 @@ def request_member_transfer(*, member, requester, email):
             "detail": "アカウントに紐づいている会員は移せません。",
         }
 
-    blocked = transfer_block_detail(member, to_user)
-    if blocked:
-        return {"ok": False, "status": 400, "detail": blocked}
-
     cleaned = (email or "").strip()
     if not cleaned:
         return {"ok": False, "status": 400, "detail": "メールアドレスを入力してください。"}
@@ -126,6 +122,10 @@ def request_member_transfer(*, member, requester, email):
             "status": 400,
             "detail": "自分のアカウントには移せません。",
         }
+
+    blocked = transfer_block_detail(member, to_user)
+    if blocked:
+        return {"ok": False, "status": 400, "detail": blocked}
 
     MemberTransfer.objects.filter(
         member=member,
