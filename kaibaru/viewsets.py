@@ -4249,7 +4249,7 @@ class ClubViewSet(viewsets.ModelViewSet):
         ip = self._domain_payload(club, "")["custom_domain_target"]
         return Response(self._domain_payload(
             club,
-            f"{domain} を保存しました。Aレコードを {ip} に向けると、1時間以内に公開します。準備ができたらメールでお知らせします。",
+            f"{domain} を保存しました。Aレコードを {ip} に向けてください。DNSの反映には時間がかかることがあります。",
         ))
 
     @action(

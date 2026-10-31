@@ -178,14 +178,11 @@ def update_club_billing_settings(request, club_id):
 
 
 def start_google_login(request):
-    next_url = request.GET.get('next')
-    if next_url:
-        request.session['next_subdomain'] = next_url
-    else:
-        request.session['next_subdomain'] = "https://kaibaru.jp/"
+    next_url = request.GET.get("next") or "https://kaibaru.jp/"
+    request.session["next_subdomain"] = next_url
     if request.GET.get("process") == "connect" and request.user.is_authenticated:
         return redirect("/account/google/login/?process=connect")
-    return redirect("/account/google/login/")
+    return redirect(f"/account/google/login/?next={quote(next_url, safe='')}")
 
 
 class KaibaruPageView(View):

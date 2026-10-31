@@ -4,7 +4,7 @@ from unittest.mock import patch
 from django.http import HttpResponse
 from django.test import RequestFactory, SimpleTestCase
 
-from kaibaru.custom_domain_hosts import custom_domain_redirect_url
+from kaibaru.custom_domain_hosts import custom_domain_redirect_url, login_return_url
 from kaibaru.custom_domain_middleware import (
     CustomDomainHostMiddleware,
     CustomDomainSessionCookieMiddleware,
@@ -103,6 +103,31 @@ class CustomDomainRedirectTests(SimpleTestCase):
             response = CustomDomainHostMiddleware(app)(request)
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], "https://ibarubibaru.lol/members/")
+
+
+class LoginReturnTests(SimpleTestCase):
+    def test_subdomain_with_a_live_domain_hands_off_to_that_host(self):
+        user = SimpleNamespace(pk=5)
+        with patch("kaibaru.custom_domain_hosts.active_custom_domain", return_value="ibarubibaru.lol"):
+            with patch("kaibaru.custom_domain_hosts.cache.set") as saved:
+                url = login_return_url(user, "https://gy.kaibaru.jp/members/?tab=1")
+        self.assertTrue(url.startswith("https://ibarubibaru.lol/accounts/domain-session/"))
+        self.assertEqual(saved.call_args.args[1]["user_id"], 5)
+        self.assertEqual(saved.call_args.args[1]["path"], "/members/?tab=1")
+
+    def test_subdomain_without_a_custom_domain_stays_on_kaibaru(self):
+        user = SimpleNamespace(pk=5)
+        with patch("kaibaru.custom_domain_hosts.active_custom_domain", return_value=None):
+            url = login_return_url(user, "https://gy.kaibaru.jp/members/")
+        self.assertEqual(url, "https://gy.kaibaru.jp/members/")
+
+    def test_custom_domain_hands_off_and_keeps_the_path(self):
+        user = SimpleNamespace(pk=5)
+        with patch("kaibaru.custom_domain_hosts.safe_return_url", side_effect=lambda url: url):
+            with patch("kaibaru.custom_domain_hosts.cache.set") as saved:
+                url = login_return_url(user, "https://ibarubibaru.lol/members/?tab=1")
+        self.assertTrue(url.startswith("https://ibarubibaru.lol/accounts/domain-session/"))
+        self.assertEqual(saved.call_args.args[1]["path"], "/members/?tab=1")
 
 
 class CheckDomainTests(SimpleTestCase):

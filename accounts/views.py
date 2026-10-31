@@ -304,10 +304,18 @@ class DomainSessionHandoffView(View):
         from django.core.cache import cache
         from kaibaru.custom_domain_hosts import handoff_cache_key
 
-        user_id = cache.get(handoff_cache_key(token))
+        payload = cache.get(handoff_cache_key(token))
         cache.delete(handoff_cache_key(token))
+        if isinstance(payload, dict):
+            user_id = payload.get("user_id")
+            path = payload.get("path") or "/"
+        else:
+            user_id = payload
+            path = "/"
+        if not isinstance(path, str) or not path.startswith("/") or path.startswith("//"):
+            path = "/"
         user = CustomUser.objects.filter(pk=user_id, is_active=True).first() if user_id else None
         if not user:
-            return redirect("/")
+            return redirect(path)
         login(request, user, backend="allauth.account.auth_backends.AuthenticationBackend")
-        return redirect("/")
+        return redirect(path)

@@ -28,14 +28,7 @@ def club_subdomain(host):
     return label
 
 
-def custom_domain_redirect_url(host, path):
-    """
-    Where a Kaibaru subdomain should send the browser once its own domain is live.
-    Pending domains stay on the subdomain. This does not look up DNS.
-    """
-    subdomain = club_subdomain(host)
-    if not subdomain:
-        return None
+def active_custom_domain(subdomain):
     from django.db import OperationalError, ProgrammingError
 
     from .models import Club
@@ -57,6 +50,20 @@ def custom_domain_redirect_url(host, path):
         return None
     domain = (club.custom_domain or "").strip().lower().rstrip(".")
     if not domain or is_platform_host(domain) or "/" in domain or "\\" in domain:
+        return None
+    return domain
+
+
+def custom_domain_redirect_url(host, path):
+    """
+    Where a Kaibaru subdomain should send the browser once its own domain is live.
+    Pending domains stay on the subdomain. This does not look up DNS.
+    """
+    subdomain = club_subdomain(host)
+    if not subdomain:
+        return None
+    domain = active_custom_domain(subdomain)
+    if not domain:
         return None
     if not path.startswith("/"):
         path = "/" + path
@@ -89,6 +96,15 @@ def safe_return_url(url):
     return None
 
 
+def _return_path(parsed):
+    path = parsed.path or "/"
+    if not path.startswith("/") or path.startswith("//"):
+        path = "/"
+    if parsed.query:
+        path = f"{path}?{parsed.query}"
+    return path
+
+
 def session_handoff_url(user, url):
     """
     A .kaibaru.jp session cookie is not sent to a club's own domain.
@@ -99,5 +115,45 @@ def session_handoff_url(user, url):
     if not host or is_platform_host(host):
         return url
     token = secrets.token_urlsafe(32)
-    cache.set(handoff_cache_key(token), user.pk, timeout=60)
+    cache.set(
+        handoff_cache_key(token),
+        {"user_id": user.pk, "path": _return_path(parsed)},
+        timeout=60,
+    )
     return f"https://{host}/accounts/domain-session/{token}/"
+
+
+def login_return_url(user, url):
+    """
+    Finish login on the host the person should keep using.
+    A club subdomain whose custom domain is active is sent there, through the handoff.
+    A plain Kaibaru host is returned unchanged so its .kaibaru.jp cookie still works.
+    """
+    safe = safe_return_url(url)
+    if not safe or user is None:
+        return None
+    parsed = urlparse(safe)
+    host = (parsed.hostname or "").lower().rstrip(".")
+    path = _return_path(parsed)
+    label = club_subdomain(host)
+    if label:
+        custom = active_custom_domain(label)
+        if custom:
+            return session_handoff_url(user, f"https://{custom}{path}")
+        return safe
+    if is_platform_host(host):
+        return safe
+    return session_handoff_url(user, safe)
+
+
+def prefer_login_return(stored, redirect_url):
+    """Session destination wins over the apex fallback Google would otherwise use."""
+    candidates = [stored, redirect_url]
+    for candidate in candidates:
+        host = (urlparse(candidate or "").hostname or "").lower().rstrip(".")
+        if host and host not in {"kaibaru.jp", "www.kaibaru.jp"} and safe_return_url(candidate):
+            return candidate
+    for candidate in candidates:
+        if safe_return_url(candidate):
+            return candidate
+    return None
