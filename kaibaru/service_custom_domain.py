@@ -112,8 +112,9 @@ def check_domain(club):
 def issue_custom_certificate(domain):
     """
     Ask the server script to issue the certificate.
-    sudo -n never sends a password. The server allows this one
-    script without a password; that rule is not stored here.
+    /usr/bin/sudo is absolute because the Celery worker's PATH
+    does not include sudo. -n never sends a password. The server
+    allows this one script without a password; that rule is not stored here.
     """
     command = getattr(
         settings,
@@ -122,7 +123,7 @@ def issue_custom_certificate(domain):
     )
     try:
         result = subprocess.run(
-            ["sudo", "-n", command, domain],
+            ["/usr/bin/sudo", "-n", command, domain],
             capture_output=True,
             text=True,
             timeout=180,

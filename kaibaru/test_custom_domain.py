@@ -82,7 +82,7 @@ class CheckDomainTests(SimpleTestCase):
                 with patch("kaibaru.service_custom_domain.EmailMessage") as message:
                     publish_domain(club)
         run.assert_called_once()
-        self.assertEqual(run.call_args.args[0][0:2], ["sudo", "-n"])
+        self.assertEqual(run.call_args.args[0][0:2], ["/usr/bin/sudo", "-n"])
         self.assertNotIn("-S", run.call_args.args[0])
         message.return_value.send.assert_called_once()
         self.assertEqual(club.custom_domain_status, "active")
