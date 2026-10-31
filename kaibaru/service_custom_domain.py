@@ -1,10 +1,14 @@
+import logging
 import re
 import socket
 import subprocess
 
 from django.conf import settings
+from django.core.mail import EmailMessage
 
 from .models import Club
+
+logger = logging.getLogger(__name__)
 
 
 class CustomDomainError(Exception):
@@ -52,17 +56,32 @@ def assign_domain(club, value):
     if other:
         other.custom_domain = None
         other.custom_domain_status = ""
-        other.save(update_fields=["custom_domain", "custom_domain_status"])
+        other.scheduled_for_domain_cert = False
+        other.save(update_fields=[
+            "custom_domain",
+            "custom_domain_status",
+            "scheduled_for_domain_cert",
+        ])
     club.custom_domain = domain
     club.custom_domain_status = "pending"
-    club.save(update_fields=["custom_domain", "custom_domain_status"])
+    club.scheduled_for_domain_cert = True
+    club.save(update_fields=[
+        "custom_domain",
+        "custom_domain_status",
+        "scheduled_for_domain_cert",
+    ])
     return domain
 
 
 def clear_domain(club):
     club.custom_domain = None
     club.custom_domain_status = ""
-    club.save(update_fields=["custom_domain", "custom_domain_status"])
+    club.scheduled_for_domain_cert = False
+    club.save(update_fields=[
+        "custom_domain",
+        "custom_domain_status",
+        "scheduled_for_domain_cert",
+    ])
 
 
 def _addresses(domain):
@@ -73,7 +92,12 @@ def _addresses(domain):
     return {item[4][0] for item in infos}
 
 
-def publish_domain(club):
+def domain_points_here(domain):
+    return target_ip() in _addresses(domain)
+
+
+def check_domain(club):
+    """Look up DNS only. The hourly task issues the certificate."""
     domain = club.custom_domain
     if not domain:
         raise CustomDomainError("先にドメインを保存してください。")
@@ -82,8 +106,15 @@ def publish_domain(club):
         raise CustomDomainError(
             f"DNSがまだ {ip} を指していません。Aレコードを設定してから、もう一度確認してください。"
         )
-    if club.custom_domain_status == "active":
-        return domain
+    return domain
+
+
+def issue_custom_certificate(domain):
+    """
+    Ask the server script to issue the certificate.
+    sudo -n never sends a password. The server allows this one
+    script without a password; that rule is not stored here.
+    """
     command = getattr(
         settings,
         "CUSTOM_DOMAIN_ISSUE_COMMAND",
@@ -105,6 +136,44 @@ def publish_domain(club):
         raise CustomDomainError(
             "証明書の発行に失敗しました。" + (f" {detail}" if detail else "")
         )
+
+
+def _notify_domain_ready(club):
+    owner = getattr(club, "owner", None)
+    email = (getattr(owner, "email", "") or "").strip()
+    if not email:
+        return
+    club_name = club.title or club.subdomain or "クラブ"
+    domain = club.custom_domain
+    try:
+        EmailMessage(
+            subject=f"【{club_name}】独自ドメインの準備ができました",
+            body=(
+                f"{domain} を{club_name}のアドレスとして公開しました。\n\n"
+                f"https://{domain}\n"
+            ),
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            to=[email],
+        ).send()
+    except Exception:
+        logger.exception(
+            "custom domain ready email failed club=%s domain=%s",
+            club.pk,
+            domain,
+        )
+
+
+def publish_domain(club):
+    """Issue a certificate when DNS already points here. Used by the hourly task."""
+    domain = check_domain(club)
+    if club.custom_domain_status == "active":
+        if club.scheduled_for_domain_cert:
+            club.scheduled_for_domain_cert = False
+            club.save(update_fields=["scheduled_for_domain_cert"])
+        return domain
+    issue_custom_certificate(domain)
     club.custom_domain_status = "active"
-    club.save(update_fields=["custom_domain_status"])
+    club.scheduled_for_domain_cert = False
+    club.save(update_fields=["custom_domain_status", "scheduled_for_domain_cert"])
+    _notify_domain_ready(club)
     return domain

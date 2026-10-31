@@ -4249,7 +4249,7 @@ class ClubViewSet(viewsets.ModelViewSet):
         ip = self._domain_payload(club, "")["custom_domain_target"]
         return Response(self._domain_payload(
             club,
-            f"{domain} を保存しました。Aレコードを {ip} にしてから、確認してください。",
+            f"{domain} を保存しました。Aレコードを {ip} に向けると、1時間以内に公開します。準備ができたらメールでお知らせします。",
         ))
 
     @action(
@@ -4258,16 +4258,19 @@ class ClubViewSet(viewsets.ModelViewSet):
         url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/custom-domain/check",
     )
     def custom_domain_check(self, request, subdomain=None):
-        from .service_custom_domain import CustomDomainError, publish_domain
+        from .service_custom_domain import CustomDomainError, check_domain
 
         club, error = self._owned_club(request, subdomain)
         if error:
             return error
         try:
-            domain = publish_domain(club)
+            domain = check_domain(club)
         except CustomDomainError as exc:
             return Response({"error": exc.message}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(self._domain_payload(club, f"https://{domain} を公開しました。"))
+        return Response(self._domain_payload(
+            club,
+            f"{domain} のDNSは確認できました。1時間以内に公開し、準備ができたらメールでお知らせします。",
+        ))
 
     @action(
         detail=False,

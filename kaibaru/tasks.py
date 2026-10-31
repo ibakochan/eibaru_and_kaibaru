@@ -981,3 +981,43 @@ def create_monthly_instructor_invoices():
         raise
     logger.info("[TEACHER PAY] Finished monthly statements result=%s", result)
     return result
+
+
+@shared_task
+def issue_scheduled_custom_domain_certs():
+    """
+    Hourly pass over clubs that saved a custom domain.
+    DNS that does not point here yet stays scheduled for the next run.
+    A matching address is handed to the certificate script, then the owner is emailed.
+    """
+    from .service_custom_domain import (
+        CustomDomainError,
+        domain_points_here,
+        publish_domain,
+    )
+
+    clubs = Club.objects.filter(scheduled_for_domain_cert=True).select_related("owner")
+    summary = {"issued": 0, "waiting": 0, "failed": 0, "cleared": 0}
+    for club in clubs:
+        if not club.custom_domain or club.custom_domain_status == "active":
+            club.scheduled_for_domain_cert = False
+            club.save(update_fields=["scheduled_for_domain_cert"])
+            summary["cleared"] += 1
+            continue
+        if not domain_points_here(club.custom_domain):
+            summary["waiting"] += 1
+            continue
+        try:
+            publish_domain(club)
+        except CustomDomainError as exc:
+            logger.warning(
+                "[CUSTOM DOMAIN] certificate failed club=%s domain=%s error=%s",
+                club.pk,
+                club.custom_domain,
+                exc.message,
+            )
+            summary["failed"] += 1
+            continue
+        summary["issued"] += 1
+    logger.info("[CUSTOM DOMAIN] scheduled pass %s", summary)
+    return summary

@@ -74,6 +74,11 @@ class Club(models.Model):
         default="",
         help_text="pending until DNS points here and a certificate is issued. active once it is live.",
     )
+    scheduled_for_domain_cert = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text="True after the owner saves a domain, until the hourly task finishes the certificate.",
+    )
 
     owner = models.ForeignKey(CustomUser, on_delete=models.PROTECT, related_name="owned_clubs")
 
