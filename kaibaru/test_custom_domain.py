@@ -4,7 +4,11 @@ from unittest.mock import patch
 from django.http import HttpResponse
 from django.test import RequestFactory, SimpleTestCase
 
-from kaibaru.custom_domain_middleware import CustomDomainSessionCookieMiddleware
+from kaibaru.custom_domain_hosts import custom_domain_redirect_url
+from kaibaru.custom_domain_middleware import (
+    CustomDomainHostMiddleware,
+    CustomDomainSessionCookieMiddleware,
+)
 from kaibaru.service_custom_domain import (
     CustomDomainError,
     check_domain,
@@ -63,6 +67,42 @@ class SessionCookieTests(SimpleTestCase):
     def test_kaibaru_keeps_parent_domain(self):
         response = self.response_for("no.kaibaru.jp")
         self.assertEqual(response.cookies["sessionid"]["domain"], ".kaibaru.jp")
+
+
+class CustomDomainRedirectTests(SimpleTestCase):
+    def test_active_domain_redirects_with_the_same_path(self):
+        club = SimpleNamespace(custom_domain="ibarubibaru.lol")
+        with patch("kaibaru.models.Club") as club_model:
+            club_model.objects.filter.return_value.exclude.return_value.exclude.return_value.only.return_value.first.return_value = club
+            url = custom_domain_redirect_url("gy.kaibaru.jp", "/members/?tab=1")
+            club_model.objects.filter.assert_called_once_with(
+                subdomain="gy",
+                custom_domain_status="active",
+            )
+        self.assertEqual(url, "https://ibarubibaru.lol/members/?tab=1")
+
+    def test_other_hosts_are_not_redirected(self):
+        self.assertIsNone(custom_domain_redirect_url("kaibaru.jp", "/"))
+        self.assertIsNone(custom_domain_redirect_url("ibarubibaru.lol", "/"))
+
+    def test_pending_domain_stays_on_the_subdomain(self):
+        with patch("kaibaru.models.Club") as club_model:
+            club_model.objects.filter.return_value.exclude.return_value.exclude.return_value.only.return_value.first.return_value = None
+            url = custom_domain_redirect_url("gy.kaibaru.jp", "/")
+        self.assertIsNone(url)
+
+    def test_middleware_sends_a_temporary_redirect(self):
+        def app(request):
+            return HttpResponse("ok")
+
+        request = RequestFactory().get("/members/", HTTP_HOST="gy.kaibaru.jp")
+        with patch(
+            "kaibaru.custom_domain_middleware.custom_domain_redirect_url",
+            return_value="https://ibarubibaru.lol/members/",
+        ):
+            response = CustomDomainHostMiddleware(app)(request)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "https://ibarubibaru.lol/members/")
 
 
 class CheckDomainTests(SimpleTestCase):

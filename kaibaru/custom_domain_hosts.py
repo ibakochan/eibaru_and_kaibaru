@@ -16,6 +16,53 @@ def is_platform_host(host):
     )
 
 
+def club_subdomain(host):
+    """The club label in gy.kaibaru.jp. Empty for the apex and for other hosts."""
+    host = (host or "").lower().rstrip(".")
+    suffix = ".kaibaru.jp"
+    if not host.endswith(suffix):
+        return None
+    label = host[: -len(suffix)]
+    if not label or "." in label or label == "www":
+        return None
+    return label
+
+
+def custom_domain_redirect_url(host, path):
+    """
+    Where a Kaibaru subdomain should send the browser once its own domain is live.
+    Pending domains stay on the subdomain. This does not look up DNS.
+    """
+    subdomain = club_subdomain(host)
+    if not subdomain:
+        return None
+    from django.db import OperationalError, ProgrammingError
+
+    from .models import Club
+
+    try:
+        club = (
+            Club.objects.filter(
+                subdomain=subdomain,
+                custom_domain_status="active",
+            )
+            .exclude(custom_domain__isnull=True)
+            .exclude(custom_domain="")
+            .only("custom_domain")
+            .first()
+        )
+    except (OperationalError, ProgrammingError):
+        return None
+    if club is None:
+        return None
+    domain = (club.custom_domain or "").strip().lower().rstrip(".")
+    if not domain or is_platform_host(domain) or "/" in domain or "\\" in domain:
+        return None
+    if not path.startswith("/"):
+        path = "/" + path
+    return f"https://{domain}{path}"
+
+
 def handoff_cache_key(token):
     return f"domain-handoff:{token}"
 
