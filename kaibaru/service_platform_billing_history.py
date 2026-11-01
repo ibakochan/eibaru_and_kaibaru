@@ -30,6 +30,8 @@ from .service_cash_platform_fee import (
 from .service_platform_subscription import (
     CLUB_BASE_YEN,
     CLUB_EXTRA_YEN,
+    DOMAIN_EXTRA_YEN,
+    DOMAIN_YEN,
     MEMBER_FULL_CAP,
     MEMBER_FULL_YEN,
     MEMBER_REDUCED_YEN,
@@ -259,12 +261,18 @@ def _parse_platform_invoice_lines(lines):
     cash_fee_yen = 0
     cash_fee_year = None
     cash_fee_month = None
+    domain_yen = 0
+    domain_extra_yen = 0
+    domain_count = 0
+    extra_domains = 0
     other_yen = 0
 
     base_price = settings.STRIPE_BASE_PRICE_ID
     base_reduced = settings.STRIPE_BASE_PRICE_ID_REDUCED
     member_price = settings.STRIPE_MEMBER_PRICE_ID
     member_reduced = settings.STRIPE_MEMBER_PRICE_ID_REDUCED
+    domain_price = settings.STRIPE_CUSTOM_DOMAIN_PRICE_ID
+    domain_extra_price = settings.STRIPE_CUSTOM_DOMAIN_EXTRA_PRICE_ID
 
     for line in lines or []:
         amount = _line_amount(line)
@@ -297,6 +305,14 @@ def _parse_platform_invoice_lines(lines):
             member_reduced_yen += amount
             reduced_members += qty
             continue
+        if price_id == domain_price:
+            domain_yen += amount
+            domain_count += qty or 1
+            continue
+        if price_id == domain_extra_price:
+            domain_extra_yen += amount
+            extra_domains += qty
+            continue
 
         # Fallback by unit amount when price ids differ (test / migrated).
         unit = amount // qty if qty else amount
@@ -311,6 +327,12 @@ def _parse_platform_invoice_lines(lines):
         elif unit == MEMBER_REDUCED_YEN:
             member_reduced_yen += amount
             reduced_members += qty
+        elif unit == DOMAIN_YEN and qty == 1 and domain_yen == 0:
+            domain_yen += amount
+            domain_count += 1
+        elif unit == DOMAIN_EXTRA_YEN:
+            domain_extra_yen += amount
+            extra_domains += qty
         else:
             other_yen += amount
 
@@ -327,11 +349,16 @@ def _parse_platform_invoice_lines(lines):
         )
     )
 
+    if domain_yen and domain_count < 1:
+        domain_count = 1
+    domain_count = domain_count + extra_domains if domain_yen else extra_domains
     subscription_yen = (
         club_base_yen
         + club_extra_yen
         + member_full_yen
         + member_reduced_yen
+        + domain_yen
+        + domain_extra_yen
     )
     return {
         "club_count": club_count,
@@ -343,6 +370,10 @@ def _parse_platform_invoice_lines(lines):
         "member_count": full_price_members + reduced_members,
         "member_full_yen": member_full_yen,
         "member_reduced_yen": member_reduced_yen,
+        "domain_count": domain_count,
+        "extra_domains": extra_domains,
+        "domain_yen": domain_yen,
+        "domain_extra_yen": domain_extra_yen,
         "subscription_yen": subscription_yen,
         "cash_fee_yen": cash_fee_yen,
         "cash_fee_year": cash_fee_year,
@@ -417,6 +448,10 @@ def _build_history_entry(stripe_invoice, club_ids, *, include_stripe_processing=
         "member_count": parsed["member_count"],
         "member_full_yen": parsed["member_full_yen"],
         "member_reduced_yen": parsed["member_reduced_yen"],
+        "domain_count": parsed["domain_count"],
+        "extra_domains": parsed["extra_domains"],
+        "domain_yen": parsed["domain_yen"],
+        "domain_extra_yen": parsed["domain_extra_yen"],
         "subscription_yen": parsed["subscription_yen"],
         "other_yen": parsed["other_yen"],
         "cash_fee_yen": cash_fee_yen,
@@ -596,6 +631,14 @@ def format_platform_cycle_receipt(entry):
         lines.append("")
         lines.append(f"追加クラブ × {entry['extra_clubs']}")
         lines.append(_yen(entry.get("club_extra_yen")))
+    if (entry.get("domain_yen") or 0) > 0:
+        lines.append("")
+        lines.append("独自ドメイン")
+        lines.append(_yen(entry.get("domain_yen")))
+    if (entry.get("extra_domains") or 0) > 0:
+        lines.append("")
+        lines.append(f"追加ドメイン × {entry['extra_domains']}")
+        lines.append(_yen(entry.get("domain_extra_yen")))
     if full_members > 0:
         lines.append("")
         lines.append(f"会員 {full_members}名 × ¥{MEMBER_FULL_YEN}")

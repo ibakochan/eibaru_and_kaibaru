@@ -1,6 +1,9 @@
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, override_settings
 
-from kaibaru.service_platform_billing_history import format_platform_cycle_receipt
+from kaibaru.service_platform_billing_history import (
+    _parse_platform_invoice_lines,
+    format_platform_cycle_receipt,
+)
 
 
 class PlatformCycleReceiptTests(SimpleTestCase):
@@ -59,3 +62,54 @@ class PlatformCycleReceiptTests(SimpleTestCase):
         )
         self.assertNotIn("Kaibaru手数料1%", text)
         self.assertNotIn("会員のStripe決済", text)
+        self.assertNotIn("独自ドメイン", text)
+
+
+@override_settings(
+    STRIPE_BASE_PRICE_ID="price_base",
+    STRIPE_BASE_PRICE_ID_REDUCED="price_base_reduced",
+    STRIPE_MEMBER_PRICE_ID="price_member",
+    STRIPE_MEMBER_PRICE_ID_REDUCED="price_member_reduced",
+    STRIPE_CUSTOM_DOMAIN_PRICE_ID="price_domain",
+    STRIPE_CUSTOM_DOMAIN_EXTRA_PRICE_ID="price_domain_extra",
+)
+class PlatformInvoiceDomainLineTests(SimpleTestCase):
+    def test_domain_prices_are_their_own_lines(self):
+        parsed = _parse_platform_invoice_lines([
+            {
+                "amount": 2980,
+                "quantity": 1,
+                "price": {"id": "price_base"},
+            },
+            {
+                "amount": 500,
+                "quantity": 1,
+                "price": {"id": "price_domain"},
+            },
+            {
+                "amount": 500,
+                "quantity": 2,
+                "price": {"id": "price_domain_extra"},
+            },
+        ])
+
+        self.assertEqual(parsed["domain_yen"], 500)
+        self.assertEqual(parsed["extra_domains"], 2)
+        self.assertEqual(parsed["domain_extra_yen"], 500)
+        self.assertEqual(parsed["domain_count"], 3)
+        self.assertEqual(parsed["other_yen"], 0)
+        self.assertEqual(parsed["subscription_yen"], 2980 + 1000)
+
+        text = format_platform_cycle_receipt({
+            "payment_year": 2026,
+            "payment_month": 11,
+            "club_base_yen": 2980,
+            "extra_clubs": 0,
+            **parsed,
+            "cash_fee_yen": 0,
+            "cash_invoice_base_yen": 0,
+            "total_yen": parsed["subscription_yen"],
+        })
+        self.assertIn("独自ドメイン", text)
+        self.assertIn("追加ドメイン × 2", text)
+        self.assertIn("¥500", text)

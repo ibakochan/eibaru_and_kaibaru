@@ -3,7 +3,8 @@
 Separate from member subscriptions. One Stripe subscription per owner.
 The 2,980 price stays at quantity 1 while any club remains. Each extra
 club is one quantity of the 1,490 price. Member headcount is pooled:
-the first 100 at 100 yen, the rest at 50 yen.
+the first 100 at 100 yen, the rest at 50 yen. One live custom domain
+is 500 yen, and each further live domain is 250 yen.
 """
 
 import logging
@@ -54,6 +55,8 @@ CLUB_EXTRA_YEN = 1490
 MEMBER_FULL_YEN = 100
 MEMBER_REDUCED_YEN = 50
 MEMBER_FULL_CAP = 100
+DOMAIN_YEN = 500
+DOMAIN_EXTRA_YEN = 250
 
 
 def _next_calendar_month(day):
@@ -236,6 +239,23 @@ def _stripe_take_yen(club_ids, cash_fees):
     return kaibaru_stripe_application_fee_yen(club_ids, year, month)
 
 
+def _domain_fee_fields(user):
+    """Live custom domains on this owner's clubs. Pending domains are not billed."""
+    count = 0
+    if user and getattr(user, "id", None):
+        count = Club.objects.filter(
+            owner_id=user.id,
+            custom_domain_status="active",
+        ).count()
+    extra = max(count - 1, 0)
+    return {
+        "domain_count": count,
+        "extra_domains": extra,
+        "domain_yen": DOMAIN_YEN if count else 0,
+        "domain_extra_yen": extra * DOMAIN_EXTRA_YEN,
+    }
+
+
 def estimate_platform_bill_for_owner(user):
     """Next-cycle Kaibaru fee across every covered club under this owner."""
     from .service_cash_platform_fee import estimate_cash_platform_fees_for_clubs
@@ -261,6 +281,10 @@ def estimate_platform_bill_for_owner(user):
         "club_extra_yen": 0,
         "member_full_yen": 0,
         "member_reduced_yen": 0,
+        "domain_count": 0,
+        "extra_domains": 0,
+        "domain_yen": 0,
+        "domain_extra_yen": 0,
         "subscription_yen": 0,
         "total_yen": 0,
         "stripe_application_fee_yen": 0,
@@ -282,13 +306,17 @@ def estimate_platform_bill_for_owner(user):
             next_invoice_uses_current_month=False,
         )
 
+    domain_fees = _domain_fee_fields(user)
+    domain_yen = domain_fees["domain_yen"] + domain_fees["domain_extra_yen"]
     club_count = len(clubs)
     if club_count == 0:
         return {
             **empty,
             **cash_fees,
+            **domain_fees,
             "next_payment_on": next_payment_on,
-            "total_yen": cash_fees.get("cash_fee_next_yen", 0),
+            "subscription_yen": domain_yen,
+            "total_yen": cash_fees.get("cash_fee_next_yen", 0) + domain_yen,
             "stripe_application_fee_yen": _stripe_take_yen(cash_club_ids, cash_fees),
         }
 
@@ -305,6 +333,7 @@ def estimate_platform_bill_for_owner(user):
         + club_extra_yen
         + member_full_yen
         + member_reduced_yen
+        + domain_yen
     )
     cash_fee_next_yen = cash_fees.get("cash_fee_next_yen", 0)
     stripe_fee_yen = _stripe_take_yen(cash_club_ids, cash_fees)
@@ -318,6 +347,7 @@ def estimate_platform_bill_for_owner(user):
         "club_extra_yen": club_extra_yen,
         "member_full_yen": member_full_yen,
         "member_reduced_yen": member_reduced_yen,
+        **domain_fees,
         "subscription_yen": subscription_yen,
         "total_yen": subscription_yen + cash_fee_next_yen,
         "stripe_application_fee_yen": stripe_fee_yen,

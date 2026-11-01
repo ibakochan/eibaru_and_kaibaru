@@ -12,6 +12,7 @@ from kaibaru.custom_domain_middleware import (
 from kaibaru.service_custom_domain import (
     CustomDomainError,
     check_domain,
+    domain_fee_quantities,
     normalize_domain,
     publish_domain,
 )
@@ -30,6 +31,7 @@ class _Club:
         self.title = "道場"
         self.subdomain = "dojo"
         self.owner = SimpleNamespace(email="owner@example.com")
+        self.owner_id = 1
         self.saved = None
 
     def save(self, update_fields=None):
@@ -144,11 +146,33 @@ class CheckDomainTests(SimpleTestCase):
         completed = SimpleNamespace(returncode=0, stdout="", stderr="")
         with patch("kaibaru.service_custom_domain.socket.getaddrinfo", return_value=_dns("13.158.230.76")):
             with patch("kaibaru.service_custom_domain.subprocess.run", return_value=completed) as run:
-                with patch("kaibaru.service_custom_domain.EmailMessage") as message:
-                    publish_domain(club)
+                with patch("kaibaru.service_custom_domain.sync_custom_domain_fee") as sync:
+                    with patch("kaibaru.service_custom_domain.EmailMessage") as message:
+                        publish_domain(club)
         run.assert_called_once()
         self.assertEqual(run.call_args.args[0][0:2], ["/usr/bin/sudo", "-n"])
         self.assertNotIn("-S", run.call_args.args[0])
+        sync.assert_called_once()
         message.return_value.send.assert_called_once()
         self.assertEqual(club.custom_domain_status, "active")
         self.assertFalse(club.scheduled_for_domain_cert)
+
+
+class DomainFeeQuantityTests(SimpleTestCase):
+    def test_first_domain_is_the_full_price_only(self):
+        self.assertEqual(
+            domain_fee_quantities(1),
+            {"price_1UWdj7EuyKDnirofTYIVi0AP": 1},
+        )
+
+    def test_later_domains_set_the_secondary_quantity(self):
+        self.assertEqual(
+            domain_fee_quantities(3),
+            {
+                "price_1UWdj7EuyKDnirofTYIVi0AP": 1,
+                "price_1UWdlAEuyKDnirofQaW0HMGv": 2,
+            },
+        )
+
+    def test_no_domains_clears_both_items(self):
+        self.assertEqual(domain_fee_quantities(0), {})

@@ -3,10 +3,11 @@ import re
 import socket
 import subprocess
 
+import stripe
 from django.conf import settings
 from django.core.mail import EmailMessage
 
-from .models import Club
+from .models import Club, PlatformClub, PlatformSubscription
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,7 @@ def assign_domain(club, value):
 
 
 def clear_domain(club):
+    owner_id = club.owner_id
     club.custom_domain = None
     club.custom_domain_status = ""
     club.scheduled_for_domain_cert = False
@@ -82,6 +84,13 @@ def clear_domain(club):
         "custom_domain_status",
         "scheduled_for_domain_cert",
     ])
+    try:
+        sync_custom_domain_fee(owner_id)
+    except CustomDomainError:
+        logger.exception(
+            "custom domain fee sync failed after clear club=%s",
+            club.pk,
+        )
 
 
 def _addresses(domain):
@@ -164,6 +173,123 @@ def _notify_domain_ready(club):
         )
 
 
+def domain_fee_quantities(count):
+    """One full-price domain, then one quantity per domain after that."""
+    primary = getattr(
+        settings,
+        "STRIPE_CUSTOM_DOMAIN_PRICE_ID",
+        "price_1UWdj7EuyKDnirofTYIVi0AP",
+    )
+    extra_price = getattr(
+        settings,
+        "STRIPE_CUSTOM_DOMAIN_EXTRA_PRICE_ID",
+        "price_1UWdlAEuyKDnirofQaW0HMGv",
+    )
+    if count <= 0:
+        return {}
+    quantities = {primary: 1}
+    extra = count - 1
+    if extra:
+        quantities[extra_price] = extra
+    return quantities
+
+
+def _price_id_of(item):
+    price = item.get("price")
+    if isinstance(price, str):
+        return price
+    if isinstance(price, dict) and price.get("id"):
+        return price["id"]
+    details = (item.get("pricing") or {}).get("price_details") or {}
+    return details.get("price")
+
+
+def _platform_subscription_id(owner_id, club):
+    link = (
+        PlatformClub.objects
+        .filter(club=club)
+        .select_related("platform_subscription")
+        .first()
+    )
+    if link and link.platform_subscription.stripe_subscription_id:
+        return link.platform_subscription.stripe_subscription_id
+    platform = PlatformSubscription.objects.filter(user_id=owner_id).first()
+    if platform and platform.stripe_subscription_id:
+        return platform.stripe_subscription_id
+    if club is not None and club.stripe_subscription_id:
+        return club.stripe_subscription_id
+    return None
+
+
+def _live_domain_count(owner_id, include_club_id=None):
+    ids = set(
+        Club.objects.filter(
+            owner_id=owner_id,
+            custom_domain_status="active",
+        ).values_list("id", flat=True)
+    )
+    if include_club_id:
+        ids.add(include_club_id)
+    return len(ids)
+
+
+def sync_custom_domain_fee(owner_id, club=None, *, include_club_id=None):
+    """
+    Set the owner's domain items to the number of live domains.
+    The first domain uses the full price. Each domain after that
+    is one quantity on the secondary price. Quantity is written
+    as the expected total, so a retry does not add another item.
+    """
+    subscription_id = _platform_subscription_id(owner_id, club)
+    if not subscription_id:
+        raise CustomDomainError("プラットフォームの契約がないため、ドメイン料金を追加できません。")
+    count = _live_domain_count(owner_id, include_club_id)
+    desired = domain_fee_quantities(count)
+    prices = (
+        getattr(settings, "STRIPE_CUSTOM_DOMAIN_PRICE_ID", "price_1UWdj7EuyKDnirofTYIVi0AP"),
+        getattr(
+            settings,
+            "STRIPE_CUSTOM_DOMAIN_EXTRA_PRICE_ID",
+            "price_1UWdlAEuyKDnirofQaW0HMGv",
+        ),
+    )
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+    listed = stripe.SubscriptionItem.list(subscription=subscription_id, limit=100)
+    existing = {}
+    extras = []
+    for item in listed.auto_paging_iter():
+        price_id = _price_id_of(item)
+        if price_id not in prices:
+            continue
+        if price_id in existing:
+            extras.append(item)
+        else:
+            existing[price_id] = item
+    changes = []
+    for price_id in prices:
+        quantity = desired.get(price_id, 0)
+        item = existing.get(price_id)
+        if quantity <= 0:
+            if item:
+                changes.append({"id": item["id"], "deleted": True})
+            continue
+        if item:
+            if item["quantity"] != quantity:
+                changes.append({"id": item["id"], "quantity": quantity})
+        else:
+            changes.append({"price": price_id, "quantity": quantity})
+    for extra in extras:
+        changes.append({"id": extra["id"], "deleted": True})
+    if not changes:
+        return
+    stripe.Subscription.modify(
+        subscription_id,
+        items=changes,
+        proration_behavior="none",
+        idempotency_key=f"domain-fee-{subscription_id}-{count}"[:255],
+    )
+
+
 def publish_domain(club):
     """Issue a certificate when DNS already points here. Used by the hourly task."""
     domain = check_domain(club)
@@ -173,6 +299,12 @@ def publish_domain(club):
             club.save(update_fields=["scheduled_for_domain_cert"])
         return domain
     issue_custom_certificate(domain)
+    try:
+        sync_custom_domain_fee(club.owner_id, club, include_club_id=club.pk)
+    except CustomDomainError:
+        raise
+    except stripe.error.StripeError as exc:
+        raise CustomDomainError(f"ドメイン料金の追加に失敗しました。{exc}")
     club.custom_domain_status = "active"
     club.scheduled_for_domain_cert = False
     club.save(update_fields=["custom_domain_status", "scheduled_for_domain_cert"])
