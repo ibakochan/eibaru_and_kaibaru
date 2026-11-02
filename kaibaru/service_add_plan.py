@@ -129,7 +129,7 @@ class SubscriptionAddPlanService:
         
                 expected_invoice_items["next_month_fee"] = {
                     "amount": next_month_amount,
-                    "description": f"{plan.name} 翌月分前払い",
+                    "description": f"{plan.visible_name()} 翌月分前払い",
                 }
         
         
@@ -375,7 +375,7 @@ class SubscriptionAddPlanService:
                     invoice=invoice.id,
                     amount=next_month_amount,
                     currency="jpy",
-                    description=f"{plan.name} 翌月分前払い",
+                    description=f"{plan.visible_name()} 翌月分前払い",
                     metadata={
                         "mutation_id": str(mutation.id),
                         "member_id": member.id,

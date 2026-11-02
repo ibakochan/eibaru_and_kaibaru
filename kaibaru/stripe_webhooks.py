@@ -971,7 +971,7 @@ def stripe_connected_webhook(request):
                     customer=sub.customer,
                     amount=final_next_month_amount,
                     currency="jpy",
-                    description=f"{plan.name} 翌月分前払い",
+                    description=f"{plan.visible_name()} 翌月分前払い",
                     metadata={
                         "type": "next_month_fee",
                         "member_id": member.id,
@@ -1300,7 +1300,7 @@ def stripe_connected_webhook(request):
                 amount=total_amount,
                 items=email_items,
                 period_end=sub.access_until,
-                plan_name=plan.name,
+                plan_name=plan.visible_name(),
             )
         logger.info(
             "[invoice.paid] Email debug → email_items=%s primary_member_id=%s primary_plan_id=%s",

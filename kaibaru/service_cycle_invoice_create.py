@@ -243,7 +243,7 @@ class CashSubscriptionCycleInvoiceService:
                             "amount": amount,
                             "description": (
                                 f"{member.full_name} "
-                                f"{plan.name}"
+                                f"{plan.visible_name()}"
                             ),
                         }
                     )

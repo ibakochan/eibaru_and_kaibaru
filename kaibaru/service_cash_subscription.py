@@ -202,13 +202,13 @@ class MemberCashSubscriptionService:
                 if is_ticket_plan:
                     proration_description = (
                         f"{member.full_name}さんの"
-                        f"{plan.name} {ticket_quantity}枚分の日割り計算"
+                        f"{plan.visible_name()} {ticket_quantity}枚分の日割り計算"
                     )
 
                 else:
                     proration_description = (
                         f"{member.full_name}さんの"
-                        f"{pricing['proration']['remaining_days']}日分の{plan.name}の日割り計算"
+                        f"{pricing['proration']['remaining_days']}日分の{plan.visible_name()}の日割り計算"
                     )
 
 
@@ -245,7 +245,7 @@ class MemberCashSubscriptionService:
                 InvoiceItem.objects.create(
                     invoice=invoice,
                     member=member,
-                    description=f"{member.full_name}の{plan.name}翌月分前払い",
+                    description=f"{member.full_name}の{plan.visible_name()}翌月分前払い",
                     amount=next_month_amount,
                     quantity=1,
                 )

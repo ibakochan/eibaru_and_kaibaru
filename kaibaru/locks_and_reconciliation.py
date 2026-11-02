@@ -1004,7 +1004,7 @@ class MembershipPlanDeletionReconciler:
             if owner:
                 group = cancelled_owner_map[owner.id]
                 group["members"].add(item.member.full_name)
-                group["plans"].add(plan.name)
+                group["plans"].add(plan.visible_name())
                 group["access_until"] = subscription.access_until
 
         # -----------------------------------------------------------
@@ -1022,12 +1022,22 @@ class MembershipPlanDeletionReconciler:
         finalized = False
 
         if not remaining_active:
+            from .rules_plans import (
+                release_deleted_plan_name,
+                unlink_membership_plan,
+            )
+
+            # The cancellation email already copied visible_name() before this.
+            unlink_membership_plan(plan)
+            release_deleted_plan_name(plan)
             updated = MembershipPlan.objects.filter(
                 id=plan.id,
                 is_deleted=False,
             ).update(
                 is_deleted=True,
                 deleted_at=timezone.now(),
+                name=plan.name,
+                name_before_deleted=plan.name_before_deleted,
             )
             finalized = bool(updated)
 

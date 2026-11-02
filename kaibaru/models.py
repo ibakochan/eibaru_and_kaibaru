@@ -423,7 +423,11 @@ class MembershipPlan(models.Model):
         blank=True,
     )
     
-    name = models.CharField(max_length=100)   
+    # NULL after deletion so the club can create another plan with the
+    # same name. MySQL allows many (club, NULL) rows under the unique key.
+    # The name members still see is name_before_deleted.
+    name = models.CharField(max_length=100, null=True, blank=True)
+    name_before_deleted = models.CharField(max_length=100, blank=True, default="")
     description = models.TextField(blank=True)
 
     price = models.IntegerField()
@@ -479,6 +483,9 @@ class MembershipPlan(models.Model):
 
 
     
+    def visible_name(self):
+        return self.name or self.name_before_deleted or ""
+
     class Meta:
         ordering = ["price"]
         unique_together = ("club", "name")

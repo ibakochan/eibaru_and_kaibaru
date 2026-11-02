@@ -410,7 +410,7 @@ class SubscriptionItemSerializer(serializers.ModelSerializer):
         return {
             "id": obj.source_item.id,
             "plan_id": obj.source_item.plan.id if obj.source_item.plan else None,
-            "plan_name": obj.source_item.plan.name if obj.source_item.plan else None,
+            "plan_name": obj.source_item.plan.visible_name() if obj.source_item.plan else None,
             "access_start": obj.source_item.access_start,
         }
 
@@ -422,14 +422,14 @@ class SubscriptionItemSerializer(serializers.ModelSerializer):
         return {
             "id": next_item.id,
             "plan_id": next_item.plan.id if next_item.plan else None,
-            "plan_name": next_item.plan.name if next_item.plan else None,
+            "plan_name": next_item.plan.visible_name() if next_item.plan else None,
         }
     
     def get_is_scheduled_change(self, obj):
         return obj.source_item_id is not None or obj.replacement_for.all().exists()
 
     def get_plan_name(self, obj):
-        return obj.plan.name if obj.plan else None
+        return obj.plan.visible_name() if obj.plan else None
 
 
 
@@ -515,6 +515,7 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
             "id",
             "club",
             "name",
+            "name_before_deleted",
             "description",
             "price",
             "currency",
@@ -553,9 +554,15 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id",
             "club",
+            "name_before_deleted",
             "created_at",
             "updated_at",
         ]
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data["name"] = instance.visible_name()
+        return data
 
 
     def validate(self, attrs):
@@ -1106,6 +1113,11 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
             "plan_type",
             None
         )
+
+        # The API still shows name_before_deleted. Writing it back would
+        # occupy the unique name again.
+        if instance.is_deleted:
+            validated_data.pop("name", None)
 
         # ---------------------------------------------------------
         # Bundle determination is based on plan_type.

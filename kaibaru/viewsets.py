@@ -69,7 +69,11 @@ import hashlib
 from django.db import transaction
 
 from .utils import sync_member_quantity
-from .rules_plans import would_break_any_bundle
+from .rules_plans import (
+    release_deleted_plan_name,
+    unlink_membership_plan,
+    would_break_any_bundle,
+)
 
 from .rules_subscriptions import validate_plan_set
 
@@ -398,7 +402,7 @@ def build_pricing_map(club, request_user=None, preview_member=None):
                 subscription_items.append({
                     "item_id": item.id,
                     "plan_id": plan.id,
-                    "plan_name": plan.name,
+                    "plan_name": plan.visible_name(),
                     "deleted_at": item.deleted_at.isoformat() if item.deleted_at else None,
                     "access_until": item.access_until.isoformat() if item.access_until else None,
                     **pricing_result,
@@ -573,7 +577,7 @@ def build_pricing_map(club, request_user=None, preview_member=None):
                     }
 
                 plan_alternatives[plan.id] = {
-                    "plan_name": plan.name,
+                    "plan_name": plan.visible_name(),
                     "monthly": full_pricing,
                     "prorated": {
                         **prorated_pricing,
@@ -651,7 +655,7 @@ def build_pricing_map(club, request_user=None, preview_member=None):
                 staff_items.append({
                     "item_id": item.id,
                     "plan_id": plan.id,
-                    "plan_name": plan.name,
+                    "plan_name": plan.visible_name(),
                     "deleted_at": item.deleted_at.isoformat() if item.deleted_at else None,
                     "access_until": item.access_until.isoformat() if item.access_until else None,
                     **pricing_result,
@@ -973,23 +977,29 @@ class MembershipPlanViewSet(viewsets.ModelViewSet):
         # ---------------------------------------------------------
         if has_history:
 
-            instance.is_deleted = True
-            instance.deleted_at = timezone.now()
-
-            instance.save(
-                update_fields=[
-                    "is_deleted",
-                    "deleted_at"
-                ]
-            )
+            with transaction.atomic():
+                unlink_membership_plan(instance)
+                release_deleted_plan_name(instance)
+                instance.is_deleted = True
+                instance.deleted_at = timezone.now()
+                instance.save(
+                    update_fields=[
+                        "name",
+                        "name_before_deleted",
+                        "is_deleted",
+                        "deleted_at",
+                    ]
+                )
 
             return None
 
         # ---------------------------------------------------------
         # STEP 4: NEVER USED → SAFE HARD DELETE
         # ---------------------------------------------------------
-        instance.bundled_plans.clear()
-        instance.delete()
+        with transaction.atomic():
+            unlink_membership_plan(instance)
+            instance.bundled_plans.clear()
+            instance.delete()
 
         return None
 
@@ -1548,7 +1558,7 @@ class MemberViewSet(viewsets.ModelViewSet):
         """Refuse deletion while a plan is still active or inside its grace window."""
 
         def plan_name(item):
-            return item.plan.name if item.plan_id else "プラン"
+            return item.plan.visible_name() if item.plan_id else "プラン"
 
         def local_date(value):
             local = timezone.localtime(value)

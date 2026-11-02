@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 def _plan_name(item):
-    return item.plan.name if item.plan_id else "プラン"
+    return item.plan.visible_name() if item.plan_id else "プラン"
 
 
 def _local_date(value):

@@ -1,4 +1,54 @@
 from .models import MembershipPlan
+
+
+def unlink_membership_plan(plan):
+    """Take a deleted plan out of every set and out of its group.
+
+    A group left with fewer than two live plans is dissolved. The plan's
+    own row is saved with group cleared before a group is deleted, because
+    deleting the group would otherwise cascade and delete the plan.
+    """
+    for bundle in list(plan.part_of_bundles.all()):
+        bundle.bundled_plans.remove(plan)
+
+    if plan.group_id is None:
+        return
+
+    group = plan.group
+    was_default = group.default_plan_id == plan.id
+    plan.group = None
+    plan.save(update_fields=["group"])
+
+    if was_default:
+        group.default_plan = None
+        group.save(update_fields=["default_plan"])
+
+    live = list(group.plans.exclude(is_deleted=True))
+    if len(live) < 2:
+        for other in list(group.plans.all()):
+            other.group = None
+            other.save(update_fields=["group"])
+        group.delete()
+        return
+
+    if group.default_plan_id is None:
+        group.default_plan = max(live, key=lambda item: item.price)
+        group.save(update_fields=["default_plan"])
+
+
+def release_deleted_plan_name(plan):
+    """Copy name to name_before_deleted and set name to NULL.
+
+    Call this only when the plan is actually being deleted. While deletion
+    is only scheduled, leave the name in place. NULL names do not collide,
+    so every deleted plan in the club can have one.
+    """
+    if not plan.name:
+        return
+    plan.name_before_deleted = plan.name
+    plan.name = None
+
+
 def enforce_membership_plan_invariants(club):
     """
     Ensures the club's membership plans are always in a valid state:
