@@ -23,6 +23,7 @@ from .models import MembershipPlan
 
 from django.db import transaction
 from .rules_plans import enforce_membership_plan_invariants
+from .rules_subscriptions import plan_price_edit_block
 from .rules_eligibility import assert_member_eligible_for_plan
 from .user_errors import format_validation_error
 from .level_progress import (
@@ -953,6 +954,19 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
                         "チケット設定はチケットプランのみで利用できます。"
                     )
                 })
+
+        if "price" in attrs or "apply_current_price_to_existing" in attrs:
+            blocked = plan_price_edit_block(
+                plan=self.instance,
+                new_price=attrs.get("price", self.instance.price),
+                new_apply=attrs.get(
+                    "apply_current_price_to_existing",
+                    self.instance.apply_current_price_to_existing,
+                ),
+                today=timezone.localtime().date(),
+            )
+            if blocked:
+                raise serializers.ValidationError({"price": blocked})
 
         return attrs
 

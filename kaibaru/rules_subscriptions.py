@@ -258,6 +258,7 @@ def validate_plan_change_window(today, subscription):
 def is_valid_billing_day(today):
     return 0 <= today.day <= 32
 
+
 def is_near_anchor(today, anchor_day):
     if not anchor_day:
         return False
@@ -270,6 +271,40 @@ def is_near_anchor(today, anchor_day):
 
     return abs((today - anchor_date).days) <= 1
 
+
+def plan_price_edit_block(*, plan, new_price, new_apply, today):
+    """Refuse any plan price change outside the billing-safe days.
+
+    Allowed only on the 2nd–27th, and only when that day is more than one
+    day away from the club billing day and from every active subscriber's
+    billing day. A cut still changes current bills when the legacy price
+    is kept, so the price number itself is what is locked.
+    """
+    if int(new_price) == int(plan.price) and bool(new_apply) == bool(
+        plan.apply_current_price_to_existing
+    ):
+        return None
+
+    anchors = set()
+    club_anchor = getattr(getattr(plan, "club", None), "stripe_anchor_date", None)
+    if club_anchor:
+        anchors.add(club_anchor)
+    anchors.update(
+        SubscriptionItem.objects.filter(
+            plan_id=plan.id,
+            deleted_at__isnull=True,
+            subscription__billing_anchor_day__isnull=False,
+        ).values_list("subscription__billing_anchor_day", flat=True)
+    )
+
+    for anchor in anchors:
+        if is_near_anchor(today, anchor):
+            return "請求日の前後1日は、プランの料金を変更できません。"
+
+    if today.day < 2 or today.day > 27:
+        return "プランの料金は毎月2日〜27日のみ変更できます。"
+
+    return None
 
 
 def can_resume_subscription(item, now):
