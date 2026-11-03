@@ -13,7 +13,11 @@ from .service_mutations import (
     stripe_idempotency_key,
     get_or_create_mutation_strict,
 )
-from .rules_subscriptions import assert_plan_is_activatable
+from .rules_subscriptions import (
+    assert_cancel_change_group_exclusive,
+    assert_plan_is_activatable,
+    assert_resume_group_exclusive,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +28,7 @@ class SubscriptionItemService:
     @staticmethod
     def resume_item(*, item, subscription, club):
         assert_plan_is_activatable(item.plan, item.member)
+        assert_resume_group_exclusive(item)
 
         assert_mutation_not_locked(
             item=item,
@@ -491,6 +496,7 @@ class SubscriptionItemService:
         # that revival must be refused - the plan change cancellation
         # must not resurrect an item on a plan that's going away.
         assert_plan_is_activatable(old_item.plan, old_item.member)
+        assert_cancel_change_group_exclusive(old_item, new_item)
 
         assert_mutation_not_locked(
             item=old_item,

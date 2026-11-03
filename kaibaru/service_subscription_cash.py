@@ -2,7 +2,11 @@ from django.db import transaction
 from django.utils import timezone
 
 from .models import SubscriptionItem
-from .rules_subscriptions import assert_plan_is_activatable
+from .rules_subscriptions import (
+    assert_cancel_change_group_exclusive,
+    assert_plan_is_activatable,
+    assert_resume_group_exclusive,
+)
 
 
 class CashSubscriptionItemService:
@@ -18,6 +22,7 @@ class CashSubscriptionItemService:
         club,
     ):
         assert_plan_is_activatable(item.plan, item.member)
+        assert_resume_group_exclusive(item)
 
         with transaction.atomic():
 
@@ -212,6 +217,7 @@ class CashSubscriptionItemService:
         # change must not revive an item on a plan that has since been
         # scheduled for deletion (or deleted).
         assert_plan_is_activatable(old_item.plan, old_item.member)
+        assert_cancel_change_group_exclusive(old_item, new_item)
 
         now = timezone.now()
 

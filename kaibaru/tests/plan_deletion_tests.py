@@ -32,6 +32,7 @@ from kaibaru.models import (
     Club,
     Member,
     MembershipPlan,
+    MembershipPlanGroup,
     Subscription,
     SubscriptionItem,
     StripeCustomer,
@@ -788,3 +789,282 @@ class ReconcileScheduledPlanDeletionsTests(PlanDeletionBaseTestCase):
 
         self.assertEqual(results, [])
         mock_stripe.Subscription.modify.assert_not_called()
+
+
+class GroupExclusiveResumeAndUndoTests(PlanDeletionBaseTestCase):
+    """Resume and undoing a plan change use the same one-plan-per-group
+    rule as a normal change. They stay allowed when the resulting set
+    has only one plan from the group."""
+
+    def make_grouped_plans(self):
+        group = MembershipPlanGroup.objects.create(
+            club=self.club,
+            name="Tiers",
+        )
+        plan_a = self.make_plan(
+            name="A",
+            group=group,
+            stripe_price_id="price_a",
+        )
+        plan_b = self.make_plan(
+            name="B",
+            group=group,
+            stripe_price_id="price_b",
+        )
+        plan_c = self.make_plan(
+            name="C",
+            stripe_price_id="price_c",
+        )
+        return plan_a, plan_b, plan_c
+
+    def test_resume_refused_while_another_plan_in_the_group_is_held(self):
+        plan_a, plan_b, _plan_c = self.make_grouped_plans()
+        subscription = self.make_cash_subscription()
+        now = timezone.now()
+
+        item_a = SubscriptionItem.objects.create(
+            subscription=subscription,
+            member=self.member,
+            plan=plan_a,
+            deleted_at=now,
+            access_until=now + timezone.timedelta(days=5),
+        )
+        SubscriptionItem.objects.create(
+            subscription=subscription,
+            member=self.member,
+            plan=plan_b,
+        )
+
+        with self.assertRaises(ValidationError):
+            CashSubscriptionItemService.resume_item(
+                item=item_a,
+                subscription=subscription,
+                club=self.club,
+            )
+
+        item_a.refresh_from_db()
+        self.assertIsNotNone(item_a.deleted_at)
+
+    def test_resume_allowed_when_the_other_group_plan_is_not_held(self):
+        plan_a, _plan_b, _plan_c = self.make_grouped_plans()
+        subscription = self.make_cash_subscription()
+        now = timezone.now()
+
+        item_a = SubscriptionItem.objects.create(
+            subscription=subscription,
+            member=self.member,
+            plan=plan_a,
+            deleted_at=now,
+            access_until=now + timezone.timedelta(days=5),
+        )
+
+        resumed = CashSubscriptionItemService.resume_item(
+            item=item_a,
+            subscription=subscription,
+            club=self.club,
+        )
+
+        self.assertIsNone(resumed.deleted_at)
+
+    def test_undo_change_refused_when_it_restores_a_second_plan_in_the_group(self):
+        plan_a, plan_b, plan_c = self.make_grouped_plans()
+        subscription = self.make_cash_subscription()
+        now = timezone.now()
+
+        old_item = SubscriptionItem.objects.create(
+            subscription=subscription,
+            member=self.member,
+            plan=plan_a,
+            deleted_at=now,
+            access_until=now + timezone.timedelta(days=5),
+        )
+        new_item = SubscriptionItem.objects.create(
+            subscription=subscription,
+            member=self.member,
+            plan=plan_c,
+            source_item=old_item,
+        )
+        SubscriptionItem.objects.create(
+            subscription=subscription,
+            member=self.member,
+            plan=plan_b,
+        )
+
+        with self.assertRaises(ValidationError):
+            CashSubscriptionItemService.cancel_change(
+                new_item=new_item,
+                old_item=old_item,
+                subscription=subscription,
+                club=self.club,
+            )
+
+        old_item.refresh_from_db()
+        new_item.refresh_from_db()
+        self.assertIsNotNone(old_item.deleted_at)
+        self.assertIsNone(new_item.deleted_at)
+
+    def test_undo_change_allowed_when_the_other_group_plan_is_not_held(self):
+        plan_a, _plan_b, plan_c = self.make_grouped_plans()
+        subscription = self.make_cash_subscription()
+        now = timezone.now()
+
+        old_item = SubscriptionItem.objects.create(
+            subscription=subscription,
+            member=self.member,
+            plan=plan_a,
+            deleted_at=now,
+            access_until=now + timezone.timedelta(days=5),
+        )
+        new_item = SubscriptionItem.objects.create(
+            subscription=subscription,
+            member=self.member,
+            plan=plan_c,
+            source_item=old_item,
+        )
+
+        CashSubscriptionItemService.cancel_change(
+            new_item=new_item,
+            old_item=old_item,
+            subscription=subscription,
+            club=self.club,
+        )
+
+        old_item.refresh_from_db()
+        new_item.refresh_from_db()
+        self.assertIsNone(old_item.deleted_at)
+        self.assertIsNotNone(new_item.deleted_at)
+
+
+class BundleResumeAndUndoTests(PlanDeletionBaseTestCase):
+    """Resume and undoing a plan change use the same bundle rules as a
+    normal change. They stay allowed when the resulting plans do not
+    break those rules."""
+
+    def make_bundle(self):
+        plan_a = self.make_plan(name="A", stripe_price_id="price_a")
+        plan_b = self.make_plan(name="B", stripe_price_id="price_b")
+        plan_c = self.make_plan(name="C", stripe_price_id="price_c")
+        bundle = self.make_plan(
+            name="AB",
+            plan_type=MembershipPlan.PlanType.BUNDLE,
+            stripe_price_id="price_ab",
+        )
+        bundle.bundled_plans.set([plan_a, plan_b])
+        return plan_a, plan_b, plan_c, bundle
+
+    def test_resume_refused_when_it_mixes_a_bundle_with_one_component(self):
+        plan_a, _plan_b, _plan_c, bundle = self.make_bundle()
+        subscription = self.make_cash_subscription()
+        now = timezone.now()
+
+        item_a = SubscriptionItem.objects.create(
+            subscription=subscription,
+            member=self.member,
+            plan=plan_a,
+            deleted_at=now,
+            access_until=now + timezone.timedelta(days=5),
+        )
+        SubscriptionItem.objects.create(
+            subscription=subscription,
+            member=self.member,
+            plan=bundle,
+        )
+
+        with self.assertRaises(ValidationError):
+            CashSubscriptionItemService.resume_item(
+                item=item_a,
+                subscription=subscription,
+                club=self.club,
+            )
+
+        item_a.refresh_from_db()
+        self.assertIsNotNone(item_a.deleted_at)
+
+    def test_resume_allowed_when_the_bundle_is_not_held(self):
+        plan_a, _plan_b, _plan_c, _bundle = self.make_bundle()
+        subscription = self.make_cash_subscription()
+        now = timezone.now()
+
+        item_a = SubscriptionItem.objects.create(
+            subscription=subscription,
+            member=self.member,
+            plan=plan_a,
+            deleted_at=now,
+            access_until=now + timezone.timedelta(days=5),
+        )
+
+        resumed = CashSubscriptionItemService.resume_item(
+            item=item_a,
+            subscription=subscription,
+            club=self.club,
+        )
+
+        self.assertIsNone(resumed.deleted_at)
+
+    def test_undo_change_refused_when_it_mixes_a_bundle_with_one_component(self):
+        plan_a, _plan_b, plan_c, bundle = self.make_bundle()
+        subscription = self.make_cash_subscription()
+        now = timezone.now()
+
+        old_item = SubscriptionItem.objects.create(
+            subscription=subscription,
+            member=self.member,
+            plan=plan_a,
+            deleted_at=now,
+            access_until=now + timezone.timedelta(days=5),
+        )
+        new_item = SubscriptionItem.objects.create(
+            subscription=subscription,
+            member=self.member,
+            plan=plan_c,
+            source_item=old_item,
+        )
+        SubscriptionItem.objects.create(
+            subscription=subscription,
+            member=self.member,
+            plan=bundle,
+        )
+
+        with self.assertRaises(ValidationError):
+            CashSubscriptionItemService.cancel_change(
+                new_item=new_item,
+                old_item=old_item,
+                subscription=subscription,
+                club=self.club,
+            )
+
+        old_item.refresh_from_db()
+        new_item.refresh_from_db()
+        self.assertIsNotNone(old_item.deleted_at)
+        self.assertIsNone(new_item.deleted_at)
+
+    def test_undo_change_allowed_when_the_bundle_is_not_held(self):
+        plan_a, _plan_b, plan_c, _bundle = self.make_bundle()
+        subscription = self.make_cash_subscription()
+        now = timezone.now()
+
+        old_item = SubscriptionItem.objects.create(
+            subscription=subscription,
+            member=self.member,
+            plan=plan_a,
+            deleted_at=now,
+            access_until=now + timezone.timedelta(days=5),
+        )
+        new_item = SubscriptionItem.objects.create(
+            subscription=subscription,
+            member=self.member,
+            plan=plan_c,
+            source_item=old_item,
+        )
+
+        CashSubscriptionItemService.cancel_change(
+            new_item=new_item,
+            old_item=old_item,
+            subscription=subscription,
+            club=self.club,
+        )
+
+        old_item.refresh_from_db()
+        new_item.refresh_from_db()
+        self.assertIsNone(old_item.deleted_at)
+        self.assertIsNotNone(new_item.deleted_at)

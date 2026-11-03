@@ -130,6 +130,97 @@ def validate_group_rule(active_plan_ids, plans_by_id):
         )
 
 
+def resulting_plan_ids(subscription, member, *, add_plan_id=None, drop_plan_id=None, now=None):
+    """
+    Plans this member would still hold after a resume or an undone
+    plan change. Grace items count, because they are still on the
+    subscription. Drop runs before add, so undoing a change removes
+    the new plan and puts the old one back.
+    """
+    now = now or timezone.now()
+    plan_ids = set(
+        SubscriptionItem.objects.filter(
+            subscription=subscription,
+            member=member,
+        ).filter(
+            active_items_q(now)
+        ).values_list("plan_id", flat=True)
+    )
+    if drop_plan_id:
+        plan_ids.discard(drop_plan_id)
+    if add_plan_id:
+        plan_ids.add(add_plan_id)
+    plan_ids.discard(None)
+    return plan_ids
+
+
+def assert_one_plan_per_group(plan_ids, club):
+    """Refuse when the plans a member would hold include two from one group."""
+    plan_ids = {pid for pid in plan_ids if pid}
+    if not plan_ids:
+        return
+
+    plans = MembershipPlan.objects.filter(
+        id__in=plan_ids,
+        club=club,
+    ).select_related("group")
+    plans_by_id = {plan.id: plan for plan in plans}
+
+    validate_group_rule(
+        plan_ids & set(plans_by_id),
+        plans_by_id,
+    )
+
+
+def assert_bundle_rule(plan_ids, club):
+    """Refuse when the plans a member would hold break a bundle rule."""
+    plan_ids = {pid for pid in plan_ids if pid}
+    if not plan_ids:
+        return
+    validate_bundle_rule(plan_ids, get_bundle_map(club))
+
+
+def assert_resulting_plan_rules(plan_ids, club):
+    """Group and bundle rules for the plans a member would hold afterward."""
+    assert_one_plan_per_group(plan_ids, club)
+    assert_bundle_rule(plan_ids, club)
+
+
+def assert_resume_group_exclusive(item):
+    """
+    Resuming puts this plan back beside whatever else the member still
+    holds. Allowed when that set keeps one plan per group and does not
+    break a bundle rule.
+    """
+    if item.plan_id is None:
+        return
+    assert_resulting_plan_rules(
+        resulting_plan_ids(
+            item.subscription,
+            item.member,
+            add_plan_id=item.plan_id,
+        ),
+        item.subscription.club,
+    )
+
+
+def assert_cancel_change_group_exclusive(old_item, new_item):
+    """
+    Undoing a plan change restores the old plan and drops the new one.
+    Allowed when the restored set keeps one plan per group and does not
+    break a bundle rule.
+    """
+    assert_resulting_plan_rules(
+        resulting_plan_ids(
+            old_item.subscription,
+            old_item.member,
+            add_plan_id=old_item.plan_id,
+            drop_plan_id=new_item.plan_id,
+        ),
+        old_item.subscription.club,
+    )
+
+
 def validate_bundle_rule(active_plan_ids, bundle_map):
     """
     Rules:
