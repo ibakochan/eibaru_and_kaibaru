@@ -2573,6 +2573,7 @@ class EventSerializer(serializers.ModelSerializer):
             "section_id",
             "title",
             "description",
+            "terms",
             "picture",
             "starts_at",
             "prices",

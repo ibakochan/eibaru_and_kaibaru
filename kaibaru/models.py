@@ -1864,6 +1864,11 @@ class Event(models.Model):
     section_id = models.IntegerField(db_index=True)
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True, default="")
+    terms = models.TextField(
+        blank=True,
+        default="",
+        help_text="Optional terms. A reservation requires agreement when this is set.",
+    )
     picture = models.CharField(max_length=1000, blank=True, default="")
     starts_at = models.DateTimeField()
 

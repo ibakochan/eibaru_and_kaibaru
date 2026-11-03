@@ -162,6 +162,14 @@ def visitor_reservation_key(event, email):
     ).hexdigest()
 
 
+def _require_terms_accepted(event, accepted):
+    if not (event.terms or "").strip():
+        return
+    if accepted is True or str(accepted or "").strip().lower() in {"1", "true", "on", "yes"}:
+        return
+    raise ValueError("参加条件に同意してください。")
+
+
 def _require_upcoming(event):
     if event.canceled_at:
         raise ValueError("このイベントは中止になりました。")
@@ -288,7 +296,7 @@ def _email_sent_result(reservation):
 class EventReservationService:
 
     @staticmethod
-    def create_member_reservation(*, event, member, price_id):
+    def create_member_reservation(*, event, member, price_id, terms_accepted=False):
         club = event.club
 
         if member.club_id != club.id or event.club_id != club.id:
@@ -308,6 +316,7 @@ class EventReservationService:
         if not audience_allows(event, "member"):
             raise ValueError("このイベントは会員予約を受け付けていません。")
 
+        _require_terms_accepted(event, terms_accepted)
         _require_upcoming(event)
         _require_registration_open(event)
 
@@ -343,6 +352,7 @@ class EventReservationService:
             if not audience_allows(locked_event, "member"):
                 raise ValueError("このイベントは会員予約を受け付けていません。")
 
+            _require_terms_accepted(locked_event, terms_accepted)
             price = selected_event_price(locked_event, price_id)
             amount = normalize_paid_amount(price.amount)
             price_name = price.name
@@ -551,6 +561,7 @@ class EventReservationService:
         phone_number="",
         user=None,
         price_id=None,
+        terms_accepted=False,
     ):
         club = event.club
 
@@ -565,6 +576,7 @@ class EventReservationService:
         if not audience_allows(event, "visitor"):
             raise ValueError("このイベントは一般予約を受け付けていません。")
 
+        _require_terms_accepted(event, terms_accepted)
         _require_upcoming(event)
         _require_registration_open(event)
 
@@ -604,6 +616,7 @@ class EventReservationService:
                     user=user,
                     price_id=price_id,
                     reservation_key=reservation_key,
+                    terms_accepted=terms_accepted,
                 )
                 _queue_start_email(token)
         except IntegrityError:
@@ -632,6 +645,7 @@ def _save_visitor_reservation(
     user,
     price_id,
     reservation_key,
+    terms_accepted=False,
 ):
     now = timezone.now()
     hold_cutoff = hold_cutoff_at(now)
@@ -643,6 +657,7 @@ def _save_visitor_reservation(
     if not audience_allows(locked_event, "visitor"):
         raise ValueError("このイベントは一般予約を受け付けていません。")
 
+    _require_terms_accepted(locked_event, terms_accepted)
     price = selected_event_price(locked_event, price_id)
     amount = normalize_paid_amount(price.amount)
     price_name = price.name
@@ -1801,6 +1816,10 @@ def save_section_event(*, club, section_id, title, payload):
     if len(description) > 4000:
         raise ValueError("説明は4000文字以内にしてください。")
 
+    terms = str(payload.get("terms") or "").strip()
+    if len(terms) > 8000:
+        raise ValueError("参加条件は8000文字以内にしてください。")
+
     picture = str(payload.get("picture") or "").strip()
     if len(picture) > 1000:
         raise ValueError("画像のURLが長すぎます。")
@@ -1873,6 +1892,7 @@ def save_section_event(*, club, section_id, title, payload):
     defaults = {
         "title": clean_title[:200],
         "description": description,
+        "terms": terms,
         "picture": picture,
         "starts_at": starts_at,
         "reservation_limit": _optional_cap(payload.get("reservation_limit")),
