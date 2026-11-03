@@ -1930,6 +1930,15 @@ def send_event_reservation_confirmation_email(self, reservation_id):
             f"お支払い方法：クレジットカード\n\n"
         )
 
+    terms = (event.terms or "").strip()
+    terms_section = ""
+    if terms:
+        terms_section = (
+            f"\n\n"
+            f"■ 同意いただいた参加条件\n"
+            f"{terms}"
+        )
+
     message = (
         f"{reservation.full_name} 様\n\n"
         f"{intro}"
@@ -1944,6 +1953,7 @@ def send_event_reservation_confirmation_email(self, reservation_id):
         f"{_cancel_notice(reservation)}\n\n"
         f"当日はお気をつけてお越しください。\n"
         f"{club_name}"
+        f"{terms_section}"
     )
     _send_event_email(
         club=club,

@@ -219,7 +219,9 @@ class CreateTrialTemplateTests(TestCase):
 
     def test_template_fills_layout_and_page_content(self):
         response = self.client.post(
-            self.URL, {"subdomain": "tplyoga", "template": "yoga"}, format="json"
+            self.URL,
+            {"subdomain": "tplyoga", "template": "yoga", "terms_accepted": True},
+            format="json",
         )
         self.assertEqual(response.status_code, 201, response.content)
         club = Club.objects.get(subdomain="tplyoga")
@@ -228,13 +230,19 @@ class CreateTrialTemplateTests(TestCase):
 
     def test_slash_layout_key(self):
         response = self.client.post(
-            self.URL, {"subdomain": "tplbjj", "template": "bjj/grappling"}, format="json"
+            self.URL,
+            {"subdomain": "tplbjj", "template": "bjj/grappling", "terms_accepted": True},
+            format="json",
         )
         self.assertEqual(response.status_code, 201, response.content)
         self.assertEqual(Club.objects.get(subdomain="tplbjj").layout, "bjj/grappling")
 
     def test_without_template_keeps_old_behaviour(self):
-        response = self.client.post(self.URL, {"subdomain": "tplblank"}, format="json")
+        response = self.client.post(
+            self.URL,
+            {"subdomain": "tplblank", "terms_accepted": True},
+            format="json",
+        )
         self.assertEqual(response.status_code, 201, response.content)
         club = Club.objects.get(subdomain="tplblank")
         self.assertEqual(club.layout, "default")
@@ -242,7 +250,9 @@ class CreateTrialTemplateTests(TestCase):
 
     def test_apply_template_replaces_page_and_keeps_lessons(self):
         created = self.client.post(
-            self.URL, {"subdomain": "tplswap", "template": "yoga"}, format="json"
+            self.URL,
+            {"subdomain": "tplswap", "template": "yoga", "terms_accepted": True},
+            format="json",
         )
         self.assertEqual(created.status_code, 201, created.content)
         club = Club.objects.get(subdomain="tplswap")
@@ -270,7 +280,9 @@ class CreateTrialTemplateTests(TestCase):
 
     def test_apply_template_rejects_unknown_and_strangers(self):
         created = self.client.post(
-            self.URL, {"subdomain": "tplkeep", "template": "yoga"}, format="json"
+            self.URL,
+            {"subdomain": "tplkeep", "template": "yoga", "terms_accepted": True},
+            format="json",
         )
         club = Club.objects.get(subdomain="tplkeep")
         bad = self.client.post(
@@ -293,9 +305,22 @@ class CreateTrialTemplateTests(TestCase):
         self.assertEqual(denied.status_code, 403)
         self.assertEqual(Club.objects.get(pk=club.pk).layout, "yoga")
 
+    def test_terms_are_required(self):
+        response = self.client.post(
+            self.URL, {"subdomain": "tplterms", "template": "yoga"}, format="json"
+        )
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertFalse(Club.objects.filter(subdomain="tplterms").exists())
+
     def test_unknown_template_rejected(self):
         response = self.client.post(
-            self.URL, {"subdomain": "tplbad", "template": "../etc"}, format="json"
+            self.URL,
+            {
+                "subdomain": "tplbad",
+                "template": "../etc",
+                "terms_accepted": True,
+            },
+            format="json",
         )
         self.assertEqual(response.status_code, 400)
         self.assertFalse(Club.objects.filter(subdomain="tplbad").exists())

@@ -4641,8 +4641,18 @@ class ClubViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["post"], url_path="create-trial")
     def create_trial(self, request):
         subdomain = request.data.get("subdomain")
+        accepted = request.data.get("terms_accepted")
+        if accepted is not True and str(accepted or "").strip().lower() not in {
+            "1",
+            "true",
+            "on",
+            "yes",
+        }:
+            return Response(
+                {"error": "利用規約への同意が必要です。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        
         if not subdomain:
             return Response({"error": "サブドメインは必須項目です。"}, status=status.HTTP_400_BAD_REQUEST)
 
