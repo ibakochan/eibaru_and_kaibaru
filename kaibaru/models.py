@@ -147,6 +147,28 @@ class Club(models.Model):
         help_text="入会金 (one-time fee charged when a member joins)"
     )
 
+    JOIN_PICTURE_MODE_CHOICES = [
+        ("off", "Optional"),
+        ("all", "Every join request"),
+        ("age", "Join requests at or above an age"),
+    ]
+    join_picture_mode = models.CharField(
+        max_length=10,
+        choices=JOIN_PICTURE_MODE_CHOICES,
+        default="off",
+        help_text="When a join request must include a photo. Off means the photo is optional.",
+    )
+    join_picture_min_age = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        help_text="Used when join_picture_mode is age. A photo is required at this age and older.",
+    )
+    join_terms = models.TextField(
+        blank=True,
+        default="",
+        help_text="Terms a person must accept to request membership. Empty means there are no terms.",
+    )
+
 
     system = models.JSONField(null=True, blank=True)
     trial = models.JSONField(null=True, blank=True)
@@ -547,6 +569,11 @@ class Member(models.Model):
     other_information = models.TextField(null=True, blank=True)
 
     picture = models.ImageField(upload_to=club_member_pictures_upload_to, null=True, blank=True)
+    accepted_join_terms = models.TextField(
+        blank=True,
+        default="",
+        help_text="The join terms this member accepted. Empty if the club had none.",
+    )
 
     manual_total_participation = models.IntegerField(default=0)
 
@@ -1632,6 +1659,11 @@ class JoinRequest(models.Model):
     phone_number = models.CharField(max_length=20, blank=True)
     emergency_number = models.CharField(max_length=20, blank=True)
     picture = models.ImageField(upload_to=club_member_pictures_upload_to, null=True, blank=True)
+    accepted_join_terms = models.TextField(
+        blank=True,
+        default="",
+        help_text="The join terms accepted with this request. Copied onto the member when accepted.",
+    )
     other_information = models.TextField(blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)

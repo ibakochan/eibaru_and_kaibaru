@@ -1536,6 +1536,33 @@ class JoinRequestLevelSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "level_system_name"]
 
 
+def _terms_accepted(request):
+    if request is None:
+        return False
+    value = request.data.get("terms_accepted")
+    return value is True or str(value or "").strip().lower() in {"1", "true", "on", "yes"}
+
+
+def assert_join_request_picture(club, birth_date, picture):
+    """Refuse a join request that is missing a photo the club requires."""
+    from .discounts import calculate_age
+
+    mode = getattr(club, "join_picture_mode", None) or "off"
+    if mode == "age" and birth_date is None:
+        raise serializers.ValidationError({
+            "birth_date": "生年月日を入力してください。"
+        })
+    required = mode == "all"
+    if mode == "age":
+        min_age = club.join_picture_min_age
+        age = calculate_age(birth_date)
+        required = min_age is not None and age is not None and age >= min_age
+    if required and not picture:
+        raise serializers.ValidationError({
+            "picture": "写真を選択してください。"
+        })
+
+
 class JoinRequestSerializer(serializers.ModelSerializer):
     levels = JoinRequestLevelSerializer(many=True, read_only=True)
 
@@ -1571,9 +1598,18 @@ class JoinRequestSerializer(serializers.ModelSerializer):
             sync_join_request_levels(updated, self.initial_data.get("levels"))
         return updated
 
+    def _join_request_club(self):
+        if self.instance is not None and getattr(self.instance, "club_id", None):
+            return self.instance.club
+        request = self.context.get("request")
+        subdomain = getattr(request, "data", {}).get("club_subdomain") if request else None
+        if not subdomain:
+            return None
+        return Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
+
     def validate(self, attrs):
         plans = attrs.get("already_subscribed_plans") or []
-        birth_date = attrs.get("birth_date")
+        birth_date = attrs.get("birth_date", getattr(self.instance, "birth_date", None))
         gender = attrs.get("gender")
 
         fake_member = SimpleNamespace(
@@ -1588,6 +1624,26 @@ class JoinRequestSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({
                     "already_subscribed_plans": format_validation_error(e)
                 })
+
+        club = self._join_request_club()
+        if club is not None and (
+            self.instance is None or "picture" in attrs or "birth_date" in attrs
+        ):
+            if "picture" in attrs:
+                picture = attrs.get("picture")
+            elif self.instance is not None:
+                picture = self.instance.picture
+            else:
+                picture = None
+            assert_join_request_picture(club, birth_date, picture)
+
+        if self.instance is None and club is not None:
+            terms = (club.join_terms or "").strip()
+            if terms and not _terms_accepted(self.context.get("request")):
+                raise serializers.ValidationError({
+                    "terms_accepted": "入会条件を開いて同意してください。"
+                })
+            self._accepted_join_terms = terms
 
         return attrs
 
@@ -1713,8 +1769,16 @@ class MemberSerializer(serializers.ModelSerializer):
             "counts_for_family_discount",
             "tickets",
             "other_owned_club_subdomains",
+            "accepted_join_terms",
         ]
-        read_only_fields = ["id", "user", "is_manager", "is_instructor", "manager_permissions"]
+        read_only_fields = [
+            "id",
+            "user",
+            "is_manager",
+            "is_instructor",
+            "manager_permissions",
+            "accepted_join_terms",
+        ]
 
     def _apply_role_flags(self, instance):
         request = self.context.get("request")
@@ -1989,6 +2053,13 @@ class MemberSerializer(serializers.ModelSerializer):
         data.pop("participations", None)
         request = self.context.get("request")
         user = getattr(request, "user", None)
+        owns_member = (
+            user
+            and getattr(user, "is_authenticated", False)
+            and (user.id == instance.user_id or user.id == instance.owner_id)
+        )
+        if not owns_member:
+            data.pop("accepted_join_terms", None)
 
         if not user or not user.is_authenticated:
             for field in [
@@ -2999,6 +3070,9 @@ class ClubSerializer(serializers.ModelSerializer):
             "stripe_anchor_date",
             "has_member_subscription",
             "joining_fee",
+            "join_picture_mode",
+            "join_picture_min_age",
+            "join_terms",
 
             #member to gym stripe
             "stripe_charges_enabled",
@@ -3075,6 +3149,32 @@ class ClubSerializer(serializers.ModelSerializer):
             message = invalid_set_price(attrs.get(field), allow_free=True)
             if message:
                 raise serializers.ValidationError({field: message})
+
+        mode = attrs.get(
+            "join_picture_mode",
+            getattr(self.instance, "join_picture_mode", "off"),
+        ) or "off"
+        min_age = attrs.get(
+            "join_picture_min_age",
+            getattr(self.instance, "join_picture_min_age", None),
+        )
+        if mode == "age":
+            if min_age is None:
+                raise serializers.ValidationError({
+                    "join_picture_min_age": "年齢を入力してください。"
+                })
+            if int(min_age) > 120:
+                raise serializers.ValidationError({
+                    "join_picture_min_age": "年齢は0〜120で入力してください。"
+                })
+
+        if "join_terms" in attrs and attrs["join_terms"] is not None:
+            terms = str(attrs["join_terms"]).strip()
+            if len(terms) > 8000:
+                raise serializers.ValidationError({
+                    "join_terms": "入会条件は8000文字以内で入力してください。"
+                })
+            attrs["join_terms"] = terms
 
         return attrs
 

@@ -1351,6 +1351,7 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
             user=None if is_family else self.request.user,
             owner=self.request.user,
             club=club,
+            accepted_join_terms=getattr(serializer, "_accepted_join_terms", ""),
         )
 
     def update(self, request, *args, **kwargs):
@@ -1454,6 +1455,7 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
                     emergency_number=jr.emergency_number,
                     other_information=jr.other_information,
                     picture=new_picture,
+                    accepted_join_terms=jr.accepted_join_terms or "",
                 )
                 copy_join_request_levels(jr, member)
 
@@ -4081,6 +4083,9 @@ class ClubViewSet(viewsets.ModelViewSet):
                 "expiration_date",
                 "joining_fee",
                 "owner",
+                "join_picture_mode",
+                "join_picture_min_age",
+                "join_terms",
             }
             plan_fields = {
                 "subscription_mode",
