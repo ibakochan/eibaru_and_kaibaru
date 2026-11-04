@@ -1406,6 +1406,20 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
                 {"detail": MEMBERS_REQUIRE_SUBSCRIPTION},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        if (
+            timezone.localdate().day == club.stripe_anchor_date
+            and join_requests.filter(already_subscribed_plans__isnull=False).exists()
+        ):
+            return Response(
+                {
+                    "detail": (
+                        "今日は請求日のため、加入済みプランがある入会申請は承認できません。"
+                        "その申請の選択を外すか、明日以降に承認してください。"
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
     
         try:
             created_member_ids = self._accept_join_requests(join_requests)
