@@ -577,8 +577,6 @@ class Member(models.Model):
 
     manual_total_participation = models.IntegerField(default=0)
 
-    participation_limit = models.PositiveIntegerField(null=True, blank=True, default=None)
-
     is_kyukai = models.BooleanField(default=False)
     is_kyukai_paid = models.BooleanField(default=False)
     kyukai_since = models.DateField(null=True, blank=True)

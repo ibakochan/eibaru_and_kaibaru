@@ -1755,7 +1755,6 @@ class MemberSerializer(serializers.ModelSerializer):
             "this_month_participation",
             "levels",
             "manual_total_participation",
-            "participation_limit",
             "is_manager",
             "is_instructor",
             "manager_permissions",
@@ -1893,6 +1892,8 @@ class MemberSerializer(serializers.ModelSerializer):
             is_self = instance.user_id == user.id or instance.owner_id == user.id
             if not is_owner and not is_self and not has_permission(user, club, "members"):
                 raise serializers.ValidationError({"detail": "許可なし"})
+            if not is_owner and not has_permission(user, club, "members"):
+                validated_data.pop("manual_total_participation", None)
             if not is_owner and instance.user_id == user.id:
                 validated_data.pop("has_paid_joining_fee", None)
                 validated_data.pop("has_been_charged_joining_fee", None)

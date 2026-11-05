@@ -1207,6 +1207,18 @@ def cancel_cash_member_plan_change(request, new_item_id):
 
 
     club = subscription.club
+    today = timezone.localtime().date()
+
+    error = validate_plan_change_window(
+        today=today,
+        subscription=subscription,
+    )
+
+    if error:
+        return JsonResponse(
+            {"error": error},
+            status=400
+        )
 
 
     old_plan_deleted = (
@@ -1898,6 +1910,19 @@ def add_plan_to_cash_subscription_view(
     if not subscription:
         return JsonResponse(
             {"error": "現金払いの契約が見つかりません。"},
+            status=400
+        )
+
+    today = timezone.localtime().date()
+
+    error = validate_plan_change_window(
+        today=today,
+        subscription=subscription,
+    )
+
+    if error:
+        return JsonResponse(
+            {"error": error},
             status=400
         )
 
