@@ -4785,7 +4785,13 @@ class ClubViewSet(viewsets.ModelViewSet):
                 club.default_background_color = color.strip().lower()
                 update_fields.append("default_background_color")
             club.save(update_fields=update_fields)
-            for old_id, new_id in event_section_remap.items():
+            # A new id can be the section a later live event still holds.
+            # Moving the highest id first frees that slot before the next
+            # event is written onto it. MySQL checks the unique key on each
+            # UPDATE, so the order of these writes is what avoids the clash.
+            for old_id, new_id in sorted(
+                event_section_remap.items(), key=lambda item: item[1], reverse=True
+            ):
                 Event.objects.filter(club=club, section_id=old_id).update(section_id=new_id)
                 Event.objects.filter(club=club, live_section_id=old_id).update(
                     live_section_id=new_id

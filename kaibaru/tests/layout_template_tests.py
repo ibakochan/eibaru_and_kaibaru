@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from django.db.models.signals import post_save
 from django.test import SimpleTestCase, TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from accounts.models import CustomUser
@@ -17,7 +18,7 @@ from kaibaru.layout_templates import (
     page_content_for_club,
     template_path,
 )
-from kaibaru.models import Club, Lesson
+from kaibaru.models import Club, Event, Lesson
 from kaibaru.signals import club_created_signal
 
 EXAMPLE_PIC_PREFIX = "https://storage.googleapis.com/sitepicsforkaibaru/layouts/"
@@ -318,6 +319,46 @@ class CreateTrialTemplateTests(TestCase):
         self.assertEqual(json.loads(club.page_content), load_page_content("swimming"))
         self.assertEqual(lesson.section_id, 7)
         self.assertEqual(lesson.title, "朝のクラス")
+
+    def test_apply_template_moves_the_live_event_off_the_destination_first(self):
+        created = self.client.post(
+            self.URL,
+            {"subdomain": "tplchain", "template": "yoga", "terms_accepted": True},
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201, created.content)
+        club = Club.objects.get(subdomain="tplchain")
+        club.page_content = json.dumps({
+            "version": 1,
+            "next_section_id": 29,
+            "sections": {
+                "26": {"id": 26, "order": 1, "type": "event", "slug": "net", "title": "予約"},
+                "15": {"id": 15, "order": 2, "type": "event", "slug": "costco", "title": "costco"},
+                "27": {"id": 27, "order": 3, "type": "event", "slug": "bjj", "title": "BJJ"},
+                "28": {"id": 28, "order": 4, "type": "event", "slug": "one", "title": "One"},
+            },
+        })
+        club.save(update_fields=["page_content"])
+        starts = timezone.now()
+        held = Event.objects.create(
+            club=club, section_id=28, live_section_id=28, title="One match", starts_at=starts,
+        )
+        moving = Event.objects.create(
+            club=club, section_id=27, live_section_id=27, title="BJJ tournament", starts_at=starts,
+        )
+
+        response = self.client.post(
+            f"/api/clubs/{club.id}/apply-template/",
+            {"template": "swimming"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        held.refresh_from_db()
+        moving.refresh_from_db()
+        self.assertEqual(held.section_id, 29)
+        self.assertEqual(held.live_section_id, 29)
+        self.assertEqual(moving.section_id, 28)
+        self.assertEqual(moving.live_section_id, 28)
 
     def test_apply_template_rejects_unknown_and_strangers(self):
         created = self.client.post(
