@@ -29,13 +29,17 @@ import stripe
 from django.conf import settings
 from django.db.models import Prefetch
 from django.db.models.functions import Coalesce
+from django.core.cache import cache
 from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from .user_errors import format_validation_error
 from .layout_templates import (
+    clean_sticky_nav,
     is_template_key,
     load_page_content,
     merge_carried_sections,
     page_content_for_club,
+    scrub_sticky_nav,
     section_ids_of_type,
 )
 stripe.api_key = settings.STRIPE_SECRET_KEY
@@ -703,6 +707,28 @@ def slugify(value):
     value = re.sub(r"[\s\-]+", "-", value)
 
     return value.strip("-").lower()
+
+
+def _inquiry_text(value, limit):
+    text = unicodedata.normalize("NFKC", str(value or "")).strip()
+    if not text or len(text) > limit:
+        return ""
+    return text
+
+
+def _inquiry_allowed(request, club_id):
+    forwarded = request.META.get("HTTP_X_FORWARDED_FOR") or ""
+    ip = forwarded.split(",")[0].strip() or request.META.get("REMOTE_ADDR") or "unknown"
+    key = f"inquiry:{club_id}:{ip}"
+    try:
+        if cache.add(key, 1, timeout=3600):
+            return True
+        return cache.incr(key) <= 8
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "Inquiry rate limit unavailable for club %s", club_id
+        )
+        return True
 
 
 class InvoiceViewSet(viewsets.ReadOnlyModelViewSet):
@@ -4929,9 +4955,9 @@ class ClubViewSet(viewsets.ModelViewSet):
         section_type = request.data.get("type", "custom")
         icon = request.data.get("icon")
 
-        ALLOWED_TYPES = {"custom", "schedule", "join", "member", "teacher", "slideshow", "header", "memberplans", "event"}
+        ALLOWED_TYPES = {"custom", "schedule", "join", "member", "teacher", "slideshow", "header", "memberplans", "event", "inquiry"}
 
-        if action_type not in {"add", "remove", "edit", "add_slide", "remove_slide", "update_slide"}:
+        if action_type not in {"add", "remove", "edit", "add_slide", "remove_slide", "update_slide", "set_sticky_nav"}:
             return Response(
                 {"detail": "Invalid action"},
                 status=status.HTTP_400_BAD_REQUEST
@@ -4984,7 +5010,7 @@ class ClubViewSet(viewsets.ModelViewSet):
 
         # Prevent duplicate system sections
 
-        UNIQUE_TYPES = {"join", "member", "teacher", "header", "memberplans"}
+        UNIQUE_TYPES = {"join", "member", "teacher", "header", "memberplans", "inquiry"}
         if action_type == "add" and section_type in UNIQUE_TYPES:
             if any(s.get("type") == section_type for s in section_list):
                 return Response(
@@ -5033,6 +5059,12 @@ class ClubViewSet(viewsets.ModelViewSet):
                 new_section["style"] = style
             if icon:
                 new_section["icon"] = icon
+
+            show_in_menu = request.data.get("show_in_menu")
+            if section_type != "header" and isinstance(show_in_menu, bool):
+                new_section["show_in_menu"] = show_in_menu
+            elif section_type == "inquiry":
+                new_section["show_in_menu"] = False
 
             # Only custom sections get editable content
             if section_type == "custom":
@@ -5158,6 +5190,10 @@ class ClubViewSet(viewsets.ModelViewSet):
             
             if "icon" in request.data:
                 section["icon"] = icon
+
+            show_in_menu = request.data.get("show_in_menu")
+            if section.get("type") != "header" and isinstance(show_in_menu, bool):
+                section["show_in_menu"] = show_in_menu
 
             if section.get("type") == "header" and "header" in request.data:
                 header_data = request.data.get("header")
@@ -5330,6 +5366,18 @@ class ClubViewSet(viewsets.ModelViewSet):
 
 
 
+        elif action_type == "set_sticky_nav":
+            try:
+                page_content["sticky_nav"] = clean_sticky_nav(
+                    page_content, request.data.get("sticky_nav") or {}
+                )
+            except ValueError as exc:
+                transaction.set_rollback(True)
+                return Response(
+                    {"detail": str(exc)},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         # ----- REMOVE SECTION -----
         elif action_type == "remove":
             if not section_id or str(section_id) not in sections:
@@ -5383,9 +5431,53 @@ class ClubViewSet(viewsets.ModelViewSet):
         for section in section_list:
             sections[str(section["id"])] = section
 
+        scrub_sticky_nav(page_content)
         club.page_content = json.dumps(page_content)
         club.save()
 
         serializer = self.get_serializer(club, context={"request": request})
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="inquiry")
+    def inquiry(self, request, pk=None):
+        club = self.get_object()
+        if str(request.data.get("company") or "").strip():
+            return Response({"ok": True})
+        if not _inquiry_allowed(request, club.id):
+            return Response(
+                {"detail": "送信が続いています。しばらくしてからもう一度お試しください。"},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+
+        name = _inquiry_text(request.data.get("name"), 80)
+        furigana = _inquiry_text(request.data.get("furigana"), 80)
+        phone = _inquiry_text(request.data.get("phone_number"), 40)
+        email = _inquiry_text(request.data.get("email"), 254)
+        header = _inquiry_text(request.data.get("header"), 120).replace("\n", " ").replace("\r", "")
+        message = _inquiry_text(request.data.get("message"), 4000)
+        if not all([name, furigana, phone, email, header, message]):
+            return Response(
+                {"detail": "すべての項目を入力してください。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            validate_email(email)
+        except ValidationError:
+            return Response(
+                {"detail": "メールアドレスの形式が正しくありません。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        digits = re.sub(r"\D", "", phone)
+        if len(digits) < 10 or len(digits) > 15:
+            return Response(
+                {"detail": "電話番号の形式が正しくありません。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from .tasks_emails import send_inquiry_email
+
+        send_inquiry_email.delay(
+            club.id, name, furigana, phone, email, header, message
+        )
+        return Response({"ok": True})
 

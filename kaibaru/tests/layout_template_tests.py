@@ -1,6 +1,7 @@
 """Tests for the ready-made site templates in kaibaru/layout/*.json."""
 import json
 from datetime import time
+from unittest.mock import patch
 
 from django.db.models.signals import post_save
 from django.test import SimpleTestCase, TestCase
@@ -10,6 +11,7 @@ from accounts.models import CustomUser
 from kaibaru.layout_templates import (
     LAYOUT_DIR,
     TEMPLATE_KEYS,
+    clean_sticky_nav,
     load_page_content,
     merge_carried_sections,
     page_content_for_club,
@@ -22,7 +24,7 @@ EXAMPLE_PIC_PREFIX = "https://storage.googleapis.com/sitepicsforkaibaru/layouts/
 CANVAS_WIDTH = 1205
 ALLOWED_TYPES = {
     "custom", "schedule", "join", "member", "teacher",
-    "slideshow", "header", "memberplans",
+    "slideshow", "header", "memberplans", "inquiry",
 }
 ICONS = {
     "home", "schedule", "access", "contact", "phone", "time", "join",
@@ -66,7 +68,7 @@ class LayoutTemplateFileTests(SimpleTestCase):
         self.assertEqual(len(slugs), len(set(slugs)))
 
         types = [s["type"] for s in ordered]
-        for unique in ("header", "join", "member", "teacher", "memberplans", "slideshow", "schedule"):
+        for unique in ("header", "join", "member", "teacher", "memberplans", "slideshow", "schedule", "inquiry"):
             self.assertEqual(types.count(unique), 1, unique)
         self.assertTrue(set(types) <= ALLOWED_TYPES)
 
@@ -97,6 +99,35 @@ class LayoutTemplateFileTests(SimpleTestCase):
         self.assertGreaterEqual(len(customs), 5)
         for section in customs:
             self.check_canvas(sections, section)
+
+        self.check_inquiry(ordered, page)
+
+    def check_inquiry(self, ordered, page):
+        inquiry = next(section for section in ordered if section["type"] == "inquiry")
+        self.assertEqual(inquiry["title"], "問い合わせフォーム")
+        self.assertFalse(inquiry["show_in_menu"])
+        flow = [section for section in ordered if section["type"] != "header"]
+        sticky = page["sticky_nav"]
+        self.assertEqual(sticky["hide_from_section_id"], flow[1]["id"])
+        self.assertNotEqual(sticky["hide_from_section_id"], flow[0]["id"])
+        labels = [button["label"] for button in sticky["buttons"]]
+        self.assertEqual(
+            labels,
+            ["問い合わせフォーム", "アクセス", "予約はレッスンから"],
+        )
+        by_label = {button["label"]: button for button in sticky["buttons"]}
+        access = next(section for section in ordered if section["title"] == "アクセス")
+        schedule = next(section for section in ordered if section["type"] == "schedule")
+        self.assertEqual(by_label["問い合わせフォーム"]["section_id"], inquiry["id"])
+        self.assertEqual(by_label["アクセス"]["section_id"], access["id"])
+        self.assertEqual(by_label["予約はレッスンから"]["section_id"], schedule["id"])
+        found = False
+        for box in access["layout"]["boxes"]:
+            for node in walk(box["content"]):
+                if node.get("type") == "button" and node.get("label") == "問い合わせフォーム":
+                    self.assertEqual(node["sectionId"], inquiry["id"])
+                    found = True
+        self.assertTrue(found, "access section needs an inquiry button")
 
     def check_canvas(self, sections, section):
         layout = section["layout"]
@@ -145,6 +176,16 @@ class LayoutTemplateFileTests(SimpleTestCase):
     def test_unknown_layout_rejected(self):
         with self.assertRaises(ValueError):
             load_page_content("nope")
+
+    def test_sticky_nav_rejects_the_opening_section(self):
+        page = load_page_content("yoga")
+        ordered = sorted(page["sections"].values(), key=lambda section: section["order"])
+        opening = next(section for section in ordered if section["type"] != "header")
+        with self.assertRaises(ValueError):
+            clean_sticky_nav(page, {
+                "hide_from_section_id": opening["id"],
+                "buttons": [],
+            })
 
 
 class MergeCarriedSectionsTests(SimpleTestCase):
@@ -311,6 +352,39 @@ class CreateTrialTemplateTests(TestCase):
         )
         self.assertEqual(response.status_code, 400, response.content)
         self.assertFalse(Club.objects.filter(subdomain="tplterms").exists())
+
+    def test_inquiry_emails_the_owner(self):
+        created = self.client.post(
+            self.URL,
+            {"subdomain": "tplinquiry", "template": "yoga", "terms_accepted": True},
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201, created.content)
+        club = Club.objects.get(subdomain="tplinquiry")
+        visitor = APIClient()
+        with patch("kaibaru.tasks_emails.send_inquiry_email.delay") as send:
+            response = visitor.post(
+                f"/api/clubs/{club.id}/inquiry/",
+                {
+                    "name": "山田 太郎",
+                    "furigana": "やまだ たろう",
+                    "phone_number": "090-0000-0000",
+                    "email": "guest@example.com",
+                    "header": "体験について",
+                    "message": "初めてです。",
+                },
+                format="json",
+            )
+        self.assertEqual(response.status_code, 200, response.content)
+        send.assert_called_once_with(
+            club.id,
+            "山田 太郎",
+            "やまだ たろう",
+            "090-0000-0000",
+            "guest@example.com",
+            "体験について",
+            "初めてです。",
+        )
 
     def test_unknown_template_rejected(self):
         response = self.client.post(

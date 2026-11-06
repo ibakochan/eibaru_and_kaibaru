@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "next_section_id": 13,
+  "next_section_id": 14,
   "sections": {
     "1": {
       "id": 1,
@@ -1306,6 +1306,28 @@
                 ]
               }
             ]
+          },
+          {
+            "id": "fb0a6747-ecaf-5d9f-9f3a-224b4c5932e8",
+            "x": 50,
+            "y": 784.1,
+            "width": 1100,
+            "height": 94,
+            "order": 9,
+            "content": [
+              {
+                "type": "button",
+                "label": "問い合わせフォーム",
+                "align": "center",
+                "sectionId": 13,
+                "boxId": null,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              }
+            ]
           }
         ]
       },
@@ -1321,6 +1343,38 @@
       "slug": "会員ページ",
       "type": "member",
       "icon": "memberCard"
+    },
+    "13": {
+      "id": 13,
+      "order": 13,
+      "title": "問い合わせフォーム",
+      "slug": "問い合わせフォーム",
+      "type": "inquiry",
+      "icon": "contact",
+      "show_in_menu": false
     }
+  },
+  "sticky_nav": {
+    "hide_from_section_id": 3,
+    "buttons": [
+      {
+        "id": "a34768cb-1b37-547e-b9ad-f9df23b4fb3a",
+        "label": "問い合わせフォーム",
+        "kind": "section",
+        "section_id": 13
+      },
+      {
+        "id": "2dfc724d-815b-565c-beab-255d8f645e16",
+        "label": "アクセス",
+        "kind": "section",
+        "section_id": 11
+      },
+      {
+        "id": "3406d8d6-8370-55c9-adaf-77d1bbaeb0a2",
+        "label": "予約はレッスンから",
+        "kind": "section",
+        "section_id": 5
+      }
+    ]
   }
 }

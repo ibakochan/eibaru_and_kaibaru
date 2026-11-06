@@ -1887,6 +1887,7 @@ class MemberSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         user = getattr(request, "user", None)
         club = instance.club
+        is_owner = False
         if user and getattr(user, "is_authenticated", False) and club is not None:
             is_owner = club.owner_id == user.id
             is_self = instance.user_id == user.id or instance.owner_id == user.id
@@ -1897,6 +1898,9 @@ class MemberSerializer(serializers.ModelSerializer):
             if not is_owner and instance.user_id == user.id:
                 validated_data.pop("has_paid_joining_fee", None)
                 validated_data.pop("has_been_charged_joining_fee", None)
+        if not is_owner:
+            validated_data.pop("birth_date", None)
+            validated_data.pop("gender", None)
         self._apply_role_flags(instance)
         updated = super().update(instance, validated_data)
         self._sync_manager_role(updated)

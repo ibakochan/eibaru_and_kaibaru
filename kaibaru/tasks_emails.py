@@ -2040,3 +2040,42 @@ def send_reservation_canceled_email(self, kind, reservation_id):
         reservation.id,
     )
 
+
+@shared_task(
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=30,
+    retry_kwargs={"max_retries": 5},
+)
+def send_inquiry_email(self, club_id, name, furigana, phone_number, email, header, message):
+    club = (
+        Club.objects
+        .select_related("owner")
+        .filter(id=club_id, is_deleted=False)
+        .first()
+    )
+    if not club or not club.owner_id or not club.owner.email:
+        logger.warning("[EMAIL] Inquiry for club %s has no owner email.", club_id)
+        return
+
+    club_name = club.title or club.subdomain or "クラブ"
+    subject = f"【{club_name}】お問い合わせ：{header}"
+    body = (
+        f"{club_name}のサイトからお問い合わせがありました。\n\n"
+        f"お名前：{name}\n"
+        f"ふりがな：{furigana}\n"
+        f"電話番号：{phone_number}\n"
+        f"メールアドレス：{email}\n"
+        f"件名：{header}\n\n"
+        f"問い合わせ内容：\n{message}\n"
+    )
+    mail = EmailMessage(
+        subject=subject,
+        body=body,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        to=[club.owner.email],
+        reply_to=[email],
+    )
+    mail.send()
+    logger.info("[EMAIL] Inquiry sent club=%s", club_id)
+

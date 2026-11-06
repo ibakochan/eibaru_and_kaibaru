@@ -6,6 +6,7 @@ holds a full ``page_content`` document (header, slideshow, custom sections,
 schedule, plans, teacher, join and member sections).
 """
 import json
+import uuid
 from functools import lru_cache
 from pathlib import Path
 
@@ -153,3 +154,123 @@ def page_content_for_club(layout):
     template is serialised the same way.
     """
     return json.dumps(load_page_content(layout), ensure_ascii=False)
+
+
+def clean_sticky_nav(page_content, payload):
+    """Validate the bottom buttons stored on a page.
+
+    The first section after the header cannot be the hide point. Hiding
+    starts there, so picking it would hide the buttons on the opening screen.
+    """
+    if not isinstance(payload, dict):
+        raise ValueError("下のボタンの内容が正しくありません。")
+    sections = page_content.get("sections") or {}
+    if not isinstance(sections, dict):
+        sections = {}
+    ordered = sorted(
+        (section for section in sections.values() if isinstance(section, dict)),
+        key=lambda section: (section.get("order") or 0, section.get("id") or 0),
+    )
+    flow = [section for section in ordered if section.get("type") != "header"]
+    first_id = flow[0].get("id") if flow else None
+
+    hide_raw = payload.get("hide_from_section_id")
+    hide_id = None
+    if hide_raw not in (None, ""):
+        try:
+            hide_id = int(hide_raw)
+        except (TypeError, ValueError):
+            raise ValueError("隠すセクションが正しくありません。")
+        target = sections.get(str(hide_id))
+        if not isinstance(target, dict) or target.get("type") == "header":
+            raise ValueError("そのセクションからは隠せません。")
+        if first_id is not None and hide_id == int(first_id):
+            raise ValueError("先頭のセクションは、下のボタンを隠す位置にできません。")
+
+    raw_buttons = payload.get("buttons") if "buttons" in payload else []
+    if raw_buttons is None:
+        raw_buttons = []
+    if not isinstance(raw_buttons, list):
+        raise ValueError("下のボタンの内容が正しくありません。")
+    if len(raw_buttons) > 8:
+        raise ValueError("下のボタンは8個までです。")
+
+    cleaned = []
+    seen = set()
+    for button in raw_buttons:
+        if not isinstance(button, dict):
+            raise ValueError("下のボタンの内容が正しくありません。")
+        label = str(button.get("label") or "").strip()
+        if not label or len(label) > 40:
+            raise ValueError("ボタンの文字を40字以内で入力してください。")
+        kind = button.get("kind")
+        raw_id = str(button.get("id") or "").strip()
+        if not raw_id or len(raw_id) > 64:
+            raw_id = str(uuid.uuid4())
+        if raw_id in seen:
+            raw_id = str(uuid.uuid4())
+        seen.add(raw_id)
+        item = {"id": raw_id, "label": label, "kind": kind}
+        if kind == "section":
+            try:
+                section_id = int(button.get("section_id"))
+            except (TypeError, ValueError):
+                raise ValueError("移動先のセクションを選んでください。")
+            if str(section_id) not in sections:
+                raise ValueError("移動先のセクションがありません。")
+            item["section_id"] = section_id
+        elif kind == "link":
+            url = str(button.get("url") or "").strip()
+            if not (url.startswith("http://") or url.startswith("https://")) or len(url) > 500:
+                raise ValueError("リンクは http:// か https:// で始めてください。")
+            item["url"] = url
+        else:
+            raise ValueError("ボタンの種類が正しくありません。")
+        cleaned.append(item)
+    return {"hide_from_section_id": hide_id, "buttons": cleaned}
+
+
+def scrub_sticky_nav(page_content):
+    """Drop bottom buttons that point at a section which no longer exists."""
+    sticky = page_content.get("sticky_nav")
+    if not isinstance(sticky, dict):
+        return
+    sections = page_content.get("sections") or {}
+    ids = set()
+    if isinstance(sections, dict):
+        for section in sections.values():
+            if isinstance(section, dict) and section.get("id") is not None:
+                ids.add(int(section["id"]))
+    buttons = []
+    for button in sticky.get("buttons") or []:
+        if not isinstance(button, dict):
+            continue
+        if button.get("kind") == "section":
+            try:
+                section_id = int(button.get("section_id"))
+            except (TypeError, ValueError):
+                continue
+            if section_id not in ids:
+                continue
+        buttons.append(button)
+    hide = sticky.get("hide_from_section_id")
+    if hide is not None:
+        try:
+            hide = int(hide)
+        except (TypeError, ValueError):
+            hide = None
+        if hide not in ids:
+            hide = None
+    ordered = sorted(
+        (
+            section
+            for section in (sections.values() if isinstance(sections, dict) else [])
+            if isinstance(section, dict)
+        ),
+        key=lambda section: (section.get("order") or 0, section.get("id") or 0),
+    )
+    flow = [section for section in ordered if section.get("type") != "header"]
+    if hide is not None and flow and hide == int(flow[0]["id"]):
+        hide = None
+    sticky["buttons"] = buttons
+    sticky["hide_from_section_id"] = hide
