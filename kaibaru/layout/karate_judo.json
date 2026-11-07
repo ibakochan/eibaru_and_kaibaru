@@ -2014,6 +2014,12 @@
     }
   },
   "sticky_nav": {
+    "style": {
+      "shape": "square",
+      "button_color": "#161616",
+      "text_color": "#f7f5f0",
+      "tray_color": "#f7f5f0"
+    },
     "hide_from_section_id": 3,
     "buttons": [
       {

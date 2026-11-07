@@ -2291,6 +2291,12 @@
     }
   },
   "sticky_nav": {
+    "style": {
+      "shape": "rounded",
+      "button_color": "#145c34",
+      "text_color": "#ffffff",
+      "tray_color": "#f3f7f1"
+    },
     "hide_from_section_id": 3,
     "buttons": [
       {

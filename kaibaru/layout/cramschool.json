@@ -2009,6 +2009,12 @@
     }
   },
   "sticky_nav": {
+    "style": {
+      "shape": "rounded",
+      "button_color": "#1e3a8a",
+      "text_color": "#ffffff",
+      "tray_color": "#f4f6fb"
+    },
     "hide_from_section_id": 3,
     "buttons": [
       {

@@ -6,6 +6,7 @@ holds a full ``page_content`` document (header, slideshow, custom sections,
 schedule, plans, teacher, join and member sections).
 """
 import json
+import re
 import uuid
 from functools import lru_cache
 from pathlib import Path
@@ -227,7 +228,51 @@ def clean_sticky_nav(page_content, payload):
         else:
             raise ValueError("ボタンの種類が正しくありません。")
         cleaned.append(item)
-    return {"hide_from_section_id": hide_id, "buttons": cleaned}
+    return {
+        "hide_from_section_id": hide_id,
+        "buttons": cleaned,
+        "style": clean_sticky_style(payload.get("style")),
+    }
+
+
+_HEX_COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
+_STICKY_SHAPES = {"pill", "rounded", "square"}
+
+
+def clean_sticky_style(raw):
+    """Keep a small shared look for the bottom buttons and their tray.
+
+    A missing or invalid value falls back to the plain dark buttons on a
+    white tray. The tray color may be empty when the owner hides it.
+    """
+    if not isinstance(raw, dict):
+        raw = {}
+    shape = raw.get("shape")
+    if shape not in _STICKY_SHAPES:
+        shape = "pill"
+
+    def color(key, default):
+        value = raw.get(key)
+        if isinstance(value, str) and _HEX_COLOR.fullmatch(value.strip()):
+            return value.strip().lower()
+        return default
+
+    if "tray_color" not in raw:
+        tray_color = "#ffffff"
+    else:
+        tray = raw.get("tray_color")
+        if tray in (None, "", "transparent"):
+            tray_color = None
+        elif isinstance(tray, str) and _HEX_COLOR.fullmatch(tray.strip()):
+            tray_color = tray.strip().lower()
+        else:
+            tray_color = "#ffffff"
+    return {
+        "shape": shape,
+        "button_color": color("button_color", "#1c1917"),
+        "text_color": color("text_color", "#ffffff"),
+        "tray_color": tray_color,
+    }
 
 
 def scrub_sticky_nav(page_content):

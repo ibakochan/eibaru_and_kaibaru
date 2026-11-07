@@ -122,6 +122,11 @@ class LayoutTemplateFileTests(SimpleTestCase):
         self.assertEqual(by_label["問い合わせフォーム"]["section_id"], inquiry["id"])
         self.assertEqual(by_label["アクセス"]["section_id"], access["id"])
         self.assertEqual(by_label["予約はレッスンから"]["section_id"], schedule["id"])
+        style = sticky["style"]
+        self.assertIn(style["shape"], {"pill", "rounded", "square"})
+        self.assertRegex(style["button_color"], r"^#[0-9a-f]{6}$")
+        self.assertRegex(style["text_color"], r"^#[0-9a-f]{6}$")
+        self.assertRegex(style["tray_color"], r"^#[0-9a-f]{6}$")
         found = False
         for box in access["layout"]["boxes"]:
             for node in walk(box["content"]):
@@ -177,6 +182,33 @@ class LayoutTemplateFileTests(SimpleTestCase):
     def test_unknown_layout_rejected(self):
         with self.assertRaises(ValueError):
             load_page_content("nope")
+
+    def test_sticky_styles_differ_by_template(self):
+        colors = set()
+        shapes = set()
+        for key in TEMPLATE_KEYS:
+            style = load_page_content(key)["sticky_nav"]["style"]
+            colors.add(style["button_color"])
+            shapes.add(style["shape"])
+        self.assertGreaterEqual(len(colors), 8)
+        self.assertEqual(shapes, {"pill", "rounded", "square"})
+
+    def test_clean_sticky_nav_keeps_style(self):
+        page = load_page_content("yoga")
+        cleaned = clean_sticky_nav(page, {
+            "hide_from_section_id": page["sticky_nav"]["hide_from_section_id"],
+            "buttons": page["sticky_nav"]["buttons"],
+            "style": {
+                "shape": "square",
+                "button_color": "#ABCDEF",
+                "text_color": "nope",
+                "tray_color": "transparent",
+            },
+        })
+        self.assertEqual(cleaned["style"]["shape"], "square")
+        self.assertEqual(cleaned["style"]["button_color"], "#abcdef")
+        self.assertEqual(cleaned["style"]["text_color"], "#ffffff")
+        self.assertIsNone(cleaned["style"]["tray_color"])
 
     def test_sticky_nav_rejects_the_opening_section(self):
         page = load_page_content("yoga")

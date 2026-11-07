@@ -1355,6 +1355,12 @@
     }
   },
   "sticky_nav": {
+    "style": {
+      "shape": "rounded",
+      "button_color": "#1c2330",
+      "text_color": "#ffffff",
+      "tray_color": "#ffffff"
+    },
     "hide_from_section_id": 3,
     "buttons": [
       {

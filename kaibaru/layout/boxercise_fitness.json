@@ -1821,6 +1821,12 @@
     }
   },
   "sticky_nav": {
+    "style": {
+      "shape": "pill",
+      "button_color": "#121417",
+      "text_color": "#d6ff4a",
+      "tray_color": "#f4f5f1"
+    },
     "hide_from_section_id": 3,
     "buttons": [
       {
