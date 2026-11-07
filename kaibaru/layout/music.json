@@ -2257,18 +2257,21 @@
       {
         "id": "612fd2c2-38ef-5d9c-983f-c2c91e6588f6",
         "label": "問い合わせフォーム",
+        "icon": "contact",
         "kind": "section",
         "section_id": 15
       },
       {
         "id": "d5b8fd48-8e80-5b15-9038-680c7c2dbe7a",
         "label": "アクセス",
+        "icon": "access",
         "kind": "section",
         "section_id": 13
       },
       {
         "id": "a362b1be-6854-5979-af15-e5a2bac779fc",
         "label": "予約はレッスンから",
+        "icon": "schedule",
         "kind": "section",
         "section_id": 6
       }

@@ -212,6 +212,11 @@ def clean_sticky_nav(page_content, payload):
             raw_id = str(uuid.uuid4())
         seen.add(raw_id)
         item = {"id": raw_id, "label": label, "kind": kind}
+        icon = button.get("icon")
+        if icon not in (None, ""):
+            if icon not in STICKY_ICONS:
+                raise ValueError("アイコンが正しくありません。")
+            item["icon"] = icon
         if kind == "section":
             try:
                 section_id = int(button.get("section_id"))
@@ -234,6 +239,15 @@ def clean_sticky_nav(page_content, payload):
         "style": clean_sticky_style(payload.get("style")),
     }
 
+
+STICKY_ICONS = {
+    "instagram", "x", "facebook", "youtube", "tiktok", "line", "whatsapp", "website",
+    "check", "shield", "info", "award",
+    "heart", "thumbsUp", "pointRight", "smile",
+    "home", "schedule", "access", "contact", "phone", "time",
+    "join", "members", "memberCard", "teacher",
+    "payment", "cash", "login", "featured",
+}
 
 _HEX_COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
 _STICKY_SHAPES = {"pill", "rounded", "square"}

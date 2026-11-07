@@ -2302,18 +2302,21 @@
       {
         "id": "c046f10a-08ae-57ae-8c0d-dccd61d87dd7",
         "label": "問い合わせフォーム",
+        "icon": "contact",
         "kind": "section",
         "section_id": 15
       },
       {
         "id": "c0a817f1-9523-5919-8cef-894d51f09e11",
         "label": "アクセス",
+        "icon": "access",
         "kind": "section",
         "section_id": 13
       },
       {
         "id": "a47e5463-e88e-58ef-9ad0-578a24959854",
         "label": "予約はレッスンから",
+        "icon": "schedule",
         "kind": "section",
         "section_id": 7
       }

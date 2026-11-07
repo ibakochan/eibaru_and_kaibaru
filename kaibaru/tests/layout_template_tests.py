@@ -122,6 +122,9 @@ class LayoutTemplateFileTests(SimpleTestCase):
         self.assertEqual(by_label["問い合わせフォーム"]["section_id"], inquiry["id"])
         self.assertEqual(by_label["アクセス"]["section_id"], access["id"])
         self.assertEqual(by_label["予約はレッスンから"]["section_id"], schedule["id"])
+        self.assertEqual(by_label["問い合わせフォーム"]["icon"], "contact")
+        self.assertEqual(by_label["アクセス"]["icon"], "access")
+        self.assertEqual(by_label["予約はレッスンから"]["icon"], "schedule")
         style = sticky["style"]
         self.assertIn(style["shape"], {"pill", "rounded", "square"})
         self.assertRegex(style["button_color"], r"^#[0-9a-f]{6}$")
@@ -209,6 +212,17 @@ class LayoutTemplateFileTests(SimpleTestCase):
         self.assertEqual(cleaned["style"]["button_color"], "#abcdef")
         self.assertEqual(cleaned["style"]["text_color"], "#ffffff")
         self.assertIsNone(cleaned["style"]["tray_color"])
+        self.assertEqual(
+            [button["icon"] for button in cleaned["buttons"]],
+            ["contact", "access", "schedule"],
+        )
+        broken = dict(page["sticky_nav"]["buttons"][0])
+        broken["icon"] = "not-an-icon"
+        with self.assertRaises(ValueError):
+            clean_sticky_nav(page, {
+                "hide_from_section_id": page["sticky_nav"]["hide_from_section_id"],
+                "buttons": [broken],
+            })
 
     def test_sticky_nav_rejects_the_opening_section(self):
         page = load_page_content("yoga")

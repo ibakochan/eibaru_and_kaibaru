@@ -2025,18 +2025,21 @@
       {
         "id": "92f08746-06cf-5950-943c-1c6a06def88e",
         "label": "問い合わせフォーム",
+        "icon": "contact",
         "kind": "section",
         "section_id": 15
       },
       {
         "id": "190b7a68-d2ae-5b31-a572-da68f278fc5a",
         "label": "アクセス",
+        "icon": "access",
         "kind": "section",
         "section_id": 13
       },
       {
         "id": "63282c07-997f-59ae-bf9a-716e219382ca",
         "label": "予約はレッスンから",
+        "icon": "schedule",
         "kind": "section",
         "section_id": 6
       }

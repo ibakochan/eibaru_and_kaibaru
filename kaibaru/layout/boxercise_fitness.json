@@ -1832,18 +1832,21 @@
       {
         "id": "cae22189-e88a-5279-a48c-7c8c3281b643",
         "label": "問い合わせフォーム",
+        "icon": "contact",
         "kind": "section",
         "section_id": 14
       },
       {
         "id": "11e5d693-31bf-5143-adf1-268af408dd8e",
         "label": "アクセス",
+        "icon": "access",
         "kind": "section",
         "section_id": 12
       },
       {
         "id": "074006ee-7a66-5187-aa72-ea25a63eaadf",
         "label": "予約はレッスンから",
+        "icon": "schedule",
         "kind": "section",
         "section_id": 6
       }
