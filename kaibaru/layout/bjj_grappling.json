@@ -1838,6 +1838,7 @@
         "id": "b9f5741e-830a-5e48-963e-f1bd15cd8248",
         "label": "問い合わせフォーム",
         "icon": "contact",
+        "icon_color": "#2563eb",
         "kind": "section",
         "section_id": 14
       },
@@ -1845,6 +1846,7 @@
         "id": "ea6c4042-6ea3-57be-8133-c61acda29068",
         "label": "アクセス",
         "icon": "access",
+        "icon_color": "#dc2626",
         "kind": "section",
         "section_id": 12
       },
@@ -1852,6 +1854,7 @@
         "id": "eb7554fc-0507-5dcc-9e85-6b590b2b6c12",
         "label": "予約はレッスンから",
         "icon": "schedule",
+        "icon_color": "#7c3aed",
         "kind": "section",
         "section_id": 6
       }

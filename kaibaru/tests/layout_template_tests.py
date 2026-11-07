@@ -125,6 +125,9 @@ class LayoutTemplateFileTests(SimpleTestCase):
         self.assertEqual(by_label["問い合わせフォーム"]["icon"], "contact")
         self.assertEqual(by_label["アクセス"]["icon"], "access")
         self.assertEqual(by_label["予約はレッスンから"]["icon"], "schedule")
+        self.assertEqual(by_label["問い合わせフォーム"]["icon_color"], "#2563eb")
+        self.assertEqual(by_label["アクセス"]["icon_color"], "#dc2626")
+        self.assertEqual(by_label["予約はレッスンから"]["icon_color"], "#7c3aed")
         style = sticky["style"]
         self.assertIn(style["shape"], {"pill", "rounded", "square"})
         self.assertRegex(style["button_color"], r"^#[0-9a-f]{6}$")
@@ -215,6 +218,10 @@ class LayoutTemplateFileTests(SimpleTestCase):
         self.assertEqual(
             [button["icon"] for button in cleaned["buttons"]],
             ["contact", "access", "schedule"],
+        )
+        self.assertEqual(
+            [button["icon_color"] for button in cleaned["buttons"]],
+            ["#2563eb", "#dc2626", "#7c3aed"],
         )
         broken = dict(page["sticky_nav"]["buttons"][0])
         broken["icon"] = "not-an-icon"

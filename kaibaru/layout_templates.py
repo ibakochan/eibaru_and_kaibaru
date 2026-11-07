@@ -217,6 +217,9 @@ def clean_sticky_nav(page_content, payload):
             if icon not in STICKY_ICONS:
                 raise ValueError("アイコンが正しくありません。")
             item["icon"] = icon
+            icon_color = button.get("icon_color")
+            if isinstance(icon_color, str) and _HEX_COLOR.fullmatch(icon_color.strip()):
+                item["icon_color"] = icon_color.strip().lower()
         if kind == "section":
             try:
                 section_id = int(button.get("section_id"))
