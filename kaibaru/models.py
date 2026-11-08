@@ -28,7 +28,17 @@ def line_qr_upload_to(instance, filename):
 
 def club_slate_image_upload_to(instance, filename):
     club_subdomain = getattr(instance.club, "subdomain", "unknown_club")
-    return f"{club_subdomain}/slate/{filename}"  
+    return f"{club_subdomain}/slate/{filename}"
+
+
+def club_video_upload_to(instance, filename):
+    import os
+    import uuid
+    club_subdomain = getattr(instance.club, "subdomain", "unknown_club")
+    ext = os.path.splitext(filename or "")[1].lower()
+    if ext not in {".mp4", ".webm"}:
+        ext = ".mp4"
+    return f"{club_subdomain}/video/{uuid.uuid4().hex}{ext}"  
 
 
 def club_lessons_upload_to(instance, filename):
@@ -538,6 +548,15 @@ class SlateImage(models.Model):
 
     def __str__(self):
         return f"{self.club.subdomain} - Image {self.id}"
+
+
+class ClubVideo(models.Model):
+    club = models.OneToOneField(Club, on_delete=models.CASCADE, related_name="hero_video")
+    created_at = models.DateTimeField(default=timezone.now)
+    file = models.FileField(upload_to=club_video_upload_to)
+
+    def __str__(self):
+        return f"{self.club.subdomain} - video"
 
 class Member(models.Model):
     user = models.ForeignKey(CustomUser, null=True, blank=True, on_delete=models.SET_NULL, related_name="memberships")

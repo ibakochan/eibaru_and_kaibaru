@@ -3,7 +3,7 @@ from rest_framework import viewsets, serializers, status
 from rest_framework.decorators import action
 from rest_framework.viewsets import ViewSet
 from rest_framework.response import Response
-from .models import TicketGrant, TicketType, TicketPackage, Reservation, Event, EventReservation, MemberRecord, Invoice, MemberPricingAdjustment, Discount, DiscountCondition, SubscriptionItem, Member, Club, Lesson, Participation, SlateImage, JoinRequest, MembershipPlan, Subscription, ExpenseReceipt, LevelSystem
+from .models import TicketGrant, TicketType, TicketPackage, Reservation, Event, EventReservation, MemberRecord, Invoice, MemberPricingAdjustment, Discount, DiscountCondition, SubscriptionItem, Member, Club, ClubVideo, Lesson, Participation, SlateImage, JoinRequest, MembershipPlan, Subscription, ExpenseReceipt, LevelSystem
 from .manager_permissions import has_permission
 from accounts.models import CustomUser
 from django.contrib.auth import login
@@ -20,6 +20,17 @@ from .service_legacy_subscription import (
     LegacySubscriptionService,
 )
 from .club_access import MEMBERS_REQUIRE_SUBSCRIPTION, club_has_platform_subscription
+from .club_media import (
+    IMAGE_LIMIT_MESSAGE,
+    SLATE_IMAGE_LIMIT,
+    VIDEO_CONTENT_TYPES,
+    VIDEO_MAX_BYTES,
+    VIDEO_SECTION_MESSAGE,
+    VIDEO_SIZE_MESSAGE,
+    VIDEO_TYPE_MESSAGE,
+    scrub_stored_file,
+    sync_video_url,
+)
 from .service_platform_subscription import member_deletion_block_reason
 
 
@@ -1218,6 +1229,54 @@ class MembershipPlanViewSet(viewsets.ModelViewSet):
             ensure_plan_price(updated_plan, club.stripe_account_id)
 
 
+def _page_dict(club):
+    raw = club.page_content
+    if isinstance(raw, dict):
+        return raw
+    if not raw:
+        return None
+    try:
+        page = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    return page if isinstance(page, dict) else None
+
+
+def _save_page(club, page):
+    club.page_content = json.dumps(page, ensure_ascii=False)
+    club.save(update_fields=["page_content"])
+
+
+def _drop_club_file(club, field_file):
+    """Remove a stored file from the page and from cloud storage."""
+    url = ""
+    name = ""
+    try:
+        url = field_file.url
+    except Exception:
+        url = ""
+    name = getattr(field_file, "name", "") or ""
+    if name:
+        field_file.delete(save=False)
+    page = _page_dict(club)
+    if page is not None and scrub_stored_file(page, url, name):
+        _save_page(club, page)
+
+
+def _delete_club_video(club):
+    video = ClubVideo.objects.filter(club=club).first()
+    if video is None:
+        page = _page_dict(club)
+        if page is not None and sync_video_url(page, None):
+            _save_page(club, page)
+        return
+    _drop_club_file(club, video.file)
+    video.delete()
+    page = _page_dict(club)
+    if page is not None and sync_video_url(page, None):
+        _save_page(club, page)
+
+
 class SlateImageViewSet(viewsets.ModelViewSet):
     queryset = SlateImage.objects.all()
     serializer_class = SlateImageSerializer
@@ -1254,6 +1313,12 @@ class SlateImageViewSet(viewsets.ModelViewSet):
             
             serializer = self.get_serializer(existing)
             return Response(serializer.data, status=status.HTTP_200_OK)
+
+        if SlateImage.objects.filter(club_id=club_id).count() >= SLATE_IMAGE_LIMIT:
+            return Response(
+                {"detail": IMAGE_LIMIT_MESSAGE, "code": "image_limit"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
  
         serializer = self.get_serializer(
             data={
@@ -1268,6 +1333,16 @@ class SlateImageViewSet(viewsets.ModelViewSet):
             serializer.data,
             status=status.HTTP_201_CREATED,
         )
+
+    def destroy(self, request, *args, **kwargs):
+        image = SlateImage.objects.filter(pk=kwargs.get("pk")).select_related("club").first()
+        if image is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        if not has_permission(request.user, image.club, "site"):
+            return Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
+        _drop_club_file(image.club, image.image)
+        image.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 
@@ -4947,6 +5022,54 @@ class ClubViewSet(viewsets.ModelViewSet):
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response({"ok": True})
 
+    @action(detail=True, methods=["post", "delete"], url_path="section-video")
+    def section_video(self, request, pk=None):
+        club = self.get_object()
+        if not has_permission(request.user, club, "site"):
+            return Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
+
+        if request.method == "DELETE":
+            _delete_club_video(club)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        uploaded = request.FILES.get("file")
+        if uploaded is None:
+            return Response({"detail": "動画ファイルがありません。"}, status=status.HTTP_400_BAD_REQUEST)
+        if uploaded.size > VIDEO_MAX_BYTES:
+            return Response(
+                {"detail": VIDEO_SIZE_MESSAGE, "code": "video_size"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        content_type = (getattr(uploaded, "content_type", "") or "").split(";")[0].strip().lower()
+        filename = (getattr(uploaded, "name", "") or "").lower()
+        if content_type not in VIDEO_CONTENT_TYPES:
+            if filename.endswith(".mp4"):
+                content_type = "video/mp4"
+            elif filename.endswith(".webm"):
+                content_type = "video/webm"
+        if content_type not in VIDEO_CONTENT_TYPES:
+            return Response(
+                {"detail": VIDEO_TYPE_MESSAGE, "code": "video_type"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        video = ClubVideo.objects.filter(club=club).first()
+        old_name = video.file.name if video is not None and video.file else ""
+        if video is None:
+            video = ClubVideo(club=club)
+        video.file = uploaded
+        video.save()
+        if old_name and old_name != video.file.name:
+            try:
+                video.file.storage.delete(old_name)
+            except Exception:
+                logging.getLogger(__name__).exception("replaced club video was not removed from storage")
+        url = video.file.url
+        page = _page_dict(club)
+        if page is not None and sync_video_url(page, url):
+            _save_page(club, page)
+        return Response({"url": url})
+
     @action(detail=True, methods=["post"], url_path="mutate_page_section")
     def mutate_page_section(self, request, pk=None):
       with transaction.atomic():
@@ -4961,7 +5084,7 @@ class ClubViewSet(viewsets.ModelViewSet):
         section_type = request.data.get("type", "custom")
         icon = request.data.get("icon")
 
-        ALLOWED_TYPES = {"custom", "schedule", "join", "member", "teacher", "slideshow", "header", "memberplans", "event", "inquiry"}
+        ALLOWED_TYPES = {"custom", "schedule", "join", "member", "teacher", "slideshow", "header", "memberplans", "event", "inquiry", "video"}
 
         if action_type not in {"add", "remove", "edit", "add_slide", "remove_slide", "update_slide", "set_sticky_nav"}:
             return Response(
@@ -5015,6 +5138,13 @@ class ClubViewSet(viewsets.ModelViewSet):
             )
 
         # Prevent duplicate system sections
+
+        if action_type == "add" and section_type == "video":
+            if any(s.get("type") == "video" for s in section_list):
+                return Response(
+                    {"detail": VIDEO_SECTION_MESSAGE, "code": "video_section_limit"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         UNIQUE_TYPES = {"join", "member", "teacher", "header", "memberplans", "inquiry"}
         if action_type == "add" and section_type in UNIQUE_TYPES:
@@ -5110,6 +5240,10 @@ class ClubViewSet(viewsets.ModelViewSet):
                             "textAlign": "center"
                         }
                     ]
+
+            if section_type == "video":
+                video = ClubVideo.objects.filter(club=club).first()
+                new_section["video_url"] = video.file.url if video is not None and video.file else None
 
             if section_type == "event":
                 try:
@@ -5225,6 +5359,10 @@ class ClubViewSet(viewsets.ModelViewSet):
                         {"detail": "Slideshow must contain at least one slide"},
                         status=status.HTTP_400_BAD_REQUEST
                     )
+
+            if section.get("type") == "video":
+                video = ClubVideo.objects.filter(club=club).first()
+                section["video_url"] = video.file.url if video is not None and video.file else None
                     
              # ---- order update ----
             try:
@@ -5400,6 +5538,9 @@ class ClubViewSet(viewsets.ModelViewSet):
                     club=club,
                     section_id=removed_section["id"],
                 ).delete()
+
+            if removed_section.get("type") == "video":
+                _delete_club_video(club)
 
             if removed_section.get("type") == "past":
                 if Event.objects.filter(
