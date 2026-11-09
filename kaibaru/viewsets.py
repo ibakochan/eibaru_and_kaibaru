@@ -3,7 +3,7 @@ from rest_framework import viewsets, serializers, status
 from rest_framework.decorators import action
 from rest_framework.viewsets import ViewSet
 from rest_framework.response import Response
-from .models import TicketGrant, TicketType, TicketPackage, Reservation, Event, EventReservation, MemberRecord, Invoice, MemberPricingAdjustment, Discount, DiscountCondition, SubscriptionItem, Member, Club, ClubVideo, Lesson, Participation, SlateImage, JoinRequest, MembershipPlan, Subscription, ExpenseReceipt, LevelSystem
+from .models import TicketGrant, TicketType, TicketPackage, Reservation, Event, EventReservation, MemberRecord, Invoice, MemberPricingAdjustment, Discount, DiscountCondition, SubscriptionItem, Member, Club, ClubNews, ClubVideo, Lesson, Participation, SlateImage, JoinRequest, MembershipPlan, Subscription, ExpenseReceipt, LevelSystem
 from .manager_permissions import has_permission
 from accounts.models import CustomUser
 from django.contrib.auth import login
@@ -66,7 +66,7 @@ from .pricing import (
     get_effective_subscription_price,
 )
 
-from .serializers import TicketTypeSerializer, TicketPackageSerializer, ReservationSerializer, PaymentHistoryInvoiceSerializer, MemberPricingAdjustmentSerializer, DiscountConditionSerializer, DiscountSerializer, MembershipPlanSerializer, MemberSerializer, MemberRecordSerializer, ClubSerializer, LessonSerializer, ParticipationSerializer, SlateImageSerializer, JoinRequestSerializer, LevelSystemSerializer
+from .serializers import TicketTypeSerializer, TicketPackageSerializer, ReservationSerializer, PaymentHistoryInvoiceSerializer, MemberPricingAdjustmentSerializer, DiscountConditionSerializer, DiscountSerializer, MembershipPlanSerializer, MemberSerializer, MemberRecordSerializer, ClubSerializer, ClubNewsSerializer, LessonSerializer, ParticipationSerializer, SlateImageSerializer, JoinRequestSerializer, LevelSystemSerializer
 from .level_progress import copy_join_request_levels, member_levels_data, record_level_progress
 from .service_event import (
     cancel_section_event,
@@ -1275,6 +1275,59 @@ def _delete_club_video(club):
     page = _page_dict(club)
     if page is not None and sync_video_url(page, None):
         _save_page(club, page)
+
+
+class ClubNewsViewSet(viewsets.ModelViewSet):
+    queryset = ClubNews.objects.select_related("club")
+    serializer_class = ClubNewsSerializer
+
+    def get_queryset(self):
+        queryset = ClubNews.objects.select_related("club").order_by("-published_on", "-id")
+        club_id = self.request.query_params.get("club")
+        if club_id:
+            queryset = queryset.filter(club_id=club_id)
+        return queryset
+
+    def create(self, request, *args, **kwargs):
+        club = Club.objects.filter(id=request.data.get("club"), is_deleted=False).first()
+        if club is None or not has_permission(request.user, club, "site"):
+            return Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        news = self.get_object()
+        if not has_permission(request.user, news.club, "site"):
+            return Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        news = self.get_object()
+        if not has_permission(request.user, news.club, "site"):
+            return Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
+        return super().partial_update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        news = self.get_object()
+        if not has_permission(request.user, news.club, "site"):
+            return Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
+        if news.image:
+            news.image.delete(save=False)
+        news.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    def perform_update(self, serializer):
+        current = serializer.instance
+        old_name = current.image.name if current.image else ""
+        clear = self.request.data.get("clear_image") in {"1", "true", "True"}
+        updated = serializer.save()
+        if clear and not self.request.FILES.get("image") and updated.image:
+            updated.image.delete(save=True)
+            return
+        if old_name and (not updated.image or updated.image.name != old_name):
+            try:
+                current.image.storage.delete(old_name)
+            except Exception:
+                logging.getLogger(__name__).exception("replaced news image was not removed")
 
 
 class SlateImageViewSet(viewsets.ModelViewSet):
@@ -4272,6 +4325,10 @@ class ClubViewSet(viewsets.ModelViewSet):
                 "events__prices__brackets",
                 *event_lookups,
                 "slate_images",
+                Prefetch(
+                    "news_posts",
+                    queryset=ClubNews.objects.order_by("-published_on", "-id"),
+                ),
                 "level_systems__lessons",
                 Prefetch(
                     "join_requests",
@@ -5084,7 +5141,7 @@ class ClubViewSet(viewsets.ModelViewSet):
         section_type = request.data.get("type", "custom")
         icon = request.data.get("icon")
 
-        ALLOWED_TYPES = {"custom", "schedule", "join", "member", "teacher", "slideshow", "header", "memberplans", "event", "inquiry", "video"}
+        ALLOWED_TYPES = {"custom", "schedule", "join", "member", "teacher", "slideshow", "header", "memberplans", "event", "inquiry", "video", "news"}
 
         if action_type not in {"add", "remove", "edit", "add_slide", "remove_slide", "update_slide", "set_sticky_nav"}:
             return Response(
@@ -5138,6 +5195,13 @@ class ClubViewSet(viewsets.ModelViewSet):
             )
 
         # Prevent duplicate system sections
+
+        if action_type == "add" and section_type == "news":
+            if any(s.get("type") == "news" for s in section_list):
+                return Response(
+                    {"detail": "ニュースは1つまでです。", "code": "news_section_limit"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         if action_type == "add" and section_type == "video":
             if any(s.get("type") == "video" for s in section_list):

@@ -31,6 +31,16 @@ def club_slate_image_upload_to(instance, filename):
     return f"{club_subdomain}/slate/{filename}"
 
 
+def club_news_upload_to(instance, filename):
+    import os
+    import uuid
+    club_subdomain = getattr(instance.club, "subdomain", "unknown_club")
+    ext = os.path.splitext(filename or "")[1].lower()
+    if ext not in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
+        ext = ".jpg"
+    return f"{club_subdomain}/news/{uuid.uuid4().hex}{ext}"
+
+
 def club_video_upload_to(instance, filename):
     import os
     import uuid
@@ -548,6 +558,26 @@ class SlateImage(models.Model):
 
     def __str__(self):
         return f"{self.club.subdomain} - Image {self.id}"
+
+
+class ClubNews(models.Model):
+    club = models.ForeignKey(Club, on_delete=models.CASCADE, related_name="news_posts")
+    title = models.CharField(max_length=120)
+    published_on = models.DateField(default=datetime.date.today)
+    summary = models.CharField(max_length=200, blank=True)
+    body = models.TextField(blank=True)
+    image = models.ImageField(upload_to=club_news_upload_to, null=True, blank=True)
+    youtube_url = models.URLField(max_length=300, blank=True)
+    author_name = models.CharField(max_length=80, blank=True)
+    link_url = models.URLField(max_length=300, blank=True)
+    link_label = models.CharField(max_length=40, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ["-published_on", "-id"]
+
+    def __str__(self):
+        return f"{self.club.subdomain} - {self.title}"
 
 
 class ClubVideo(models.Model):

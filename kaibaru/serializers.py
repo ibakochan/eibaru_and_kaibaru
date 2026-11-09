@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import TicketType, TicketPackage, Reservation, Event, EventPrice, EventReservation, MemberRecord, MembershipPlanGroup, MemberPricingAdjustment, Discount, DiscountCondition, Member, Club, Lesson, Participation, SlateImage, JoinRequest, JoinRequestLevel, InvoiceItem, Invoice, Subscription, SubscriptionItem, LevelSystem
+from .models import TicketType, TicketPackage, Reservation, Event, EventPrice, EventReservation, MemberRecord, MembershipPlanGroup, MemberPricingAdjustment, Discount, DiscountCondition, Member, Club, ClubNews, Lesson, Participation, SlateImage, JoinRequest, JoinRequestLevel, InvoiceItem, Invoice, Subscription, SubscriptionItem, LevelSystem
 from types import SimpleNamespace
 from django.core.exceptions import ValidationError as DjangoValidationError
 
@@ -12,6 +12,7 @@ from django.utils.timezone import now
 from collections import defaultdict
 
 import json
+import re
 from django.db.models import Sum
 from datetime import date
 
@@ -2949,6 +2950,43 @@ def visible_club_events(club, request):
     return visible
 
 
+_YOUTUBE_ID = re.compile(
+    r"(?:youtu\.be/|youtube\.com/(?:watch\?v=|embed/|shorts/))([A-Za-z0-9_-]{11})"
+)
+
+
+class ClubNewsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ClubNews
+        fields = [
+            "id",
+            "club",
+            "title",
+            "published_on",
+            "summary",
+            "body",
+            "image",
+            "youtube_url",
+            "author_name",
+            "link_url",
+            "link_label",
+            "created_at",
+        ]
+        read_only_fields = ["id", "created_at"]
+
+    def validate_youtube_url(self, value):
+        text = (value or "").strip()
+        if text and not _YOUTUBE_ID.search(text):
+            raise serializers.ValidationError("YouTubeのURLを入力してください。")
+        return text
+
+    def validate_link_url(self, value):
+        return (value or "").strip()
+
+    def validate_link_label(self, value):
+        return (value or "").strip()
+
+
 class ClubSerializer(serializers.ModelSerializer):
     members = serializers.SerializerMethodField()
     lessons = LessonSerializer(many=True, read_only=True)
@@ -2961,6 +2999,7 @@ class ClubSerializer(serializers.ModelSerializer):
     frozen = serializers.SerializerMethodField()
     platform_bill = serializers.SerializerMethodField()
     slate_images = SlateImageSerializer(many=True, read_only=True)
+    news = serializers.SerializerMethodField()
     level_systems = LevelSystemSerializer(many=True, read_only=True)
     join_requests = serializers.SerializerMethodField()
     my_join_requests = serializers.SerializerMethodField()
@@ -2973,6 +3012,10 @@ class ClubSerializer(serializers.ModelSerializer):
     custom_domain = serializers.CharField(read_only=True, allow_null=True)
     custom_domain_status = serializers.CharField(read_only=True)
     custom_domain_target = serializers.SerializerMethodField()
+
+    def get_news(self, club):
+        posts = club.news_posts.all()
+        return ClubNewsSerializer(posts, many=True, context=self.context).data
 
     def get_members(self, club):
         request = self.context.get("request")
@@ -3090,6 +3133,7 @@ class ClubSerializer(serializers.ModelSerializer):
             "frozen",
             "platform_bill",
             "slate_images",
+            "news",
             "page_content",
             "membership_plans",
             "membership_plan_groups",
