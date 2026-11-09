@@ -25,7 +25,7 @@ from google.cloud import storage
 from kaibaru.example_page_images import BUCKET_NAME, LAYOUT_IMAGES, public_url
 from kaibaru.layout_templates import LAYOUT_DIR, load_page_content, template_path
 
-IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".mp4", ".webm"}
 
 
 def use_application_credentials():
@@ -45,7 +45,7 @@ def iter_image_files(directory):
         if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
     ]
     if not files:
-        raise CommandError(f"No images found in {directory}")
+        raise CommandError(f"No images or videos found in {directory}")
     return root, sorted(files)
 
 
@@ -55,6 +55,8 @@ def content_type_for(path):
         ".jpg": "image/jpeg",
         ".jpeg": "image/jpeg",
         ".webp": "image/webp",
+        ".mp4": "video/mp4",
+        ".webm": "video/webm",
     }[path.suffix.lower()]
 
 

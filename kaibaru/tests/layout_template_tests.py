@@ -25,7 +25,7 @@ EXAMPLE_PIC_PREFIX = "https://storage.googleapis.com/sitepicsforkaibaru/layouts/
 CANVAS_WIDTH = 1205
 ALLOWED_TYPES = {
     "custom", "schedule", "join", "member", "teacher",
-    "slideshow", "header", "memberplans", "inquiry",
+    "slideshow", "header", "memberplans", "inquiry", "video",
 }
 ICONS = {
     "home", "schedule", "access", "contact", "phone", "time", "join",
@@ -69,7 +69,7 @@ class LayoutTemplateFileTests(SimpleTestCase):
         self.assertEqual(len(slugs), len(set(slugs)))
 
         types = [s["type"] for s in ordered]
-        for unique in ("header", "join", "member", "teacher", "memberplans", "slideshow", "schedule", "inquiry"):
+        for unique in ("header", "join", "member", "teacher", "memberplans", "slideshow", "schedule", "inquiry", "video"):
             self.assertEqual(types.count(unique), 1, unique)
         self.assertTrue(set(types) <= ALLOWED_TYPES)
 
@@ -87,6 +87,14 @@ class LayoutTemplateFileTests(SimpleTestCase):
 
         header = next(s for s in ordered if s["type"] == "header")["header"]
         self.assertTrue(header["title"])
+
+        self.assertEqual(ordered[1]["type"], "slideshow")
+        video = ordered[2]
+        self.assertEqual(video["type"], "video")
+        self.assertEqual(video["title"], "動画")
+        self.assertFalse(video["show_in_menu"])
+        self.assertTrue(video["video_url"].startswith(EXAMPLE_PIC_PREFIX))
+        self.assertTrue(video["video_url"].endswith("/hero.mp4"))
 
         slideshow = next(s for s in ordered if s["type"] == "slideshow")
         self.assertGreaterEqual(len(slideshow["slides"]), 3)
@@ -107,10 +115,13 @@ class LayoutTemplateFileTests(SimpleTestCase):
         inquiry = next(section for section in ordered if section["type"] == "inquiry")
         self.assertEqual(inquiry["title"], "問い合わせフォーム")
         self.assertFalse(inquiry["show_in_menu"])
-        flow = [section for section in ordered if section["type"] != "header"]
+        after_hero = [
+            section for section in ordered
+            if section["type"] not in ("header", "slideshow", "video")
+        ]
         sticky = page["sticky_nav"]
-        self.assertEqual(sticky["hide_from_section_id"], flow[1]["id"])
-        self.assertNotEqual(sticky["hide_from_section_id"], flow[0]["id"])
+        self.assertEqual(sticky["hide_from_section_id"], after_hero[0]["id"])
+        self.assertNotEqual(sticky["hide_from_section_id"], ordered[1]["id"])
         labels = [button["label"] for button in sticky["buttons"]]
         self.assertEqual(
             labels,
