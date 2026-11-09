@@ -5361,8 +5361,11 @@ class ClubViewSet(viewsets.ModelViewSet):
                     )
 
             if section.get("type") == "video":
+                # A template clip lives only in the page. Leave that address
+                # alone unless this club has uploaded its own file.
                 video = ClubVideo.objects.filter(club=club).first()
-                section["video_url"] = video.file.url if video is not None and video.file else None
+                if video is not None and video.file:
+                    section["video_url"] = video.file.url
                     
              # ---- order update ----
             try:
