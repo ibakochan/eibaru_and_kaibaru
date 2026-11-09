@@ -1359,7 +1359,7 @@
       "title": "動画",
       "slug": "video",
       "type": "video",
-      "show_in_menu": false,
+      "show_in_menu": true,
       "video_url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/default/hero.mp4"
     }
   },

@@ -92,7 +92,7 @@ class LayoutTemplateFileTests(SimpleTestCase):
         video = ordered[2]
         self.assertEqual(video["type"], "video")
         self.assertEqual(video["title"], "動画")
-        self.assertFalse(video["show_in_menu"])
+        self.assertTrue(video["show_in_menu"])
         self.assertTrue(video["video_url"].startswith(EXAMPLE_PIC_PREFIX))
         self.assertTrue(video["video_url"].endswith("/hero.mp4"))
 
