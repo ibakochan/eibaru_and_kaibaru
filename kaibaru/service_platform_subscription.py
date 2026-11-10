@@ -904,7 +904,30 @@ def _apply_stripe(mutation):
         _apply_quantities(platform_sub, mutation)
         return
 
+    if mutation.type == ClubSubscriptionMutation.MutationType.SYNC_DOMAIN:
+        _apply_domain_quantity(mutation)
+        return
+
+    if mutation.type in (
+        ClubSubscriptionMutation.MutationType.SYNC_MEMBERS,
+        ClubSubscriptionMutation.MutationType.MEMBER_QUANTITY,
+    ):
+        _apply_quantities(platform_sub, mutation)
+        return
+
     _apply_quantities(platform_sub, mutation)
+
+
+def _apply_domain_quantity(mutation):
+    from .service_custom_domain import CustomDomainError, sync_custom_domain_fee
+
+    try:
+        sync_custom_domain_fee(mutation.platform_subscription.user_id)
+    except CustomDomainError:
+        logger.info(
+            "[PLATFORM SUB] domain sync has no subscription mutation=%s",
+            mutation.id,
+        )
 
 
 def _finish_checkout_mutation(mutation):
@@ -1173,6 +1196,74 @@ def resume_club_subscription(club, user):
     return {"success": True, "subscription_cancel_at_period_end": False}
 
 
+MEMBER_QUANTITY_TYPES = (
+    ClubSubscriptionMutation.MutationType.MEMBER_QUANTITY,
+    ClubSubscriptionMutation.MutationType.SYNC_MEMBERS,
+)
+DOMAIN_QUANTITY_TYPES = (
+    ClubSubscriptionMutation.MutationType.SYNC_DOMAIN,
+)
+
+
+def _open_quantity_mutation(platform_sub_id, types):
+    return ClubSubscriptionMutation.objects.filter(
+        platform_subscription_id=platform_sub_id,
+        type__in=types,
+        status__in=OPEN_STATUSES,
+    ).exists()
+
+
+def _queue_quantity_sync(platform_sub, club, mutation_type, types, delay):
+    with transaction.atomic():
+        locked = (
+            PlatformSubscription.objects
+            .select_for_update()
+            .get(id=platform_sub.id)
+        )
+        if not _open_quantity_mutation(locked.id, types):
+            ClubSubscriptionMutation.objects.create(
+                platform_subscription=locked,
+                club=club,
+                type=mutation_type,
+                status=ClubSubscriptionMutation.Status.PENDING,
+                payload={},
+            )
+    try:
+        reconcile_platform_subscription(platform_sub.id)
+    except Exception:
+        logger.exception(
+            "[PLATFORM SUB] quantity sync failed subscription=%s type=%s",
+            platform_sub.id,
+            mutation_type,
+        )
+    if _open_quantity_mutation(platform_sub.id, types):
+        delay()
+
+
+def queue_domain_sync(club):
+    platform_sub = (
+        PlatformSubscription.objects
+        .filter(user_id=club.owner_id)
+        .exclude(stripe_subscription_id__isnull=True)
+        .exclude(stripe_subscription_id="")
+        .first()
+    )
+    if not platform_sub:
+        return
+
+    def delay():
+        from .tasks import reconcile_domain_fee_mutations
+        reconcile_domain_fee_mutations.delay()
+
+    _queue_quantity_sync(
+        platform_sub,
+        club,
+        ClubSubscriptionMutation.MutationType.SYNC_DOMAIN,
+        DOMAIN_QUANTITY_TYPES,
+        delay,
+    )
+
+
 def queue_member_sync(club):
     link = (
         PlatformClub.objects
@@ -1182,36 +1273,36 @@ def queue_member_sync(club):
     )
     if not link or not link.platform_subscription.stripe_subscription_id:
         return
-    platform_sub = link.platform_subscription
-    with transaction.atomic():
-        locked = (
-            PlatformSubscription.objects
-            .select_for_update()
-            .get(id=platform_sub.id)
-        )
-        already = ClubSubscriptionMutation.objects.filter(
-            platform_subscription=locked,
-            type=ClubSubscriptionMutation.MutationType.SYNC_MEMBERS,
-            status__in=OPEN_STATUSES,
-        ).exists()
-        if not already:
-            ClubSubscriptionMutation.objects.create(
-                platform_subscription=locked,
-                club=club,
-                type=ClubSubscriptionMutation.MutationType.SYNC_MEMBERS,
-                status=ClubSubscriptionMutation.Status.PENDING,
-                payload={},
+
+    def delay():
+        from .tasks import reconcile_member_quantity_mutations
+        reconcile_member_quantity_mutations.delay()
+
+    _queue_quantity_sync(
+        link.platform_subscription,
+        club,
+        ClubSubscriptionMutation.MutationType.MEMBER_QUANTITY,
+        MEMBER_QUANTITY_TYPES,
+        delay,
+    )
+
+
+def reconcile_open_mutations_of_type(types):
+    _stripe()
+    subscription_ids = (
+        ClubSubscriptionMutation.objects
+        .filter(status__in=OPEN_STATUSES, type__in=types)
+        .values_list("platform_subscription_id", flat=True)
+        .distinct()
+    )
+    for platform_sub_id in subscription_ids:
+        try:
+            reconcile_platform_subscription(platform_sub_id)
+        except Exception:
+            logger.exception(
+                "[PLATFORM SUB] typed reconcile failed id=%s",
+                platform_sub_id,
             )
-    try:
-        reconcile_platform_subscription(platform_sub.id)
-    except PlatformBusy:
-        return
-    except Exception:
-        logger.exception(
-            "[PLATFORM SUB] member sync failed club=%s",
-            club.id,
-        )
-        return
 
 
 def handle_checkout_completed(session):
@@ -1396,10 +1487,18 @@ def _end_platform_subscription(platform_sub):
 
 def _force_end_platform_subscription(platform_sub):
     try:
-        stripe.Subscription.delete(platform_sub.stripe_subscription_id)
-    except stripe.error.InvalidRequestError:
+        with platform_subscription_lock(platform_sub.id):
+            try:
+                stripe.Subscription.delete(platform_sub.stripe_subscription_id)
+            except stripe.error.InvalidRequestError:
+                logger.info(
+                    "[PLATFORM SUB] scheduled subscription already gone id=%s",
+                    platform_sub.id,
+                )
+            _end_platform_subscription(platform_sub)
+    except PlatformBusy:
         logger.info(
-            "[PLATFORM SUB] scheduled subscription already gone id=%s",
+            "[PLATFORM SUB] skip finish, locked id=%s",
             platform_sub.id,
         )
     except Exception:
@@ -1407,12 +1506,6 @@ def _force_end_platform_subscription(platform_sub):
             "[PLATFORM SUB] failed to finish scheduled subscription id=%s",
             platform_sub.id,
         )
-        return
-    try:
-        with platform_subscription_lock(platform_sub.id):
-            _end_platform_subscription(platform_sub)
-    except PlatformBusy:
-        pass
 
 
 def delete_overdue_platform_subscriptions(today):
@@ -1442,23 +1535,27 @@ def delete_overdue_platform_subscriptions(today):
             if not club.is_deleted
         ]
         try:
-            stripe.Subscription.delete(platform_sub.stripe_subscription_id)
-        except stripe.error.InvalidRequestError:
+            with platform_subscription_lock(platform_sub.id):
+                try:
+                    stripe.Subscription.delete(platform_sub.stripe_subscription_id)
+                except stripe.error.InvalidRequestError:
+                    logger.info(
+                        "[PLATFORM SUB] overdue subscription already gone id=%s",
+                        platform_sub.id,
+                    )
+                _end_platform_subscription(platform_sub)
+        except PlatformBusy:
             logger.info(
-                "[PLATFORM SUB] overdue subscription already gone id=%s",
+                "[PLATFORM SUB] skip overdue delete, locked id=%s",
                 platform_sub.id,
             )
+            continue
         except Exception:
             logger.exception(
                 "[PLATFORM SUB] failed to delete overdue id=%s",
                 platform_sub.id,
             )
             continue
-        try:
-            with platform_subscription_lock(platform_sub.id):
-                _end_platform_subscription(platform_sub)
-        except PlatformBusy:
-            pass
         for club in clubs:
             owner = club.owner
             send_club_deleted_emails.delay({

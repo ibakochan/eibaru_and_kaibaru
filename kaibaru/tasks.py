@@ -14,7 +14,10 @@ logger = logging.getLogger(__name__)
 from .models import Participation, Club, Subscription, Invoice, MembershipPlan, PlatformClub
 from .service_instructor_pay import create_monthly_teacher_invoices
 from .service_platform_subscription import (
+    DOMAIN_QUANTITY_TYPES,
+    MEMBER_QUANTITY_TYPES,
     delete_overdue_platform_subscriptions,
+    reconcile_open_mutations_of_type,
     reconcile_open_platform_mutations,
     reconcile_platform_subscription,
 )
@@ -367,6 +370,20 @@ def reconcile_platform_subscription_mutations():
     """Safety net for platform subscription mutations. Not member plans."""
     stripe.api_key = settings.STRIPE_SECRET_KEY
     reconcile_open_platform_mutations()
+
+
+@shared_task(name="kaibaru.tasks.reconcile_domain_fee_mutations")
+def reconcile_domain_fee_mutations():
+    """Retry a domain removal whose Stripe quantity sync did not finish."""
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+    reconcile_open_mutations_of_type(DOMAIN_QUANTITY_TYPES)
+
+
+@shared_task(name="kaibaru.tasks.reconcile_member_quantity_mutations")
+def reconcile_member_quantity_mutations():
+    """Retry a member-count sync that did not finish."""
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+    reconcile_open_mutations_of_type(MEMBER_QUANTITY_TYPES)
 
 
 @shared_task

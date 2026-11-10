@@ -99,7 +99,7 @@ def apply_cash_platform_fees_for_month(year, month):
     for club_id in club_ids:
         try:
             results.append(
-                _apply_club_month(club_id, year, month, start, end)
+                _apply_club_month_locked(club_id, year, month, start, end)
             )
         except Exception:
             logger.exception(
@@ -120,6 +120,33 @@ def apply_previous_month_cash_platform_fees(today=None):
     today = today or timezone.localdate()
     year, month = previous_month(today)
     return apply_cash_platform_fees_for_month(year, month)
+
+
+def _apply_club_month_locked(club_id, year, month, start, end):
+    from .models import PlatformClub
+    from .service_platform_subscription import PlatformBusy, platform_subscription_lock
+
+    link = (
+        PlatformClub.objects
+        .filter(club_id=club_id, awaiting_checkout=False)
+        .only("platform_subscription_id")
+        .first()
+    )
+    if not link:
+        return _apply_club_month(club_id, year, month, start, end)
+    try:
+        with platform_subscription_lock(link.platform_subscription_id):
+            return _apply_club_month(club_id, year, month, start, end)
+    except PlatformBusy:
+        logger.info(
+            "[CASH PLATFORM FEE] Club=%s skipped, platform subscription locked",
+            club_id,
+        )
+        return {
+            "club_id": club_id,
+            "applied": False,
+            "reason": "locked",
+        }
 
 
 def _apply_club_month(club_id, year, month, start, end):

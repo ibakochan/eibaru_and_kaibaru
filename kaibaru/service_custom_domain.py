@@ -11,8 +11,11 @@ from django.core.mail import EmailMessage
 
 from .models import Club, PlatformClub, PlatformSubscription
 from .service_platform_subscription import (
+    PlatformBusy,
     apply_quantity_changes,
+    platform_subscription_lock,
     quantity_change_key,
+    queue_domain_sync,
     split_quantity_changes,
 )
 
@@ -93,13 +96,7 @@ def clear_domain(club):
         "scheduled_for_domain_cert",
     ])
     _bump_domain_fee_generation(owner_id)
-    try:
-        sync_custom_domain_fee(owner_id)
-    except CustomDomainError:
-        logger.exception(
-            "custom domain fee sync failed after clear club=%s",
-            club.pk,
-        )
+    queue_domain_sync(club)
 
 
 def _addresses(domain):
@@ -332,8 +329,20 @@ def publish_domain(club):
             club.save(update_fields=["scheduled_for_domain_cert"])
         return domain
     issue_custom_certificate(domain)
+    subscription_id = _platform_subscription_id(club.owner_id, club)
+    platform_sub = None
+    if subscription_id:
+        platform_sub = PlatformSubscription.objects.filter(
+            stripe_subscription_id=subscription_id
+        ).first()
     try:
-        sync_custom_domain_fee(club.owner_id, club, include_club_id=club.pk)
+        if platform_sub:
+            with platform_subscription_lock(platform_sub.id):
+                sync_custom_domain_fee(club.owner_id, club, include_club_id=club.pk)
+        else:
+            sync_custom_domain_fee(club.owner_id, club, include_club_id=club.pk)
+    except PlatformBusy:
+        raise CustomDomainError("処理中です。しばらくしてから再度お試しください。")
     except CustomDomainError:
         raise
     except stripe.error.StripeError as exc:

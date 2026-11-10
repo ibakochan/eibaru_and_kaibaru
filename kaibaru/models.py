@@ -361,6 +361,8 @@ class ClubSubscriptionMutation(models.Model):
         CANCEL_SUBSCRIPTION = "cancel_subscription", "Cancel subscription"
         RESUME_SUBSCRIPTION = "resume_subscription", "Resume subscription"
         SYNC_MEMBERS = "sync_members", "Sync members"
+        MEMBER_QUANTITY = "member_quantity", "Member quantity"
+        SYNC_DOMAIN = "sync_domain", "Sync domain"
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
