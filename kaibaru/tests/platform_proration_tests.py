@@ -1,6 +1,7 @@
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, override_settings
 
 from kaibaru.service_platform_subscription import (
+    bucket_proration_lines,
     quantity_change_key,
     split_quantity_changes,
 )
@@ -57,3 +58,49 @@ class QuantityProrationSplitTests(SimpleTestCase):
         self.assertEqual(first, second)
         self.assertNotEqual(first, other)
         self.assertLessEqual(len(first), 255)
+
+
+@override_settings(
+    STRIPE_BASE_PRICE_ID="price_base",
+    STRIPE_BASE_PRICE_ID_REDUCED="price_extra",
+    STRIPE_MEMBER_PRICE_ID="price_member",
+    STRIPE_MEMBER_PRICE_ID_REDUCED="price_member_reduced",
+    STRIPE_CUSTOM_DOMAIN_PRICE_ID="price_domain",
+    STRIPE_CUSTOM_DOMAIN_EXTRA_PRICE_ID="price_domain_extra",
+)
+class PendingProrationLineTests(SimpleTestCase):
+    def test_positive_prorations_are_split_by_price(self):
+        lines = [
+            {"proration": True, "amount": 745, "price": {"id": "price_extra"}},
+            {"proration": True, "amount": 40, "price": "price_member"},
+            {"proration": True, "amount": 250, "price": {"id": "price_domain"}},
+            {"proration": False, "amount": 2980, "price": {"id": "price_base"}},
+            {"proration": True, "amount": -100, "price": {"id": "price_member"}},
+            {
+                "amount": 20,
+                "pricing": {"price_details": {"price": "price_member_reduced"}},
+                "parent": {"subscription_item_details": {"proration": True}},
+            },
+        ]
+        self.assertEqual(
+            bucket_proration_lines(lines),
+            {
+                "prorated_clubs_yen": 745,
+                "prorated_domains_yen": 250,
+                "prorated_members_yen": 60,
+                "prorated_yen": 1055,
+            },
+        )
+
+    def test_no_proration_lines_are_zero(self):
+        self.assertEqual(
+            bucket_proration_lines([
+                {"proration": False, "amount": 2980, "price": {"id": "price_base"}},
+            ]),
+            {
+                "prorated_clubs_yen": 0,
+                "prorated_domains_yen": 0,
+                "prorated_members_yen": 0,
+                "prorated_yen": 0,
+            },
+        )

@@ -259,6 +259,114 @@ def _domain_fee_fields(user):
     }
 
 
+def _invoice_line_price_id(line):
+    price = line.get("price")
+    if isinstance(price, dict):
+        return price.get("id") or ""
+    if isinstance(price, str):
+        return price
+    details = (line.get("pricing") or {}).get("price_details") or {}
+    if details.get("price"):
+        return details["price"]
+    parent = line.get("parent") or {}
+    for key in ("subscription_item_details", "invoice_item_details"):
+        nested = (parent.get(key) or {}).get("price")
+        if isinstance(nested, dict):
+            return nested.get("id") or ""
+        if isinstance(nested, str):
+            return nested
+    return ""
+
+
+def _invoice_line_is_proration(line):
+    if line.get("proration"):
+        return True
+    parent = line.get("parent") or {}
+    for key in ("subscription_item_details", "invoice_item_details"):
+        if (parent.get(key) or {}).get("proration"):
+            return True
+    return False
+
+
+def bucket_proration_lines(lines):
+    """Sum positive day-rate lines already waiting on the next invoice.
+
+    Recurring lines and credits are left out. Decreases are not credited,
+    so a negative proration is not part of the next bill.
+    """
+    clubs = 0
+    domains = 0
+    members = 0
+    club_prices = {
+        settings.STRIPE_BASE_PRICE_ID,
+        settings.STRIPE_BASE_PRICE_ID_REDUCED,
+    }
+    member_prices = {
+        settings.STRIPE_MEMBER_PRICE_ID,
+        settings.STRIPE_MEMBER_PRICE_ID_REDUCED,
+    }
+    domain_prices = {
+        settings.STRIPE_CUSTOM_DOMAIN_PRICE_ID,
+        settings.STRIPE_CUSTOM_DOMAIN_EXTRA_PRICE_ID,
+    }
+    for line in lines or []:
+        if not _invoice_line_is_proration(line):
+            continue
+        try:
+            amount = int(line.get("amount") or 0)
+        except (TypeError, ValueError):
+            continue
+        if amount <= 0:
+            continue
+        price_id = _invoice_line_price_id(line)
+        if price_id in club_prices:
+            clubs += amount
+        elif price_id in member_prices:
+            members += amount
+        elif price_id in domain_prices:
+            domains += amount
+    return {
+        "prorated_clubs_yen": clubs,
+        "prorated_domains_yen": domains,
+        "prorated_members_yen": members,
+        "prorated_yen": clubs + domains + members,
+    }
+
+
+def _preview_invoice_lines(invoice):
+    lines = invoice.get("lines") if hasattr(invoice, "get") else None
+    if lines is None:
+        return []
+    if getattr(lines, "has_more", False) and hasattr(lines, "auto_paging_iter"):
+        return list(lines.auto_paging_iter())
+    data = lines.get("data") if hasattr(lines, "get") else None
+    return list(data or [])
+
+
+def pending_platform_prorations(platform_sub):
+    """Day-rate amounts Stripe will add to this owner's next invoice."""
+    empty = bucket_proration_lines([])
+    if (
+        not platform_sub
+        or not platform_sub.stripe_subscription_id
+        or not platform_sub.stripe_customer_id
+    ):
+        return empty
+    _stripe()
+    try:
+        preview = stripe.Invoice.create_preview(
+            customer=platform_sub.stripe_customer_id,
+            subscription=platform_sub.stripe_subscription_id,
+        )
+    except Exception:
+        logger.exception(
+            "[PLATFORM SUB] proration preview failed id=%s",
+            platform_sub.id,
+        )
+        return empty
+    return bucket_proration_lines(_preview_invoice_lines(preview))
+
+
 def estimate_platform_bill_for_owner(user):
     """Next-cycle Kaibaru fee across every covered club under this owner."""
     from .service_cash_platform_fee import estimate_cash_platform_fees_for_clubs
@@ -373,7 +481,13 @@ def platform_billing_detail_for_owner(user):
             "clubs": [],
         }
 
-    _platform_sub, clubs, cash_club_ids, use_current = _owner_billing_scope(user)
+    platform_sub, clubs, cash_club_ids, use_current = _owner_billing_scope(user)
+    prorations = pending_platform_prorations(platform_sub)
+    bill = {
+        **bill,
+        **prorations,
+        "total_yen": bill["total_yen"] + prorations["prorated_yen"],
+    }
     members = (
         Member.objects.filter(club__in=clubs)
         .select_related("club")
