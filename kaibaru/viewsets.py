@@ -22,6 +22,7 @@ from .service_legacy_subscription import (
 from .club_access import MEMBERS_REQUIRE_SUBSCRIPTION, club_has_platform_subscription
 from .club_media import (
     IMAGE_LIMIT_MESSAGE,
+    NEWS_KEEP,
     SLATE_IMAGE_LIMIT,
     VIDEO_CONTENT_TYPES,
     VIDEO_MAX_BYTES,
@@ -1277,6 +1278,15 @@ def _delete_club_video(club):
         _save_page(club, page)
 
 
+def _delete_news_post(news):
+    if news.image:
+        try:
+            news.image.delete(save=False)
+        except Exception:
+            logging.getLogger(__name__).exception("news image was not removed")
+    news.delete()
+
+
 class ClubNewsViewSet(viewsets.ModelViewSet):
     queryset = ClubNews.objects.select_related("club")
     serializer_class = ClubNewsSerializer
@@ -1294,6 +1304,21 @@ class ClubNewsViewSet(viewsets.ModelViewSet):
             return Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
         return super().create(request, *args, **kwargs)
 
+    def perform_create(self, serializer):
+        club = serializer.validated_data["club"]
+        with transaction.atomic():
+            Club.objects.select_for_update().get(pk=club.pk)
+            news = serializer.save()
+            existing = (
+                ClubNews.objects.filter(club=news.club)
+                .exclude(pk=news.pk)
+                .order_by("published_on", "id")
+            )
+            overflow = existing.count() - (NEWS_KEEP - 1)
+            if overflow > 0:
+                for old in existing[:overflow]:
+                    _delete_news_post(old)
+
     def update(self, request, *args, **kwargs):
         news = self.get_object()
         if not has_permission(request.user, news.club, "site"):
@@ -1310,9 +1335,7 @@ class ClubNewsViewSet(viewsets.ModelViewSet):
         news = self.get_object()
         if not has_permission(request.user, news.club, "site"):
             return Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
-        if news.image:
-            news.image.delete(save=False)
-        news.delete()
+        _delete_news_post(news)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     def perform_update(self, serializer):

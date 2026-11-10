@@ -1,6 +1,8 @@
 from django.test import SimpleTestCase
 
-from kaibaru.club_media import scrub_stored_file, sync_video_url
+from types import SimpleNamespace
+
+from kaibaru.club_media import IMAGE_MAX_BYTES, scrub_stored_file, sync_video_url, uploaded_image_too_large
 
 
 class ClubMediaPageTests(SimpleTestCase):
@@ -37,3 +39,13 @@ class ClubMediaPageTests(SimpleTestCase):
         self.assertFalse(sync_video_url(page, "https://cdn.example/video.mp4"))
         self.assertTrue(sync_video_url(page, None))
         self.assertIsNone(page["sections"]["2"]["video_url"])
+
+    def test_pictures_over_five_megabytes_are_rejected(self):
+        big = SimpleNamespace(size=IMAGE_MAX_BYTES + 1, content_type="image/jpeg", name="photo.jpg")
+        exact = SimpleNamespace(size=IMAGE_MAX_BYTES, content_type="image/png", name="photo.png")
+        video = SimpleNamespace(size=IMAGE_MAX_BYTES + 1, content_type="video/mp4", name="clip.mp4")
+        unnamed = SimpleNamespace(size=IMAGE_MAX_BYTES + 1, content_type="", name="scan.HEIC")
+        self.assertTrue(uploaded_image_too_large(big))
+        self.assertFalse(uploaded_image_too_large(exact))
+        self.assertFalse(uploaded_image_too_large(video))
+        self.assertTrue(uploaded_image_too_large(unnamed))

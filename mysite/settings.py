@@ -80,6 +80,7 @@ MIDDLEWARE = [
     'django.contrib.sessions.middleware.SessionMiddleware',
     
     'django.middleware.common.CommonMiddleware',
+    'kaibaru.club_media.ImageSizeLimitMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     
     'django.contrib.auth.middleware.AuthenticationMiddleware',
