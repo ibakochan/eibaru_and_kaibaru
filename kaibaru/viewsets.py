@@ -4853,6 +4853,30 @@ class ClubViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        if not request.user.is_authenticated:
+            return Response({"error": "ログインしてください。"}, status=status.HTTP_401_UNAUTHORIZED)
+
+        unpaid = (
+            Club.objects.filter(owner=request.user)
+            .filter(Q(last_paid_invoice_id__isnull=True) | Q(last_paid_invoice_id=""))
+            .filter(Q(stripe_subscription_id__isnull=True) | Q(stripe_subscription_id=""))
+            .order_by("id")
+            .first()
+        )
+        if unpaid is not None:
+            return Response(
+                {
+                    "code": "unpaid_club",
+                    "error": (
+                        "サブスクリプション未加入のクラブがすでにあります。"
+                        "まずはそちらを整えてください。"
+                        "クラブを増やしたい場合は、先にそのクラブでサブスクリプションに登録してください。"
+                    ),
+                    "subdomain": unpaid.subdomain,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         if not subdomain:
             return Response({"error": "サブドメインは必須項目です。"}, status=status.HTTP_400_BAD_REQUEST)
 
