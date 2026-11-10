@@ -9,6 +9,7 @@
       "slug": "header",
       "type": "header",
       "header": {
+        "logo": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/yoga/logo.jpg",
         "logoHeight": 56,
         "title": "〇〇ヨガスタジオ",
         "subtitle": "心と体をととのえる、やさしいヨガの時間。",

@@ -9,6 +9,7 @@
       "slug": "header",
       "type": "header",
       "header": {
+        "logo": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/eikaiwa/logo.jpg",
         "logoHeight": 56,
         "title": "〇〇英会話スクール",
         "subtitle": "話せる楽しさ、世界が広がる。",

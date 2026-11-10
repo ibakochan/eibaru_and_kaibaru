@@ -9,6 +9,7 @@
       "slug": "header",
       "type": "header",
       "header": {
+        "logo": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/karate/logo.jpg",
         "logoHeight": 56,
         "title": "〇〇空手道場",
         "subtitle": "礼に始まり、礼に終わる。心技体を磨く。",

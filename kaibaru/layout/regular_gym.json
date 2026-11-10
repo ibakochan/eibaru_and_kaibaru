@@ -9,6 +9,7 @@
       "slug": "header",
       "type": "header",
       "header": {
+        "logo": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/gym/logo.jpg",
         "logoHeight": 56,
         "title": "〇〇ジム",
         "subtitle": "トレーニングを、もっと身近に。",

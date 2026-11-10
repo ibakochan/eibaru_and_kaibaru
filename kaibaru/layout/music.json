@@ -9,6 +9,7 @@
       "slug": "header",
       "type": "header",
       "header": {
+        "logo": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/music/logo.jpg",
         "logoHeight": 56,
         "title": "〇〇音楽教室",
         "subtitle": "音楽のある毎日を、あなたに。",

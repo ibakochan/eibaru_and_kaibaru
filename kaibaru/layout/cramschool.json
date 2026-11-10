@@ -9,6 +9,7 @@
       "slug": "header",
       "type": "header",
       "header": {
+        "logo": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/cram/logo.jpg",
         "logoHeight": 56,
         "title": "〇〇学習塾",
         "subtitle": "わかる喜びが、次の一歩になる。",

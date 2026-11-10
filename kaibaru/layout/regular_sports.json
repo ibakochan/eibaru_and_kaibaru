@@ -9,6 +9,7 @@
       "slug": "header",
       "type": "header",
       "header": {
+        "logo": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/sports/logo.jpg",
         "logoHeight": 56,
         "title": "〇〇スポーツクラブ",
         "subtitle": "仲間と汗を流し、スポーツで成長する。",

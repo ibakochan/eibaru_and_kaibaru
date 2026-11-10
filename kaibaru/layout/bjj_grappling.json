@@ -9,6 +9,7 @@
       "slug": "header",
       "type": "header",
       "header": {
+        "logo": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/bjj/logo.jpg",
         "logoHeight": 56,
         "title": "〇〇柔術アカデミー",
         "subtitle": "寝技の奥深さを、すべての人に。",

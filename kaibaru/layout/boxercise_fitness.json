@@ -9,6 +9,7 @@
       "slug": "header",
       "type": "header",
       "header": {
+        "logo": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/fitness/logo.jpg",
         "logoHeight": 56,
         "title": "〇〇フィットネス",
         "subtitle": "楽しく動いて、きれいに変わる。",

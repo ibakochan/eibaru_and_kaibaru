@@ -9,6 +9,7 @@
       "slug": "header",
       "type": "header",
       "header": {
+        "logo": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/default/logo.jpg",
         "logoHeight": 56,
         "title": "〇〇クラブ",
         "subtitle": "あなたの毎日を、もっと楽しく。",

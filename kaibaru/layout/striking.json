@@ -9,6 +9,7 @@
       "slug": "header",
       "type": "header",
       "header": {
+        "logo": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/striking/logo.jpg",
         "logoHeight": 56,
         "title": "〇〇ボクシングジム",
         "subtitle": "打って、鍛えて、強くなる。",

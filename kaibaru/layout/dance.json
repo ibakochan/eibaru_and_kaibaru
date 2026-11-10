@@ -9,6 +9,7 @@
       "slug": "header",
       "type": "header",
       "header": {
+        "logo": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/dance/logo.jpg",
         "logoHeight": 56,
         "title": "〇〇ダンススタジオ",
         "subtitle": "踊ることは、自由になること。",

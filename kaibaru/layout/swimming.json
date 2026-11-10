@@ -9,6 +9,7 @@
       "slug": "header",
       "type": "header",
       "header": {
+        "logo": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/swimming/logo.jpg",
         "logoHeight": 56,
         "title": "〇〇スイミングスクール",
         "subtitle": "泳ぐ楽しさを、すべての人に。",
