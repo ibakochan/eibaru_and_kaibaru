@@ -5,6 +5,9 @@ The 2,980 price stays at quantity 1 while any club remains. Each extra
 club is one quantity of the 1,490 price. Member headcount is pooled:
 the first 100 at 100 yen, the rest at 50 yen. One live custom domain
 is 500 yen, and each further live domain is 250 yen.
+
+A higher quantity is prorated for the days left in the period and that
+line is added to the next invoice. A lower quantity is not credited.
 """
 
 import logging
@@ -770,6 +773,70 @@ def _apply_local(mutation):
     mutation.save(update_fields=["local_state_applied"])
 
 
+def split_quantity_changes(existing, price_ids, desired):
+    """Split a quantity update into raises and cuts.
+
+    The target quantity is absolute. A price that already matches is
+    omitted, so repeating the same update does not create another
+    proration. A new price counts as a raise from zero.
+    """
+    increases = []
+    decreases = []
+    for price_id in price_ids:
+        target = int(desired.get(price_id, 0) or 0)
+        item = existing.get(price_id)
+        current = int(item["quantity"]) if item else 0
+        if target == current:
+            continue
+        if target > current:
+            if item:
+                increases.append({"id": item["id"], "quantity": target})
+            else:
+                increases.append({"price": price_id, "quantity": target})
+            continue
+        if not item:
+            continue
+        if target <= 0:
+            decreases.append({"id": item["id"], "deleted": True})
+        else:
+            decreases.append({"id": item["id"], "quantity": target})
+    return increases, decreases
+
+
+def quantity_change_key(prefix, changes):
+    parts = []
+    for change in changes:
+        if change.get("deleted"):
+            parts.append(f"del-{change['id']}")
+        elif "id" in change:
+            parts.append(f"{change['id']}-to-{change['quantity']}")
+        else:
+            parts.append(f"new-{change['price']}-to-{change['quantity']}")
+    return f"{prefix}-{'-'.join(parts)}"[:255]
+
+
+def apply_quantity_changes(subscription_id, increases, decreases, *, up_key, down_key):
+    """Raise quantities onto the next invoice. Cuts are not credited.
+
+    Each call is one Stripe request with its own idempotency key, so a
+    retry of the same change does not add a second proration line.
+    """
+    if decreases:
+        stripe.Subscription.modify(
+            subscription_id,
+            items=decreases,
+            proration_behavior="none",
+            idempotency_key=down_key,
+        )
+    if increases:
+        stripe.Subscription.modify(
+            subscription_id,
+            items=increases,
+            proration_behavior="create_prorations",
+            idempotency_key=up_key,
+        )
+
+
 def _apply_quantities(platform_sub, mutation):
     if not platform_sub.stripe_subscription_id:
         raise _Wait()
@@ -781,32 +848,16 @@ def _apply_quantities(platform_sub, mutation):
         _price_id_of(item): item
         for item in stripe_sub["items"]["data"]
     }
-    changes = []
-    for price_id in _price_ids():
-        quantity = desired.get(price_id, 0)
-        item = existing.get(price_id)
-        if quantity <= 0:
-            if item:
-                changes.append({"id": item["id"], "deleted": True})
-            continue
-        if item:
-            if item["quantity"] != quantity:
-                changes.append({"id": item["id"], "quantity": quantity})
-        else:
-            changes.append({"price": price_id, "quantity": quantity})
-    if not changes:
+    increases, decreases = split_quantity_changes(existing, _price_ids(), desired)
+    if not increases and not decreases:
         return
-    stripe.Subscription.modify(
+    apply_quantity_changes(
         platform_sub.stripe_subscription_id,
-        items=changes,
-        proration_behavior="none",
-        idempotency_key=_quantity_key(mutation, desired),
+        increases,
+        decreases,
+        up_key=quantity_change_key(f"platform-mut-{mutation.id}-up", increases),
+        down_key=quantity_change_key(f"platform-mut-{mutation.id}-down", decreases),
     )
-
-
-def _quantity_key(mutation, desired):
-    parts = [f"{price_id}-{desired[price_id]}" for price_id in sorted(desired)]
-    return f"platform-mut-{mutation.id}-{'-'.join(parts)}"[:255]
 
 
 def _set_cancel_flag(platform_sub, mutation, cancel):

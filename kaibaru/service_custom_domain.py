@@ -2,12 +2,19 @@ import logging
 import re
 import socket
 import subprocess
+import uuid
 
 import stripe
 from django.conf import settings
+from django.core.cache import cache
 from django.core.mail import EmailMessage
 
 from .models import Club, PlatformClub, PlatformSubscription
+from .service_platform_subscription import (
+    apply_quantity_changes,
+    quantity_change_key,
+    split_quantity_changes,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +78,7 @@ def assign_domain(club, value):
         "custom_domain_status",
         "scheduled_for_domain_cert",
     ])
+    _bump_domain_fee_generation(club.owner_id)
     return domain
 
 
@@ -84,6 +92,7 @@ def clear_domain(club):
         "custom_domain_status",
         "scheduled_for_domain_cert",
     ])
+    _bump_domain_fee_generation(owner_id)
     try:
         sync_custom_domain_fee(owner_id)
     except CustomDomainError:
@@ -233,12 +242,40 @@ def _live_domain_count(owner_id, include_club_id=None):
     return len(ids)
 
 
+def _domain_fee_generation_key(owner_id):
+    return f"domain-fee-gen-{owner_id}"
+
+
+def _bump_domain_fee_generation(owner_id):
+    """New token for a new domain save or removal.
+
+    Publish retries keep this token, so they reuse one Stripe
+    idempotency key. Saving again replaces it, so a later add is
+    not treated as a replay of the previous one.
+    """
+    cache.set(_domain_fee_generation_key(owner_id), uuid.uuid4().hex, timeout=60 * 60 * 24)
+
+
+def _domain_fee_generation(owner_id):
+    key = _domain_fee_generation_key(owner_id)
+    existing = cache.get(key)
+    if existing:
+        return existing
+    token = uuid.uuid4().hex
+    if cache.add(key, token, timeout=60 * 60 * 24):
+        return token
+    return cache.get(key) or token
+
+
 def sync_custom_domain_fee(owner_id, club=None, *, include_club_id=None):
     """
     Set the owner's domain items to the number of live domains.
     The first domain uses the full price. Each domain after that
-    is one quantity on the secondary price. Quantity is written
-    as the expected total, so a retry does not add another item.
+    is one quantity on the secondary price. A higher quantity is
+    prorated onto the next invoice. A lower one is not credited.
+    Quantity is written as the expected total, and the idempotency
+    key is stable until the domain is saved again, so a retry does
+    not add another proration.
     """
     subscription_id = _platform_subscription_id(owner_id, club)
     if not subscription_id:
@@ -265,28 +302,24 @@ def sync_custom_domain_fee(owner_id, club=None, *, include_club_id=None):
             extras.append(item)
         else:
             existing[price_id] = item
-    changes = []
-    for price_id in prices:
-        quantity = desired.get(price_id, 0)
-        item = existing.get(price_id)
-        if quantity <= 0:
-            if item:
-                changes.append({"id": item["id"], "deleted": True})
-            continue
-        if item:
-            if item["quantity"] != quantity:
-                changes.append({"id": item["id"], "quantity": quantity})
-        else:
-            changes.append({"price": price_id, "quantity": quantity})
+    increases, decreases = split_quantity_changes(existing, prices, desired)
     for extra in extras:
-        changes.append({"id": extra["id"], "deleted": True})
-    if not changes:
+        decreases.append({"id": extra["id"], "deleted": True})
+    if not increases and not decreases:
         return
-    stripe.Subscription.modify(
+    generation = _domain_fee_generation(owner_id)
+    apply_quantity_changes(
         subscription_id,
-        items=changes,
-        proration_behavior="none",
-        idempotency_key=f"domain-fee-{subscription_id}-{count}"[:255],
+        increases,
+        decreases,
+        up_key=quantity_change_key(
+            f"domain-fee-{subscription_id}-{generation}-up",
+            increases,
+        ),
+        down_key=quantity_change_key(
+            f"domain-fee-{subscription_id}-{generation}-down",
+            decreases,
+        ),
     )
 
 
