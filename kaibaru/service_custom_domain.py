@@ -60,7 +60,35 @@ def normalize_domain(value):
     return raw
 
 
+def club_can_save_domain(club):
+    """A domain can be saved only while this club's subscription is still continuing."""
+    link = (
+        PlatformClub.objects
+        .filter(club=club)
+        .select_related("platform_subscription")
+        .first()
+    )
+    if link:
+        platform = link.platform_subscription
+        subscribed = (
+            platform.status in ("active", "trialing")
+            and bool(platform.stripe_subscription_id)
+            and not link.awaiting_checkout
+        )
+        ending = platform.cancel_at_period_end or link.pending_removal
+        return subscribed and not ending
+    return bool(
+        club.subscription_active
+        and club.stripe_subscription_id
+        and not club.subscription_cancel_at_period_end
+    )
+
+
 def assign_domain(club, value):
+    if not club_can_save_domain(club):
+        raise CustomDomainError(
+            "独自ドメインは、解約予約のない契約中のクラブだけ保存できます。"
+        )
     domain = normalize_domain(value)
     other = Club.all_objects.filter(custom_domain=domain).exclude(pk=club.pk).first()
     if other and not other.is_deleted:

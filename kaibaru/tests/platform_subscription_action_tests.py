@@ -24,7 +24,7 @@ from kaibaru.models import (
     Subscription,
     SubscriptionItem,
 )
-from kaibaru.service_custom_domain import _live_domain_count
+from kaibaru.service_custom_domain import _live_domain_count, assign_domain, CustomDomainError
 from kaibaru.service_deleted_club import finish_deleted_clubs
 from kaibaru.service_platform_subscription import (
     REMOVAL_CLUB,
@@ -141,6 +141,22 @@ class PlatformSubscriptionActionTests(TestCase):
         )
         self.link_club(leaving, pending_removal=True, removal_kind=REMOVAL_CLUB)
         self.assertEqual(_live_domain_count(self.owner.id), 1)
+
+    def test_domain_save_requires_a_continuing_subscription(self):
+        self.platform.status = "canceled"
+        self.platform.save(update_fields=["status"])
+        with self.assertRaises(CustomDomainError):
+            assign_domain(self.club, "new.example.com")
+        self.platform.status = "active"
+        self.platform.save(update_fields=["status"])
+        assign_domain(self.club, "new.example.com")
+        self.club.refresh_from_db()
+        self.assertEqual(self.club.custom_domain, "new.example.com")
+        self.link.pending_removal = True
+        self.link.removal_kind = REMOVAL_CLUB
+        self.link.save(update_fields=["pending_removal", "removal_kind"])
+        with self.assertRaises(CustomDomainError):
+            assign_domain(self.club, "later.example.com")
 
     def test_renewal_deletes_only_a_club_scheduled_on_its_own(self):
         scheduled = self.make_club("scheduledclub")
@@ -263,7 +279,7 @@ class PlatformSubscriptionActionTests(TestCase):
         video.save()
         with patch("storages.backends.gcloud.GoogleCloudStorage.delete") as delete:
             finish_deleted_clubs()
-        deleted_names = {call.args[1] for call in delete.call_args_list}
+        deleted_names = {call.args[0] for call in delete.call_args_list}
         self.assertIn("platformclub/pic.jpg", deleted_names)
         self.assertIn("platformclub/slate/a.jpg", deleted_names)
         self.assertIn("platformclub/video/a.mp4", deleted_names)
