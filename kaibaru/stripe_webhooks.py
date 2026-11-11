@@ -1928,5 +1928,7 @@ def stripe_platform_webhook(request):
             club.is_deleted = True
             club.deleted_at = timezone.localtime().date()
             club.save()
+            from .service_deleted_club import queue_deleted_club_cleanup
+            queue_deleted_club_cleanup(club)
 
     return webhook_ok(event_record) 

@@ -386,6 +386,14 @@ def reconcile_member_quantity_mutations():
     reconcile_open_mutations_of_type(MEMBER_QUANTITY_TYPES)
 
 
+@shared_task(name="kaibaru.tasks.cleanup_deleted_clubs")
+def cleanup_deleted_clubs():
+    """Unsubscribe, delete members, and remove the domain of a closed club."""
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+    from .service_deleted_club import finish_deleted_clubs
+    finish_deleted_clubs()
+
+
 @shared_task
 def reconcile_stripe_subscriptions():
     """
@@ -471,6 +479,8 @@ def reconcile_stripe_subscriptions():
                         club.is_deleted = True
                         club.deleted_at = today
                         club.save()
+                        from .service_deleted_club import queue_deleted_club_cleanup
+                        queue_deleted_club_cleanup(club)
                     else:
                         club.subscription_active = False
                         club.save()
@@ -548,6 +558,8 @@ def reconcile_stripe_subscriptions():
                         club.is_deleted = True
                         club.deleted_at = today
                         club.save()
+                        from .service_deleted_club import queue_deleted_club_cleanup
+                        queue_deleted_club_cleanup(club)
 
         except stripe.error.InvalidRequestError as e:
             logger.error(

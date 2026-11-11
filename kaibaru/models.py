@@ -363,6 +363,7 @@ class ClubSubscriptionMutation(models.Model):
         SYNC_MEMBERS = "sync_members", "Sync members"
         MEMBER_QUANTITY = "member_quantity", "Member quantity"
         SYNC_DOMAIN = "sync_domain", "Sync domain"
+        DELETE_CLUB = "delete_club", "Delete club"
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"

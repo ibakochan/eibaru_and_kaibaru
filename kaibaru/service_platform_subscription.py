@@ -242,6 +242,22 @@ def _stripe_take_yen(club_ids, cash_fees):
     return kaibaru_stripe_application_fee_yen(club_ids, year, month)
 
 
+def clubs_pending_removal_ids(owner_id):
+    """Clubs whose platform fee is already scheduled to end.
+
+    They stay usable until the period ends, but the next invoice should
+    not include their members or their domain.
+    """
+    if not owner_id:
+        return set()
+    return set(
+        PlatformClub.objects.filter(
+            pending_removal=True,
+            platform_subscription__user_id=owner_id,
+        ).values_list("club_id", flat=True)
+    )
+
+
 def _domain_fee_fields(user):
     """Live custom domains on this owner's clubs. Pending domains are not billed."""
     count = 0
@@ -249,6 +265,8 @@ def _domain_fee_fields(user):
         count = Club.objects.filter(
             owner_id=user.id,
             custom_domain_status="active",
+        ).exclude(
+            id__in=clubs_pending_removal_ids(user.id),
         ).count()
     extra = max(count - 1, 0)
     return {
@@ -568,6 +586,11 @@ def platform_subscription_lock(subscription_id, timeout=300):
     return _Lock()
 
 
+def _queue_deleted_club_cleanup(club):
+    from .service_deleted_club import queue_deleted_club_cleanup
+    queue_deleted_club_cleanup(club)
+
+
 def _stripe():
     stripe.api_key = settings.STRIPE_SECRET_KEY
 
@@ -651,6 +674,7 @@ def _links(platform_sub):
 
 
 def _is_covered(link, club):
+    """Clubs scheduled for deletion are left out of the next invoice."""
     return (
         not link.awaiting_checkout
         and not link.pending_removal
@@ -755,6 +779,8 @@ def _assert_can_start(platform_sub, mutation_type, club):
         raise PlatformActionError(PAYMENT_WINDOW_BLOCKED)
     same = None
     for mutation in _open_mutations(platform_sub):
+        if mutation.type == ClubSubscriptionMutation.MutationType.DELETE_CLUB:
+            continue
         if mutation.type == mutation_type and mutation.club_id == getattr(club, "id", None):
             same = mutation
             continue
@@ -1016,11 +1042,23 @@ def _apply_stripe(mutation):
     if mutation.type == ClubSubscriptionMutation.MutationType.RESUME_SUBSCRIPTION:
         _set_cancel_flag(platform_sub, mutation, False)
         _apply_quantities(platform_sub, mutation)
+        _apply_domain_quantity(mutation)
+        return
+
+    if mutation.type in (
+        ClubSubscriptionMutation.MutationType.REMOVE_CLUB,
+        ClubSubscriptionMutation.MutationType.RESUME_CLUB,
+    ):
+        _apply_quantities(platform_sub, mutation)
+        _apply_domain_quantity(mutation)
         return
 
     if mutation.type == ClubSubscriptionMutation.MutationType.SYNC_DOMAIN:
         _apply_domain_quantity(mutation)
         return
+
+    if mutation.type == ClubSubscriptionMutation.MutationType.DELETE_CLUB:
+        raise _Wait()
 
     if mutation.type in (
         ClubSubscriptionMutation.MutationType.SYNC_MEMBERS,
@@ -1096,7 +1134,10 @@ def _reconcile_locked(platform_sub_id):
                 continue
             _apply_stripe(mutation)
         except _Wait:
-            if mutation.type == ClubSubscriptionMutation.MutationType.SYNC_MEMBERS:
+            if mutation.type in (
+                ClubSubscriptionMutation.MutationType.SYNC_MEMBERS,
+                ClubSubscriptionMutation.MutationType.DELETE_CLUB,
+            ):
                 continue
             return
         except Exception:
@@ -1561,6 +1602,7 @@ def _delete_clubs_on_renewal(platform_sub):
         club.save(
             update_fields=["subscription_active", "is_deleted", "deleted_at"]
         )
+        _queue_deleted_club_cleanup(club)
 
 
 def handle_subscription_deleted(stripe_sub):
@@ -1592,6 +1634,7 @@ def _end_platform_subscription(platform_sub):
                 "deleted_at",
             ]
         )
+        _queue_deleted_club_cleanup(club)
     platform_sub.status = "canceled"
     platform_sub.cancel_at_period_end = False
     platform_sub.save(

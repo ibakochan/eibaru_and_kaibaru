@@ -13,6 +13,7 @@ from .models import Club, PlatformClub, PlatformSubscription
 from .service_platform_subscription import (
     PlatformBusy,
     apply_quantity_changes,
+    clubs_pending_removal_ids,
     platform_subscription_lock,
     quantity_change_key,
     queue_domain_sync,
@@ -228,13 +229,14 @@ def _platform_subscription_id(owner_id, club):
 
 
 def _live_domain_count(owner_id, include_club_id=None):
+    pending_ids = clubs_pending_removal_ids(owner_id)
     ids = set(
         Club.objects.filter(
             owner_id=owner_id,
             custom_domain_status="active",
-        ).values_list("id", flat=True)
+        ).exclude(id__in=pending_ids).values_list("id", flat=True)
     )
-    if include_club_id:
+    if include_club_id and include_club_id not in pending_ids:
         ids.add(include_club_id)
     return len(ids)
 
