@@ -63,8 +63,28 @@ from .models import (
     TicketUsage,
 )
 
+class ClubAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "subdomain",
+        "title",
+        "owner",
+        "is_deleted",
+        "deleted_at",
+        "subscription_active",
+        "subscription_cancel_at_period_end",
+    )
+    list_filter = ("is_deleted", "subscription_active", "subscription_cancel_at_period_end")
+    search_fields = ("subdomain", "title", "custom_domain", "owner__email")
+    raw_id_fields = ("owner",)
+
+    def get_queryset(self, request):
+        return Club.all_objects.all()
+
+
+admin.site.register(Club, ClubAdmin)
+
 admin.site.register([
-    Club,
     Member,
     Lesson,
     Event,
