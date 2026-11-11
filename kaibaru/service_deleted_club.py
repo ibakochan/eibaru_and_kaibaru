@@ -2,8 +2,9 @@
 
 The club row is already marked deleted. This pass unsubscribes member
 plans, deletes the members once those plans are gone, removes the custom
-domain, and syncs the owner's remaining clubs. The delete_club mutation
-is marked succeeded only when every part has finished.
+domain, deletes this club's own pictures from storage, and syncs the
+owner's remaining clubs. The delete_club mutation is marked succeeded
+only when every part has finished.
 """
 
 import logging
@@ -16,10 +17,16 @@ from django.utils import timezone
 from .locks_and_reconciliation import CacheLockError, subscription_lock
 from .models import (
     Club,
+    ClubNews,
     ClubSubscriptionMutation,
+    ClubVideo,
+    ExpenseReceipt,
+    JoinRequest,
+    Lesson,
     Member,
     PlatformClub,
     PlatformSubscription,
+    SlateImage,
     Subscription,
     SubscriptionItem,
 )
@@ -91,7 +98,13 @@ def _club_ids_to_finish():
         type=ClubSubscriptionMutation.MutationType.DELETE_CLUB,
         status__in=OPEN_STATUSES,
     ).values_list("club_id", flat=True)
-    return set(member_clubs) | set(domain_clubs) | set(subscription_clubs) | set(mutation_clubs)
+    return (
+        set(member_clubs)
+        | set(domain_clubs)
+        | set(subscription_clubs)
+        | set(mutation_clubs)
+        | _club_ids_with_files()
+    )
 
 
 def _ensure_delete_mutation(club):
@@ -137,6 +150,7 @@ def _finish_one(club):
         return
     _delete_members(club)
     _clear_domain(club)
+    _delete_club_files(club)
     if not _sync_remaining_clubs(club, mutation):
         return
     if mutation:
@@ -255,7 +269,80 @@ def _delete_members(club):
         member.ticket_purchases.update(member_name=full_name)
         member.ticket_grants.update(member_name=full_name)
         member.teacher_invoices.update(instructor_name=full_name)
+        _clear_file(member, "picture")
         member.delete()
+
+
+def _filled_file(field):
+    return Q(**{f"{field}__isnull": False}) & ~Q(**{field: ""})
+
+
+def _club_ids_with_files():
+    """Deleted clubs that still have their own pictures in storage."""
+    ids = set(
+        Club.all_objects.filter(is_deleted=True).filter(
+            _filled_file("picture")
+            | _filled_file("favicon")
+            | _filled_file("og_image")
+            | _filled_file("line_qr_code")
+        ).values_list("id", flat=True)
+    )
+    ids.update(SlateImage.objects.filter(club__is_deleted=True).values_list("club_id", flat=True))
+    ids.update(ClubVideo.objects.filter(club__is_deleted=True).values_list("club_id", flat=True))
+    ids.update(ExpenseReceipt.objects.filter(club__is_deleted=True).values_list("club_id", flat=True))
+    ids.update(
+        ClubNews.objects.filter(club__is_deleted=True).filter(_filled_file("image")).values_list("club_id", flat=True)
+    )
+    ids.update(
+        Lesson.objects.filter(club__is_deleted=True).filter(_filled_file("picture")).values_list("club_id", flat=True)
+    )
+    ids.update(
+        JoinRequest.objects.filter(club__is_deleted=True).filter(_filled_file("picture")).values_list("club_id", flat=True)
+    )
+    ids.update(
+        Member.objects.filter(club__is_deleted=True).filter(_filled_file("picture")).values_list("club_id", flat=True)
+    )
+    return ids
+
+
+def _delete_stored_file(field_file):
+    name = getattr(field_file, "name", "") or ""
+    if not name:
+        return
+    try:
+        field_file.storage.delete(name)
+    except Exception:
+        logger.exception("[DELETED CLUB] file delete failed name=%s", name)
+
+
+def _clear_file(instance, field_name):
+    field_file = getattr(instance, field_name)
+    if not getattr(field_file, "name", ""):
+        return
+    _delete_stored_file(field_file)
+    manager = getattr(type(instance), "all_objects", type(instance).objects)
+    manager.filter(pk=instance.pk).update(**{field_name: ""})
+
+
+def _delete_file_rows(rows, field_name):
+    for row in rows:
+        _clear_file(row, field_name)
+        row.delete()
+
+
+def _delete_club_files(club):
+    """Remove this club's own pictures. Shared sample photos are not rows here."""
+    for field_name in ("picture", "favicon", "og_image", "line_qr_code"):
+        _clear_file(club, field_name)
+    for news in ClubNews.objects.filter(club=club):
+        _clear_file(news, "image")
+    for lesson in Lesson.objects.filter(club=club):
+        _clear_file(lesson, "picture")
+    for request in JoinRequest.objects.filter(club=club):
+        _clear_file(request, "picture")
+    _delete_file_rows(SlateImage.objects.filter(club=club), "image")
+    _delete_file_rows(ClubVideo.objects.filter(club=club), "file")
+    _delete_file_rows(ExpenseReceipt.objects.filter(club=club), "image")
 
 
 def _clear_domain(club):

@@ -388,7 +388,7 @@ def reconcile_member_quantity_mutations():
 
 @shared_task(name="kaibaru.tasks.cleanup_deleted_clubs")
 def cleanup_deleted_clubs():
-    """Unsubscribe, delete members, and remove the domain of a closed club."""
+    """Unsubscribe, delete members, remove the domain, and delete the club's own pictures."""
     stripe.api_key = settings.STRIPE_SECRET_KEY
     from .service_deleted_club import finish_deleted_clubs
     finish_deleted_clubs()
