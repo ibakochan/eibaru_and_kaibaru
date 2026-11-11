@@ -443,7 +443,7 @@ class MembershipPlan(models.Model):
         "TicketType",
         null=True,
         blank=True,
-        on_delete=models.PROTECT,
+        on_delete=models.CASCADE,
         related_name="ticket_plans",
     )
 
@@ -1453,7 +1453,7 @@ class TicketPackage(models.Model):
 
     ticket_type = models.ForeignKey(
         TicketType,
-        on_delete=models.PROTECT,
+        on_delete=models.CASCADE,
         related_name="packages",
     )
 
@@ -1524,7 +1524,7 @@ class TicketPurchase(models.Model):
 
     package = models.ForeignKey(
         TicketPackage,
-        on_delete=models.PROTECT,
+        on_delete=models.CASCADE,
         related_name="purchases",
     )
 
@@ -1597,7 +1597,7 @@ class TicketGrant(models.Model):
 
     ticket_type = models.ForeignKey(
         TicketType,
-        on_delete=models.PROTECT,
+        on_delete=models.CASCADE,
         related_name="grants",
     )
 
@@ -1650,13 +1650,13 @@ class TicketGrant(models.Model):
 class TicketUsage(models.Model):
     grant = models.ForeignKey(
         TicketGrant,
-        on_delete=models.PROTECT,
+        on_delete=models.CASCADE,
         related_name="usages",
     )
 
     reservation = models.OneToOneField(
         Reservation,
-        on_delete=models.PROTECT,
+        on_delete=models.CASCADE,
         related_name="ticket_usage",
     )
 
