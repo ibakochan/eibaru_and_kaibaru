@@ -127,6 +127,10 @@ def validate_reservation_cap_attrs(attrs, instance=None):
 
     if errors:
         raise serializers.ValidationError(errors)
+
+
+def validate_allowed_gender_value(value):
+    """Blank means no gender restriction; anything else must be a known gender."""
     if value in ("", None):
         return None
     if value not in ("male", "female"):
@@ -566,6 +570,8 @@ class MembershipPlanSerializer(serializers.ModelSerializer):
         data["name"] = instance.visible_name()
         return data
 
+    def validate_allowed_gender(self, value):
+        return validate_allowed_gender_value(value)
 
     def validate(self, attrs):
         club = self.context.get("club")
@@ -2276,6 +2282,8 @@ class LessonSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id"]
 
+    def validate_allowed_gender(self, value):
+        return validate_allowed_gender_value(value)
 
     def validate(self, attrs):
         club = (
