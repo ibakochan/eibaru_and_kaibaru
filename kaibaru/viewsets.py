@@ -3793,6 +3793,12 @@ class MemberRecordViewSet(viewsets.ModelViewSet):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+LESSON_PERMISSION_MESSAGE = (
+    "このクラブのレッスンを変更する権限がありません。"
+    "オーナー、またはレッスンの権限を持つ管理者のアカウントでログインしているか確認してください。"
+)
+
+
 class LessonViewSet(viewsets.ModelViewSet):
     queryset = Lesson.objects.all()
     serializer_class = LessonSerializer
@@ -3813,22 +3819,67 @@ class LessonViewSet(viewsets.ModelViewSet):
 
         return context
 
+    def create(self, request, *args, **kwargs):
+        # Check what the lesson belongs to before the fields are validated.
+        # Otherwise the serializer only reports a bare "club" error and the
+        # owner cannot tell which piece is missing.
+        subdomain = request.data.get("club_subdomain")
+        if not subdomain:
+            return Response(
+                {
+                    "club_subdomain": (
+                        "このレッスンを追加するクラブが送信されていません。"
+                        "ページを再読み込みしてから、もう一度お試しください。"
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not Club.objects.filter(subdomain=subdomain, is_deleted=False).exists():
+            return Response(
+                {
+                    "club_subdomain": (
+                        f"サブドメイン「{subdomain}」のクラブが見つかりません。"
+                        "削除されたか、アドレスが違う可能性があります。"
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if request.data.get("section_id") in (None, ""):
+            return Response(
+                {
+                    "section_id": (
+                        "レッスンを追加するスケジュールのセクションが送信されていません。"
+                        "ページを再読み込みしてから、もう一度お試しください。"
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return super().create(request, *args, **kwargs)
+
     def perform_create(self, serializer):
         subdomain = self.request.data.get("club_subdomain")
         if not subdomain:
-            raise serializers.ValidationError({"club_subdomain": "この項目は必須です。"})
+            raise serializers.ValidationError(
+                {"club_subdomain": "このレッスンを追加するクラブが送信されていません。"}
+            )
 
         club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
         if not club:
-            raise serializers.ValidationError({"club_subdomain": "クラブが見つかりません。"})
+            raise serializers.ValidationError(
+                {"club_subdomain": f"サブドメイン「{subdomain}」のクラブが見つかりません。"}
+            )
         if not has_permission(self.request.user, club, "lessons"):
-            raise serializers.ValidationError({"detail": "許可なし"})
+            raise serializers.ValidationError({"detail": LESSON_PERMISSION_MESSAGE})
         
         section_id = self.request.data.get("section_id")
 
         if section_id is None:
             raise serializers.ValidationError(
-                {"section_id": "この項目は必須です。"}
+                {
+                    "section_id": (
+                        "レッスンを追加するスケジュールのセクションが送信されていません。"
+                    )
+                }
             )
         instructor = None
         instructor_id = self.request.data.get("instructor_id")
@@ -3847,12 +3898,12 @@ class LessonViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         lesson = serializer.instance
         if not has_permission(self.request.user, lesson.club, "lessons"):
-            raise serializers.ValidationError({"detail": "許可なし"})
+            raise serializers.ValidationError({"detail": LESSON_PERMISSION_MESSAGE})
         serializer.save()
 
     def perform_destroy(self, instance):
         if not has_permission(self.request.user, instance.club, "lessons"):
-            raise serializers.ValidationError({"detail": "許可なし"})
+            raise serializers.ValidationError({"detail": LESSON_PERMISSION_MESSAGE})
         instance.delete()
 
 

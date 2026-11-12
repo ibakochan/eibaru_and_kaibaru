@@ -2286,7 +2286,10 @@ class LessonSerializer(serializers.ModelSerializer):
 
         if not club:
             raise serializers.ValidationError({
-                "club": "クラブの指定が必要です。"
+                "club": (
+                    "このレッスンを追加するクラブを特定できませんでした。"
+                    "ページを再読み込みしてから、もう一度お試しください。"
+                )
             })
 
         validate_age_range_attrs(attrs, self.instance)
