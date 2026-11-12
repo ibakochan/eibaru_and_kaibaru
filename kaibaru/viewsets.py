@@ -46,7 +46,10 @@ from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from .user_errors import format_validation_error
 from .layout_templates import (
+    HERO_BOTH,
+    apply_hero,
     clean_sticky_nav,
+    is_hero_choice,
     is_template_key,
     load_page_content,
     merge_carried_sections,
@@ -4909,6 +4912,9 @@ class ClubViewSet(viewsets.ModelViewSet):
         # Optional ready-made site: "template" is a Club.layout key. Blank or
         # missing keeps the old behaviour (empty site, default layout).
         template = request.data.get("template") or ""
+        # "hero" picks what opens the page: "slideshow" (pictures), "video",
+        # or "both" (the default, as every template ships).
+        hero = request.data.get("hero") or HERO_BOTH
         extra = {}
         if template:
             if not is_template_key(template):
@@ -4916,9 +4922,14 @@ class ClubViewSet(viewsets.ModelViewSet):
                     {"error": "選択されたテンプレートは使用できません。"},
                     status=status.HTTP_400_BAD_REQUEST
                 )
+            if not is_hero_choice(hero):
+                return Response(
+                    {"error": "ページの最初に置くものが正しくありません。"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
             extra = {
                 "layout": template,
-                "page_content": page_content_for_club(template),
+                "page_content": page_content_for_club(template, hero),
             }
 
         club = Club.objects.create(
@@ -4946,7 +4957,14 @@ class ClubViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        template_page = load_page_content(template)
+        hero = request.data.get("hero") or HERO_BOTH
+        if not is_hero_choice(hero):
+            return Response(
+                {"error": "ページの最初に置くものが正しくありません。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        template_page = apply_hero(load_page_content(template), hero)
         new_schedule_ids = section_ids_of_type(template_page, "schedule")
         old_schedule_ids = section_ids_of_type(club.page_content, "schedule")
         merged_page, event_section_remap = merge_carried_sections(

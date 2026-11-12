@@ -12,6 +12,7 @@ from accounts.models import CustomUser
 from kaibaru.layout_templates import (
     LAYOUT_DIR,
     TEMPLATE_KEYS,
+    apply_hero,
     clean_sticky_nav,
     load_page_content,
     merge_carried_sections,
@@ -200,6 +201,72 @@ class LayoutTemplateFileTests(SimpleTestCase):
         with self.assertRaises(ValueError):
             load_page_content("nope")
 
+    def test_hero_both_is_the_template_unchanged(self):
+        for key in TEMPLATE_KEYS:
+            with self.subTest(layout=key):
+                page = load_page_content(key)
+                self.assertEqual(apply_hero(page, "both"), page)
+                self.assertEqual(
+                    json.loads(page_content_for_club(key)), page
+                )
+
+    def test_hero_slideshow_drops_the_video(self):
+        for key in TEMPLATE_KEYS:
+            with self.subTest(layout=key):
+                template = load_page_content(key)
+                page = apply_hero(template, "slideshow")
+                ordered = sorted(page["sections"].values(), key=lambda s: s["order"])
+                types = [s["type"] for s in ordered]
+                self.assertEqual(types[:2], ["header", "slideshow"])
+                self.assertNotIn("video", types)
+                self.assertEqual(
+                    [s["order"] for s in ordered], list(range(1, len(ordered) + 1))
+                )
+                self.assertEqual(ordered[1]["slug"], "home")
+                self.assertEqual(len(page["sections"]), len(template["sections"]) - 1)
+                self.assertEqual(page["next_section_id"], template["next_section_id"])
+
+    def test_hero_video_drops_the_slideshow_and_takes_over_home(self):
+        for key in TEMPLATE_KEYS:
+            with self.subTest(layout=key):
+                template = load_page_content(key)
+                page = apply_hero(template, "video")
+                ordered = sorted(page["sections"].values(), key=lambda s: s["order"])
+                types = [s["type"] for s in ordered]
+                self.assertEqual(types[:2], ["header", "video"])
+                self.assertNotIn("slideshow", types)
+                self.assertEqual(
+                    [s["order"] for s in ordered], list(range(1, len(ordered) + 1))
+                )
+                video = ordered[1]
+                self.assertEqual(video["title"], "ホーム")
+                self.assertEqual(video["slug"], "home")
+                self.assertEqual(video["icon"], "home")
+                self.assertTrue(video["video_url"].endswith("/hero.mp4"))
+                slugs = [s["slug"] for s in ordered]
+                self.assertEqual(len(slugs), len(set(slugs)))
+
+    def test_hero_keeps_sticky_nav_valid(self):
+        for key in TEMPLATE_KEYS:
+            for hero in ("slideshow", "video"):
+                with self.subTest(layout=key, hero=hero):
+                    page = apply_hero(load_page_content(key), hero)
+                    ordered = sorted(page["sections"].values(), key=lambda s: s["order"])
+                    flow = [s for s in ordered if s["type"] != "header"]
+                    sticky = page["sticky_nav"]
+                    self.assertIsNotNone(sticky["hide_from_section_id"])
+                    self.assertNotEqual(sticky["hide_from_section_id"], flow[0]["id"])
+                    clean_sticky_nav(page, sticky)
+
+    def test_hero_does_not_change_the_loaded_template(self):
+        before = load_page_content("yoga")
+        apply_hero(before, "video")
+        self.assertEqual(before, load_page_content("yoga"))
+
+    def test_unknown_hero_rejected(self):
+        with self.assertRaises(ValueError):
+            apply_hero(load_page_content("yoga"), "nope")
+
     def test_sticky_styles_differ_by_template(self):
         colors = set()
         shapes = set()
@@ -383,6 +450,72 @@ class CreateTrialTemplateTests(TestCase):
         self.assertEqual(json.loads(club.page_content), load_page_content("swimming"))
         self.assertEqual(lesson.section_id, 7)
         self.assertEqual(lesson.title, "朝のクラス")
+
+    def test_create_with_hero_choice(self):
+        for hero, expected in (
+            ("slideshow", ["header", "slideshow"]),
+            ("video", ["header", "video"]),
+            ("both", ["header", "slideshow", "video"]),
+        ):
+            with self.subTest(hero=hero):
+                response = self.client.post(
+                    self.URL,
+                    {
+                        "subdomain": f"tplhero{hero}",
+                        "template": "yoga",
+                        "hero": hero,
+                        "terms_accepted": True,
+                    },
+                    format="json",
+                )
+                self.assertEqual(response.status_code, 201, response.content)
+                club = Club.objects.get(subdomain=f"tplhero{hero}")
+                ordered = sorted(
+                    json.loads(club.page_content)["sections"].values(),
+                    key=lambda s: s["order"],
+                )
+                self.assertEqual([s["type"] for s in ordered][: len(expected)], expected)
+                Club.objects.filter(pk=club.pk).delete()
+
+    def test_create_rejects_unknown_hero(self):
+        response = self.client.post(
+            self.URL,
+            {
+                "subdomain": "tplherobad",
+                "template": "yoga",
+                "hero": "nope",
+                "terms_accepted": True,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Club.objects.filter(subdomain="tplherobad").exists())
+
+    def test_apply_template_with_hero_choice(self):
+        created = self.client.post(
+            self.URL,
+            {"subdomain": "tplheroswap", "template": "yoga", "terms_accepted": True},
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201, created.content)
+        club = Club.objects.get(subdomain="tplheroswap")
+        response = self.client.post(
+            f"/api/clubs/{club.id}/apply-template/",
+            {"template": "swimming", "hero": "video"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        club.refresh_from_db()
+        types = [s["type"] for s in json.loads(club.page_content)["sections"].values()]
+        self.assertIn("video", types)
+        self.assertNotIn("slideshow", types)
+
+        bad = self.client.post(
+            f"/api/clubs/{club.id}/apply-template/",
+            {"template": "swimming", "hero": "nope"},
+            format="json",
+        )
+        self.assertEqual(bad.status_code, 400)
 
     def test_apply_template_moves_the_live_event_off_the_destination_first(self):
         created = self.client.post(

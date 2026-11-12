@@ -147,14 +147,77 @@ def merge_carried_sections(template_page, old_page_content):
     return page, id_remap
 
 
-def page_content_for_club(layout):
+HERO_BOTH = "both"
+HERO_SLIDESHOW = "slideshow"
+HERO_VIDEO = "video"
+HERO_CHOICES = (HERO_BOTH, HERO_SLIDESHOW, HERO_VIDEO)
+
+
+def is_hero_choice(value):
+    return value in HERO_CHOICES
+
+
+def apply_hero(page_content, hero):
+    """Choose what opens the page: the picture slides, the video, or both.
+
+    Every template ships with a slideshow followed by a video. ``both`` keeps
+    that. ``slideshow`` or ``video`` drops the other one. Section ids are left
+    alone so lessons, buttons and the sticky nav keep pointing at the same
+    sections; only ``order`` is closed up again.
+
+    A video that ends up as the only opening section takes over the slideshow's
+    "ホーム" title, slug and icon so the menu still starts with Home.
+    """
+    if not is_hero_choice(hero):
+        raise ValueError(f"Unknown hero choice: {hero!r}")
+    page = json.loads(json.dumps(page_content))
+    if hero == HERO_BOTH:
+        return page
+
+    sections = page.get("sections") or {}
+    drop_type = HERO_VIDEO if hero == HERO_SLIDESHOW else HERO_SLIDESHOW
+    dropped = [
+        key
+        for key, section in sections.items()
+        if isinstance(section, dict) and section.get("type") == drop_type
+    ]
+    removed = [sections.pop(key) for key in dropped]
+
+    if hero == HERO_VIDEO:
+        video = next(
+            (
+                section
+                for section in sections.values()
+                if isinstance(section, dict) and section.get("type") == HERO_VIDEO
+            ),
+            None,
+        )
+        slideshow = next(iter(removed), None)
+        if video is not None and slideshow is not None:
+            for key in ("title", "slug", "icon"):
+                if slideshow.get(key):
+                    video[key] = slideshow[key]
+
+    ordered = sorted(
+        (section for section in sections.values() if isinstance(section, dict)),
+        key=lambda section: (section.get("order") or 0, section.get("id") or 0),
+    )
+    for number, section in enumerate(ordered, start=1):
+        section["order"] = number
+
+    scrub_sticky_nav(page)
+    return page
+
+
+def page_content_for_club(layout, hero=HERO_BOTH):
     """Return page_content in the format stored on Club.page_content.
 
     The site editor stores the document as a JSON *string* inside the
     JSONField and json.loads() it again when sections are edited, so the
     template is serialised the same way.
     """
-    return json.dumps(load_page_content(layout), ensure_ascii=False)
+    page = apply_hero(load_page_content(layout), hero)
+    return json.dumps(page, ensure_ascii=False)
 
 
 def clean_sticky_nav(page_content, payload):
