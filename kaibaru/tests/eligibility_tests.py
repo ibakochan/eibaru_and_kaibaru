@@ -237,6 +237,7 @@ class LessonReservationEligibilityTests(TestCase):
             subdomain="lessonelig",
             stripe_account_id="acct_lessonelig",
             stripe_anchor_date=20,
+            page_content={"sections": {"1": {"id": 1, "type": "member"}}},
         )
         self.member = Member.objects.create(
             owner=self.owner,

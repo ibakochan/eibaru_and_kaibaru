@@ -231,7 +231,12 @@ class MemberReservationService:
         # Reservation availability
         # --------------------------------------------------
 
-        if club.member_reservations_disabled:
+        from .layout_templates import club_has_member_section
+
+        if (
+            not club_has_member_section(club.page_content)
+            or club.member_reservations_disabled
+        ):
             raise ValueError(
                 "現在、会員予約を受け付けていません。"
             )

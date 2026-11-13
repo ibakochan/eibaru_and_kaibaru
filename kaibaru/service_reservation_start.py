@@ -643,10 +643,21 @@ def _unusable_reason(reservations, lesson, club):
 
     reservation_type = reservations[0].reservation_type
 
+    from .layout_templates import club_has_member_section
+
     if reservation_type == Reservation.ReservationType.TRIAL and (
-        club.trials_disabled or lesson.trial_disabled
+        not club_has_member_section(club.page_content)
+        or club.trials_disabled
+        or lesson.trial_disabled
     ):
         return "現在、体験予約を受け付けていません。"
+
+    if reservation_type == Reservation.ReservationType.MEMBER and (
+        not club_has_member_section(club.page_content)
+        or club.member_reservations_disabled
+        or lesson.member_reservation_disabled
+    ):
+        return "現在、会員予約を受け付けていません。"
 
     if reservation_type == Reservation.ReservationType.VISITOR and (
         club.visitor_reservations_disabled

@@ -2345,6 +2345,12 @@ class LessonSerializer(serializers.ModelSerializer):
         elif not self.instance and not club.stripe_account_id:
             attrs["reservation_payment_options"] = OPTION_CASH
 
+        from .layout_templates import club_has_member_section
+
+        if not club_has_member_section(club.page_content):
+            attrs["trial_disabled"] = True
+            attrs["member_reservation_disabled"] = True
+
         allowed_plans = attrs.get(
             "allowed_plans",
             list(self.instance.allowed_plans.all())

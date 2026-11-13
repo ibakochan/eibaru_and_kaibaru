@@ -39,6 +39,11 @@ def load_page_content(layout):
     return json.loads(json.dumps(_load(layout)))
 
 
+def club_has_member_section(page_content):
+    """True when the page has a member profile section, even if it is hidden."""
+    return bool(section_ids_of_type(page_content, "member"))
+
+
 def section_ids_of_type(page_content, section_type):
     """Ids of sections of one type, from a page_content dict or JSON string."""
     data = page_content

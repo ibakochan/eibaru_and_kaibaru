@@ -153,7 +153,9 @@ def _prepare_trial_request(
                 "会員の方は体験予約をご利用できません。"
             )
 
-    if club.trials_disabled:
+    from .layout_templates import club_has_member_section
+
+    if not club_has_member_section(club.page_content) or club.trials_disabled:
         raise ValueError(
             "現在、体験予約を受け付けていません。"
         )
