@@ -151,15 +151,6 @@ def _item(price, addons, source):
     }
 
 
-def _audience_controlled(lesson, audience, club_prices, lesson_prices):
-    if any(_matches(price, audience) for price in club_prices):
-        return True
-    return bool(
-        lesson.reservation_menu_customized
-        and any(_matches(price, audience) for price in lesson_prices)
-    )
-
-
 def lesson_menu(lesson):
     club_prices, lesson_prices, offers = _load(lesson)
     seen = set()
@@ -174,13 +165,11 @@ def lesson_menu(lesson):
 
 
 def resolve_reservation_quote(lesson, audience, price_id, addon_ids):
-    """Return the chosen total, or None when this audience still uses the single price."""
+    """Return the chosen base price plus any add-ons."""
     club_prices, lesson_prices, offers = _load(lesson)
     menu = _menu(lesson, audience, club_prices, lesson_prices, offers)
     if not menu:
-        if _audience_controlled(lesson, audience, club_prices, lesson_prices):
-            raise ValueError(_UNAVAILABLE[audience])
-        return None
+        raise ValueError(_UNAVAILABLE[audience])
 
     if price_id in (None, ""):
         if len(menu) == 1:

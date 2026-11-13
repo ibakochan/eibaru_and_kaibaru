@@ -166,18 +166,8 @@ def _prepare_trial_request(
     from .service_reservation_catalog import resolve_reservation_quote
 
     quote = resolve_reservation_quote(lesson, "trial", price_id, addon_ids)
-    if quote is None:
-        if lesson.trial_price is not None:
-            reservation_price = lesson.trial_price
-        else:
-            reservation_price = club.trial_price
-
-        if reservation_price is None:
-            reservation_price = 0
-        price_name = ""
-    else:
-        reservation_price = quote["amount"]
-        price_name = quote["price_name"]
+    reservation_price = quote["amount"]
+    price_name = quote["price_name"]
 
     from .charge_amounts import normalize_paid_amount
 

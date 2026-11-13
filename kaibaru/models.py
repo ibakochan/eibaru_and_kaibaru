@@ -107,15 +107,9 @@ class Club(models.Model):
     stripe_customer_id = models.CharField(max_length=255, null=True, blank=True)
     stripe_subscription_id = models.CharField(max_length=255, null=True, blank=True)
 
-    trial_price = models.PositiveIntegerField(default=0, help_text="Default trial reservation price. 0 means free.")
-
     trials_disabled = models.BooleanField(default=False, help_text="If enabled, trial reservations are unavailable for all lessons.")
 
-    visitor_reservation_price = models.PositiveIntegerField(null=True, blank=True, help_text="Default visitor reservation price. Empty means unavailable.")
-
     visitor_reservations_disabled = models.BooleanField(default=False, help_text="If enabled, visitor reservations are unavailable for all lessons.")
-
-    member_reservation_price = models.PositiveIntegerField(null=True, blank=True, help_text="Default member reservation price. Empty means unavailable.")
 
     member_reservations_disabled = models.BooleanField(default=False, help_text="If enabled, member reservations are unavailable for all lessons.")
 
@@ -1184,16 +1178,6 @@ class Lesson(models.Model):
         help_text="Maximum number of reservations. Leave empty for unlimited."
     )
 
-    # Trial settings
-    #
-    # NULL = use Club.trial_price
-    # 0 = free trial
-    trial_price = models.PositiveIntegerField(
-        null=True,
-        blank=True,
-        help_text="Trial price for this lesson. Empty uses the club default."
-    )
-
     # Prevent trial reservations for this lesson entirely.
     trial_disabled = models.BooleanField(
         default=False,
@@ -1212,22 +1196,10 @@ class Lesson(models.Model):
     # True: it offers only the club prices it selected, plus its own.
     reservation_menu_customized = models.BooleanField(default=False)
 
-    visitor_reservation_price = models.PositiveIntegerField(
-        null=True,
-        blank=True,
-        help_text="Visitor reservation price. Empty uses the club default."
-    )
-
     # Explicitly disables visitor reservations for this lesson.
     visitor_reservation_disabled = models.BooleanField(
         default=False,
         help_text="If enabled, visitor reservations are not allowed for this lesson."
-    )
-
-    member_reservation_price = models.PositiveIntegerField(
-        null=True,
-        blank=True,
-        help_text="Member reservation price. Empty uses the club default."
     )
 
     member_reservation_disabled = models.BooleanField(

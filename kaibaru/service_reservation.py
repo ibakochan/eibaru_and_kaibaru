@@ -260,13 +260,6 @@ class MemberReservationService:
             ),
         )
 
-        # --------------------------------------------------
-        # Determine member reservation price.
-        #
-        # Lesson price overrides club price.
-        # NULL means use club price.
-        # --------------------------------------------------
-
         from .service_reservation_catalog import resolve_reservation_quote
 
         quote = resolve_reservation_quote(
@@ -275,25 +268,8 @@ class MemberReservationService:
             price_id,
             addon_ids,
         )
-        if quote is None:
-            if lesson.member_reservation_price is not None:
-                reservation_price = (
-                    lesson.member_reservation_price
-                )
-            else:
-                reservation_price = (
-                    club.member_reservation_price
-                )
-
-            if reservation_price is None:
-                raise ValueError(
-                    "このレッスンでは会員予約を"
-                    "受け付けていません。"
-                )
-            price_name = ""
-        else:
-            reservation_price = quote["amount"]
-            price_name = quote["price_name"]
+        reservation_price = quote["amount"]
+        price_name = quote["price_name"]
 
         from .charge_amounts import normalize_paid_amount
 

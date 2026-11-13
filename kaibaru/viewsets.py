@@ -4335,11 +4335,8 @@ class ClubViewSet(viewsets.ModelViewSet):
             plan_fields = {
                 "subscription_mode",
                 "stripe_anchor_date",
-                "trial_price",
                 "trials_disabled",
-                "visitor_reservation_price",
                 "visitor_reservations_disabled",
-                "member_reservation_price",
                 "member_reservations_disabled",
             }
             for field in owner_only:

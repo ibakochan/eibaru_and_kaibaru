@@ -2260,16 +2260,13 @@ class LessonSerializer(serializers.ModelSerializer):
             "allowed_plans",
             "reservation_limit",
             "reservation_only",
-            "trial_price",
             "trial_disabled",
 
 
             # Visitor
-            "visitor_reservation_price",
             "visitor_reservation_disabled",
 
             # Member
-            "member_reservation_price",
             "member_reservation_disabled",
 
             "member_reservation_max_count",
@@ -2336,7 +2333,6 @@ class LessonSerializer(serializers.ModelSerializer):
         validate_age_range_attrs(attrs, self.instance)
         validate_reservation_cap_attrs(attrs, self.instance)
 
-        from .charge_amounts import invalid_set_price
         from .cash_reservations import OPTION_CASH
 
         if "reservation_payment_options" in attrs:
@@ -2348,17 +2344,6 @@ class LessonSerializer(serializers.ModelSerializer):
                 })
         elif not self.instance and not club.stripe_account_id:
             attrs["reservation_payment_options"] = OPTION_CASH
-
-        for field in (
-            "trial_price",
-            "visitor_reservation_price",
-            "member_reservation_price",
-        ):
-            if field not in attrs or attrs.get(field) is None:
-                continue
-            message = invalid_set_price(attrs.get(field), allow_free=True)
-            if message:
-                raise serializers.ValidationError({field: message})
 
         allowed_plans = attrs.get(
             "allowed_plans",
@@ -3205,12 +3190,9 @@ class ClubSerializer(serializers.ModelSerializer):
             "membership_plan_groups",
             "stripe_subscription_id",
             "invoices",
-            "trial_price",
             "trials_disabled",
-            "visitor_reservation_price",
             "visitor_reservations_disabled",
 
-            "member_reservation_price",
             "member_reservations_disabled",
             "member_reservation_max_count",
             "member_reservation_max_days_ahead",
@@ -3269,9 +3251,6 @@ class ClubSerializer(serializers.ModelSerializer):
 
         for field in (
             "joining_fee",
-            "trial_price",
-            "visitor_reservation_price",
-            "member_reservation_price",
         ):
             if field not in attrs or attrs.get(field) is None:
                 continue

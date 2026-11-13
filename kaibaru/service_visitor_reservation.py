@@ -159,20 +159,8 @@ def _prepare_visitor_request(
     from .service_reservation_catalog import resolve_reservation_quote
 
     quote = resolve_reservation_quote(lesson, "visitor", price_id, addon_ids)
-    if quote is None:
-        if lesson.visitor_reservation_price is not None:
-            reservation_price = lesson.visitor_reservation_price
-        else:
-            reservation_price = club.visitor_reservation_price
-
-        if reservation_price is None:
-            raise ValueError(
-                "このレッスンはビジター予約を受け付けていません。"
-            )
-        price_name = ""
-    else:
-        reservation_price = quote["amount"]
-        price_name = quote["price_name"]
+    reservation_price = quote["amount"]
+    price_name = quote["price_name"]
 
     from .charge_amounts import normalize_paid_amount
 

@@ -237,8 +237,6 @@ class LessonReservationEligibilityTests(TestCase):
             subdomain="lessonelig",
             stripe_account_id="acct_lessonelig",
             stripe_anchor_date=20,
-            member_reservation_price=1000,
-            visitor_reservation_price=1500,
         )
         self.member = Member.objects.create(
             owner=self.owner,
@@ -256,8 +254,6 @@ class LessonReservationEligibilityTests(TestCase):
             reservation_only=True,
             age_max=12,
             allowed_gender="female",
-            member_reservation_price=1000,
-            visitor_reservation_price=1500,
         )
 
     def test_member_reservation_blocked(self):
