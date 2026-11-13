@@ -9,7 +9,7 @@
       "slug": "header",
       "type": "header",
       "header": {
-        "logo": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/default/logo.jpg",
+        "logo": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/nail_salon/logo.jpg",
         "logoHeight": 56,
         "title": "ネイルサロン",
         "subtitle": "手元から、気分を変える。",
@@ -27,7 +27,7 @@
       "slides": [
         {
           "id": "nail-slide-1",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/default/slide-entrance.jpg",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/nail_salon/interior.jpg",
           "heading": "ネイルサロンへようこそ",
           "subheading": "写真と文章は「ホーム」右の鉛筆マークから変更できます（写真の例：店の外観）。",
           "buttonText": "予約する",
@@ -38,7 +38,7 @@
         },
         {
           "id": "nail-slide-2",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/default/slide-members.jpg",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/nail_salon/manicure.jpg",
           "heading": "担当をご紹介",
           "subheading": "写真の例：スタッフの写真。文章も鉛筆マークから変えられます。",
           "buttonText": "スタッフを見る",
@@ -49,7 +49,7 @@
         },
         {
           "id": "nail-slide-3",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/default/about.jpg",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/nail_salon/artist.jpg",
           "heading": "メニューを選んで予約",
           "subheading": "写真の例：施術の様子。基本料金と追加メニューを組み合わせて予約できます。",
           "buttonText": "メニューを見る",
@@ -109,7 +109,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/default/slide-entrance.jpg",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/nail_salon/interior.jpg",
                 "width": 512,
                 "height": 272,
                 "x": 4,
@@ -252,7 +252,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/default/about.jpg",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/nail_salon/artist.jpg",
                 "width": 332,
                 "height": 232,
                 "x": 4,
@@ -339,7 +339,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/default/slide-members.jpg",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/nail_salon/manicure.jpg",
                 "width": 332,
                 "height": 232,
                 "x": 4,
@@ -426,7 +426,7 @@
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/default/slide-group.jpg",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/nail_salon/colors.jpg",
                 "width": 332,
                 "height": 232,
                 "x": 4,
