@@ -1,0 +1,894 @@
+{
+  "version": 1,
+  "next_section_id": 11,
+  "sections": {
+    "1": {
+      "id": 1,
+      "order": 1,
+      "title": "ヘッダー",
+      "slug": "header",
+      "type": "header",
+      "header": {
+        "logo": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/default/logo.jpg",
+        "logoHeight": 56,
+        "title": "ネイルサロン",
+        "subtitle": "手元から、気分を変える。",
+        "transparent": false,
+        "collapseAllNav": false
+      }
+    },
+    "2": {
+      "id": 2,
+      "order": 2,
+      "title": "ホーム",
+      "slug": "home",
+      "type": "slideshow",
+      "icon": "home",
+      "slides": [
+        {
+          "id": "nail-slide-1",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/default/slide-entrance.jpg",
+          "heading": "ネイルサロンへようこそ",
+          "subheading": "写真と文章は「ホーム」右の鉛筆マークから変更できます（写真の例：店の外観）。",
+          "buttonText": "予約する",
+          "buttonLink": "",
+          "buttonSectionId": 7,
+          "buttonBoxId": null,
+          "textAlign": "center"
+        },
+        {
+          "id": "nail-slide-2",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/default/slide-members.jpg",
+          "heading": "担当をご紹介",
+          "subheading": "写真の例：スタッフの写真。文章も鉛筆マークから変えられます。",
+          "buttonText": "スタッフを見る",
+          "buttonLink": "",
+          "buttonSectionId": 5,
+          "buttonBoxId": null,
+          "textAlign": "center"
+        },
+        {
+          "id": "nail-slide-3",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/default/about.jpg",
+          "heading": "メニューを選んで予約",
+          "subheading": "写真の例：施術の様子。基本料金と追加メニューを組み合わせて予約できます。",
+          "buttonText": "メニューを見る",
+          "buttonLink": "",
+          "buttonSectionId": 6,
+          "buttonBoxId": null,
+          "textAlign": "center"
+        }
+      ]
+    },
+    "3": {
+      "id": 3,
+      "order": 3,
+      "title": "動画",
+      "slug": "video",
+      "type": "video",
+      "show_in_menu": true,
+      "video_url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/default/hero.mp4"
+    },
+    "4": {
+      "id": 4,
+      "order": 4,
+      "title": "サロンについて",
+      "slug": "サロンについて",
+      "type": "custom",
+      "icon": "info",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "about-title",
+            "x": 50,
+            "y": 20,
+            "width": 1100,
+            "height": 64,
+            "order": 1,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "サロンについて"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "about-photo",
+            "x": 50,
+            "y": 100,
+            "width": 520,
+            "height": 280,
+            "order": 2,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/default/slide-entrance.jpg",
+                "width": 512,
+                "height": 272,
+                "x": 4,
+                "y": 0,
+                "aspectRatio": 1.7778,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "about-cap",
+            "x": 50,
+            "y": 388,
+            "width": 520,
+            "height": 72,
+            "order": 3,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：サロンの外観や店内の写真。左上の「レイアウト編集」を押し、この枠に写真をドラッグすると変わります。",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "about-body",
+            "x": 600,
+            "y": 100,
+            "width": 550,
+            "height": 220,
+            "order": 4,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "ジェル、ケア、アート。オフだけのご予約もできます。メニューは「予約」に名前と料金を登録し、お客様が来店前に選べるようにします。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "about-reserve",
+            "x": 600,
+            "y": 340,
+            "width": 280,
+            "height": 80,
+            "order": 5,
+            "content": [
+              {
+                "type": "button",
+                "label": "予約する",
+                "align": "center",
+                "sectionId": 7,
+                "boxId": null,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "5": {
+      "id": 5,
+      "order": 5,
+      "title": "スタッフ紹介",
+      "slug": "スタッフ紹介",
+      "type": "custom",
+      "icon": "smile",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "staff-title",
+            "x": 40,
+            "y": 16,
+            "width": 1120,
+            "height": 40,
+            "order": 1,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "スタッフ"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "staff-lead",
+            "x": 40,
+            "y": 60,
+            "width": 1120,
+            "height": 40,
+            "order": 2,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "担当は店長、ネイリスト、ジュニアの3人です。名前と写真はレイアウト編集で差し替えてください。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "staff-0-photo",
+            "x": 40,
+            "y": 110,
+            "width": 340,
+            "height": 240,
+            "order": 3,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/default/about.jpg",
+                "width": 332,
+                "height": 232,
+                "x": 4,
+                "y": 0,
+                "aspectRatio": 1.7778,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "staff-0-cap",
+            "x": 40,
+            "y": 358,
+            "width": 340,
+            "height": 72,
+            "order": 4,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：スタッフの写真。左上の「レイアウト編集」から、この枠に写真をドラッグすると変わります。",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "staff-0-role",
+            "x": 40,
+            "y": 430,
+            "width": 340,
+            "height": 48,
+            "order": 5,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "店長"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "staff-0-bio",
+            "x": 40,
+            "y": 486,
+            "width": 340,
+            "height": 140,
+            "order": 6,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "デザインの相談と長さ出しを担当します。持ち込みデザインもご相談ください。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "staff-1-photo",
+            "x": 420,
+            "y": 110,
+            "width": 340,
+            "height": 240,
+            "order": 7,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/default/slide-members.jpg",
+                "width": 332,
+                "height": 232,
+                "x": 4,
+                "y": 0,
+                "aspectRatio": 1.7778,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "staff-1-cap",
+            "x": 420,
+            "y": 358,
+            "width": 340,
+            "height": 72,
+            "order": 8,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：スタッフの写真。左上の「レイアウト編集」から、この枠に写真をドラッグすると変わります。",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "staff-1-role",
+            "x": 420,
+            "y": 430,
+            "width": 340,
+            "height": 48,
+            "order": 9,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "ネイリスト"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "staff-1-bio",
+            "x": 420,
+            "y": 486,
+            "width": 340,
+            "height": 140,
+            "order": 10,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "ワンカラーとケアが中心です。初めてのジェルもこちらへ。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "staff-2-photo",
+            "x": 800,
+            "y": 110,
+            "width": 340,
+            "height": 240,
+            "order": 11,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/default/slide-group.jpg",
+                "width": 332,
+                "height": 232,
+                "x": 4,
+                "y": 0,
+                "aspectRatio": 1.7778,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "staff-2-cap",
+            "x": 800,
+            "y": 358,
+            "width": 340,
+            "height": 72,
+            "order": 12,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：スタッフの写真。左上の「レイアウト編集」から、この枠に写真をドラッグすると変わります。",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "staff-2-role",
+            "x": 800,
+            "y": 430,
+            "width": 340,
+            "height": 48,
+            "order": 13,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "ジュニア"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "staff-2-bio",
+            "x": 800,
+            "y": 486,
+            "width": 340,
+            "height": 140,
+            "order": 14,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "オフと甘皮ケアを担当します。予約時の追加メニューからも選べます。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "6": {
+      "id": 6,
+      "order": 6,
+      "title": "メニュー",
+      "slug": "メニュー",
+      "type": "custom",
+      "icon": "featured",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "menu-title",
+            "x": 50,
+            "y": 20,
+            "width": 1100,
+            "height": 56,
+            "order": 1,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "メニュー"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "menu-a",
+            "x": 50,
+            "y": 96,
+            "width": 1100,
+            "height": 90,
+            "order": 2,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "ワンカラー、フレンチ、アート、ケア、オフなど、予約できるメニューは「予約」の料金に名前を付けて登録します。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "menu-b",
+            "x": 50,
+            "y": 200,
+            "width": 1100,
+            "height": 90,
+            "order": 3,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "例えば「ジェル ワンカラー」を基本料金にして、長さ出しやパーツを追加メニューにできます。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "menu-btn",
+            "x": 50,
+            "y": 310,
+            "width": 280,
+            "height": 80,
+            "order": 4,
+            "content": [
+              {
+                "type": "button",
+                "label": "予約メニューを見る",
+                "align": "center",
+                "sectionId": 7,
+                "boxId": null,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "7": {
+      "id": 7,
+      "order": 7,
+      "title": "予約",
+      "slug": "予約",
+      "type": "schedule",
+      "icon": "schedule"
+    },
+    "8": {
+      "id": 8,
+      "order": 8,
+      "title": "ご予約の流れ",
+      "slug": "ご予約の流れ",
+      "type": "custom",
+      "icon": "check",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "flow-title",
+            "x": 50,
+            "y": 20,
+            "width": 1100,
+            "height": 56,
+            "order": 1,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "ご予約の流れ"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "flow-0-t",
+            "x": 50,
+            "y": 100,
+            "width": 350,
+            "height": 48,
+            "order": 2,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "メニューを選ぶ"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "flow-0-b",
+            "x": 50,
+            "y": 160,
+            "width": 350,
+            "height": 140,
+            "order": 3,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "予約の画面で、ジェルやケアなどの基本料金を選びます。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "flow-1-t",
+            "x": 430,
+            "y": 100,
+            "width": 350,
+            "height": 48,
+            "order": 4,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "追加を選ぶ"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "flow-1-b",
+            "x": 430,
+            "y": 160,
+            "width": 350,
+            "height": 140,
+            "order": 5,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "長さ出しやパーツなど、付けたいものだけ追加します。不要ならスキップできます。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "flow-2-t",
+            "x": 810,
+            "y": 100,
+            "width": 350,
+            "height": 48,
+            "order": 6,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "来店して支払う"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "flow-2-b",
+            "x": 810,
+            "y": 160,
+            "width": 350,
+            "height": 140,
+            "order": 7,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "日時を選んで予約します。お支払いはカード、または来店時に選べます。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "9": {
+      "id": 9,
+      "order": 9,
+      "title": "アクセス",
+      "slug": "アクセス",
+      "type": "custom",
+      "icon": "access",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "access-title",
+            "x": 50,
+            "y": 24,
+            "width": 1100,
+            "height": 56,
+            "order": 1,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "アクセス"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "access-body",
+            "x": 50,
+            "y": 100,
+            "width": 1100,
+            "height": 120,
+            "order": 2,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "〇〇駅から徒歩〇分。住所、営業時間、定休日はレイアウト編集で書き換えてください。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "access-btn",
+            "x": 400,
+            "y": 240,
+            "width": 400,
+            "height": 80,
+            "order": 3,
+            "content": [
+              {
+                "type": "button",
+                "label": "問い合わせフォーム",
+                "align": "center",
+                "sectionId": 10,
+                "boxId": null,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "style": {
+        "backgroundColor": "#5c3a44"
+      }
+    },
+    "10": {
+      "id": 10,
+      "order": 10,
+      "title": "問い合わせフォーム",
+      "slug": "問い合わせフォーム",
+      "type": "inquiry",
+      "icon": "contact",
+      "show_in_menu": false
+    }
+  },
+  "sticky_nav": {
+    "style": {
+      "shape": "rounded",
+      "button_color": "#c45c74",
+      "text_color": "#ffffff",
+      "tray_color": "#fff5f7"
+    },
+    "hide_from_section_id": 4,
+    "buttons": [
+      {
+        "id": "nail-inquiry",
+        "label": "問い合わせフォーム",
+        "icon": "contact",
+        "icon_color": "#2563eb",
+        "kind": "section",
+        "section_id": 10
+      },
+      {
+        "id": "nail-access",
+        "label": "アクセス",
+        "icon": "access",
+        "icon_color": "#dc2626",
+        "kind": "section",
+        "section_id": 9
+      },
+      {
+        "id": "nail-reserve",
+        "label": "予約する",
+        "icon": "schedule",
+        "icon_color": "#7c3aed",
+        "kind": "section",
+        "section_id": 7
+      }
+    ]
+  }
+}

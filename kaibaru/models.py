@@ -211,6 +211,8 @@ class Club(models.Model):
         ("swimming", "Swimming"),
         ("music", "Music"),
         ("regular_sports", "Regular Sports"),
+        ("hair_salon", "Hair salon"),
+        ("nail_salon", "Nail salon"),
     ]
     layout = models.CharField(
         max_length=20,

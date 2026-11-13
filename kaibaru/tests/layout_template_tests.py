@@ -23,6 +23,8 @@ from kaibaru.models import Club, Event, Lesson
 from kaibaru.signals import club_created_signal
 
 EXAMPLE_PIC_PREFIX = "https://storage.googleapis.com/sitepicsforkaibaru/layouts/"
+RESERVATION_TEMPLATE_KEYS = {"hair_salon", "nail_salon"}
+MEMBER_ONLY_TYPES = ("join", "member", "teacher", "memberplans")
 CANVAS_WIDTH = 1205
 ALLOWED_TYPES = {
     "custom", "schedule", "join", "member", "teacher",
@@ -70,15 +72,25 @@ class LayoutTemplateFileTests(SimpleTestCase):
         self.assertEqual(len(slugs), len(set(slugs)))
 
         types = [s["type"] for s in ordered]
-        for unique in ("header", "join", "member", "teacher", "memberplans", "slideshow", "schedule", "inquiry", "video"):
+        required = ["header", "slideshow", "schedule", "inquiry", "video"]
+        if key in RESERVATION_TEMPLATE_KEYS:
+            for banned in MEMBER_ONLY_TYPES:
+                self.assertNotIn(banned, types, banned)
+        else:
+            required.extend(MEMBER_ONLY_TYPES)
+        for unique in required:
             self.assertEqual(types.count(unique), 1, unique)
         self.assertTrue(set(types) <= ALLOWED_TYPES)
 
-        join = next(s for s in ordered if s["type"] == "join")
-        self.assertEqual(join["slug"], "join")
-        member = next(s for s in ordered if s["type"] == "member")
-        self.assertEqual(member["profile_title"], "プロフィール")
-        self.assertLess(join["order"], member["order"])
+        if key not in RESERVATION_TEMPLATE_KEYS:
+            join = next(s for s in ordered if s["type"] == "join")
+            self.assertEqual(join["slug"], "join")
+            member = next(s for s in ordered if s["type"] == "member")
+            self.assertEqual(member["profile_title"], "プロフィール")
+            self.assertLess(join["order"], member["order"])
+        else:
+            staff = next(s for s in ordered if s["title"] == "スタッフ紹介")
+            self.assertEqual(staff["type"], "custom")
 
         for sid, section in sections.items():
             self.assertEqual(section["id"], int(sid))
@@ -124,22 +136,22 @@ class LayoutTemplateFileTests(SimpleTestCase):
         self.assertEqual(sticky["hide_from_section_id"], after_hero[0]["id"])
         self.assertNotEqual(sticky["hide_from_section_id"], ordered[1]["id"])
         labels = [button["label"] for button in sticky["buttons"]]
-        self.assertEqual(
-            labels,
-            ["問い合わせフォーム", "アクセス", "予約はレッスンから"],
-        )
+        self.assertEqual(labels[0], "問い合わせフォーム")
+        self.assertEqual(labels[1], "アクセス")
+        self.assertIn(labels[2], {"予約はレッスンから", "予約する"})
         by_label = {button["label"]: button for button in sticky["buttons"]}
         access = next(section for section in ordered if section["title"] == "アクセス")
         schedule = next(section for section in ordered if section["type"] == "schedule")
+        reserve = by_label[labels[2]]
         self.assertEqual(by_label["問い合わせフォーム"]["section_id"], inquiry["id"])
         self.assertEqual(by_label["アクセス"]["section_id"], access["id"])
-        self.assertEqual(by_label["予約はレッスンから"]["section_id"], schedule["id"])
+        self.assertEqual(reserve["section_id"], schedule["id"])
         self.assertEqual(by_label["問い合わせフォーム"]["icon"], "contact")
         self.assertEqual(by_label["アクセス"]["icon"], "access")
-        self.assertEqual(by_label["予約はレッスンから"]["icon"], "schedule")
+        self.assertEqual(reserve["icon"], "schedule")
         self.assertEqual(by_label["問い合わせフォーム"]["icon_color"], "#2563eb")
         self.assertEqual(by_label["アクセス"]["icon_color"], "#dc2626")
-        self.assertEqual(by_label["予約はレッスンから"]["icon_color"], "#7c3aed")
+        self.assertEqual(reserve["icon_color"], "#7c3aed")
         style = sticky["style"]
         self.assertIn(style["shape"], {"pill", "rounded", "square"})
         self.assertRegex(style["button_color"], r"^#[0-9a-f]{6}$")
