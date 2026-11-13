@@ -16,6 +16,7 @@ from .models import (
     TicketUsage,
 )
 from .stripe_service import get_or_create_stripe_customer
+from .cash_reservations import resolve_payment_method
 from .charge_amounts import persisted_charge_amount, platform_fee_kwargs
 from .discounts import calculate_age
 from .rules_eligibility import assert_member_eligible_for_lesson
@@ -217,7 +218,7 @@ class MemberReservationService:
                 "この会員は指定されたクラブに所属していません。"
             )
 
-        if payment_method not in ("stripe", "ticket"):
+        if payment_method not in ("stripe", "ticket", "cash"):
             raise ValueError(
                 "無効な支払い方法です。"
             )
@@ -330,13 +331,23 @@ class MemberReservationService:
                 )
 
         # --------------------------------------------------
-        # Stripe configuration
+        # Payment method
+        #
+        # A priced reservation is paid by card or at the venue,
+        # whichever this lesson offers. Free reservations and
+        # ticket reservations take no payment here.
         # --------------------------------------------------
 
-        if not club.stripe_account_id and payment_method != "ticket":
-            raise ValueError(
-                "このクラブではオンライン決済が設定されていません。"
+        if payment_method != "ticket":
+            resolved_method = resolve_payment_method(
+                club=club,
+                option=lesson.reservation_payment_options,
+                requested=payment_method,
+                amount=reservation_price,
+                subject="レッスン",
             )
+            # A free reservation never pays at the venue.
+            payment_method = resolved_method or "stripe"
 
         # --------------------------------------------------
         # Customer information
@@ -604,6 +615,12 @@ class MemberReservationService:
                     }
 
                 if payment_view.open_url:
+                    if payment_method == "cash":
+                        raise ValueError(
+                            "このレッスンの予約はカード決済の"
+                            "手続き中です。決済を完了するか、"
+                            "しばらくしてからもう一度お試しください。"
+                        )
                     if existing.is_deleted:
                         existing.is_deleted = False
                         existing.save(
@@ -766,8 +783,51 @@ class MemberReservationService:
                         reservation=reservation,
                         quantity=1,
                     )
-                    
-                        
+
+            elif payment_method == "cash" and reservation_price > 0:
+                # Pay at the venue. The booking is confirmed now and
+                # holds a spot. paid_at stays empty until the owner
+                # marks the cash as received.
+                if existing is None:
+                    reservation = Reservation.objects.create(
+                        lesson=locked_lesson,
+                        club=club,
+                        user=member.owner,
+                        member=member,
+                        payment_method=payment_method,
+                        reservation_type=(
+                            Reservation.ReservationType.MEMBER
+                        ),
+                        status=Reservation.Status.PAID,
+                        full_name=full_name,
+                        email=email,
+                        phone_number=phone_number,
+                        age=reservation_age,
+                        gender=reservation_gender,
+                        amount=reservation_price,
+                        currency="jpy",
+                        reservation_date=reservation_date,
+                        reservation_key=reservation_key,
+                    )
+                else:
+                    reservation = _reuse_member_reservation(
+                        existing,
+                        lesson=locked_lesson,
+                        club=club,
+                        member=member,
+                        payment_method=payment_method,
+                        full_name=full_name,
+                        email=email,
+                        phone_number=phone_number,
+                        age=reservation_age,
+                        gender=reservation_gender,
+                        amount=reservation_price,
+                        reservation_date=reservation_date,
+                        status=Reservation.Status.PAID,
+                        paid_at=None,
+                        now=now,
+                    )
+
             else:
                 if existing is None:
                     reservation = Reservation.objects.create(
@@ -822,7 +882,20 @@ class MemberReservationService:
                 "payment_method": "ticket",
                 "requires_checkout": False,
             }
-    
+
+        if payment_method == "cash" and reservation_price > 0:
+            send_visitor_reservation_confirmation_email.delay(
+                reservation.id
+            )
+
+            return {
+                "reservation_id": reservation.id,
+                "success": True,
+                "paid": False,
+                "payment_method": "cash",
+                "requires_checkout": False,
+            }
+
         # --------------------------------------------------
         # Free member reservation.
         #

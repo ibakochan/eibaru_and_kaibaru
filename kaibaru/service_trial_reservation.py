@@ -3,6 +3,7 @@ import secrets
 
 from django.db import IntegrityError, transaction
 
+from .cash_reservations import resolve_payment_method
 from .models import Club, Lesson, Reservation
 from .reservation_checkout_recovery import (
     read_stripe_payment,
@@ -65,6 +66,7 @@ class TrialReservationService:
         phone_number="",
         user=None,
         participants,
+        payment_method="",
     ):
         prepared = _prepare_trial_request(
             club=club,
@@ -74,6 +76,7 @@ class TrialReservationService:
             phone_number=phone_number,
             user=user,
             participants=participants,
+            payment_method=payment_method,
         )
 
         try:
@@ -129,6 +132,7 @@ def _prepare_trial_request(
     phone_number,
     user,
     participants,
+    payment_method="",
 ):
     if lesson.club_id != club.id:
         raise ValueError(
@@ -175,10 +179,15 @@ def _prepare_trial_request(
         max_days_ahead=None,
     )
 
-    if reservation_price > 0 and not club.stripe_account_id:
-        raise ValueError(
-            "このクラブではオンライン決済が設定されていません。"
-        )
+    # Free trials keep the card label they always had. Priced ones are
+    # card or pay-at-the-venue, whichever this lesson offers.
+    payment_method = resolve_payment_method(
+        club=club,
+        option=lesson.reservation_payment_options,
+        requested=payment_method,
+        amount=reservation_price,
+        subject="レッスン",
+    ) or Reservation.PaymentMethod.STRIPE
 
     if user is not None:
         email = (user.email or "").strip().lower()
@@ -224,6 +233,7 @@ def _prepare_trial_request(
         "people": people,
         "reservation_price": reservation_price,
         "keys": keys,
+        "payment_method": payment_method,
     }
 
 
@@ -343,6 +353,7 @@ def _save_trial_reservations(
     people,
     reservation_price,
     keys,
+    payment_method=Reservation.PaymentMethod.STRIPE,
 ):
     from django.utils import timezone
 
@@ -401,6 +412,7 @@ def _save_trial_reservations(
             row.age = person["age"]
             row.gender = person["gender"]
             row.amount = reservation_price
+            row.payment_method = payment_method
             row.user = user
             row.requested_at = now
             row.save(
@@ -410,6 +422,7 @@ def _save_trial_reservations(
                     "age",
                     "gender",
                     "amount",
+                    "payment_method",
                     "user",
                     "requested_at",
                 ]
@@ -525,7 +538,7 @@ def _save_trial_reservations(
             existing.lesson = locked_lesson
             existing.club = club
             existing.user = user
-            existing.payment_method = "stripe"
+            existing.payment_method = payment_method
             existing.reservation_type = Reservation.ReservationType.TRIAL
             existing.status = Reservation.Status.NOT_STARTED
             existing.full_name = person["full_name"]
@@ -553,7 +566,7 @@ def _save_trial_reservations(
             club=club,
             member=None,
             user=user,
-            payment_method="stripe",
+            payment_method=payment_method,
             reservation_type=Reservation.ReservationType.TRIAL,
             status=Reservation.Status.NOT_STARTED,
             full_name=person["full_name"],

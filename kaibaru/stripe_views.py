@@ -2831,6 +2831,7 @@ def create_visitor_reservation(
             user=user,
             age=age,
             gender=gender,
+            payment_method=request.POST.get("payment_method", ""),
         )
 
     except ValueError as e:
@@ -2986,6 +2987,7 @@ def create_trial_reservation(
             phone_number=phone_number,
             user=user,
             participants=participants,
+            payment_method=request.POST.get("payment_method", ""),
         )
 
     except ValueError as e:
@@ -3063,7 +3065,7 @@ def create_member_reservation(
         "stripe",
     ).strip()
 
-    if payment_method not in ("stripe", "ticket"):
+    if payment_method not in ("stripe", "ticket", "cash"):
         return JsonResponse(
             {
                 "error": "無効な支払い方法です。"
@@ -3229,6 +3231,7 @@ def create_member_event_reservation(request, event_id):
             member=member,
             price_id=request.POST.get("price_id"),
             terms_accepted=request.POST.get("terms_accepted"),
+            payment_method=request.POST.get("payment_method", ""),
         )
     except ValueError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
@@ -3268,6 +3271,7 @@ def create_visitor_event_reservation(request, event_id):
             user=user,
             price_id=request.POST.get("price_id"),
             terms_accepted=request.POST.get("terms_accepted"),
+            payment_method=request.POST.get("payment_method", ""),
         )
     except ValueError as exc:
         return JsonResponse({"error": str(exc)}, status=400)

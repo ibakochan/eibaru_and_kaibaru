@@ -4634,6 +4634,7 @@ class ClubViewSet(viewsets.ModelViewSet):
                 many=True,
             ).data,
             "cash_expected": detail["cash_expected"],
+            "cash_reservations": detail.get("cash_reservations") or [],
         })
 
     @action(

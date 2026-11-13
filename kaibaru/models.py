@@ -1122,6 +1122,13 @@ class Payment(models.Model):
     issued_at = models.DateTimeField(auto_now_add=True)
 
 
+RESERVATION_PAYMENT_OPTION_CHOICES = [
+    ("stripe", "Card (Stripe)"),
+    ("cash", "Pay at the venue"),
+    ("both", "Card or pay at the venue"),
+]
+
+
 class Lesson(models.Model):
     club = models.ForeignKey('Club', on_delete=models.CASCADE, related_name='lessons')
     instructor = models.ForeignKey('Member', on_delete=models.SET_NULL, null=True, blank=True,
@@ -1189,6 +1196,15 @@ class Lesson(models.Model):
     trial_disabled = models.BooleanField(
         default=False,
         help_text="If enabled, trial reservations are not allowed."
+    )
+
+    # How a priced reservation for this lesson may be paid. Clubs without
+    # a connected Stripe account can only take payment at the venue.
+    reservation_payment_options = models.CharField(
+        max_length=10,
+        choices=RESERVATION_PAYMENT_OPTION_CHOICES,
+        default="stripe",
+        help_text="stripe, cash (pay at the venue), or both.",
     )
 
     visitor_reservation_price = models.PositiveIntegerField(
@@ -1266,6 +1282,7 @@ class Reservation(models.Model):
     class PaymentMethod(models.TextChoices):
         STRIPE = "stripe", "Stripe"
         TICKET = "ticket", "Ticket"
+        CASH = "cash", "Cash at the venue"
 
     lesson = models.ForeignKey(
         Lesson,
@@ -1390,6 +1407,12 @@ class Reservation(models.Model):
     reservation_key = models.CharField(max_length=255, unique=True)
     canceled = models.BooleanField(default=False)
     is_deleted = models.BooleanField(default=False)
+
+    # Pay-at-the-venue reservations. status is "paid" (confirmed) from the
+    # moment the booking is made; paid_at stays empty until the owner marks
+    # the cash as received. A no-show never counts toward the platform fee.
+    no_show = models.BooleanField(default=False)
+    platform_fee_applied = models.BooleanField(default=False)
 
     refunded_at = models.DateTimeField(null=True, blank=True)
 
@@ -2006,6 +2029,13 @@ class Event(models.Model):
     cancel_reason = models.TextField(blank=True, default="")
     cancel_visible_until = models.DateTimeField(null=True, blank=True)
     live_section_id = models.PositiveIntegerField(null=True, blank=True)
+    # How a priced reservation may be paid. Clubs without a connected
+    # Stripe account can only take payment at the venue.
+    reservation_payment_options = models.CharField(
+        max_length=10,
+        choices=RESERVATION_PAYMENT_OPTION_CHOICES,
+        default="stripe",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -2134,6 +2164,9 @@ class EventReservation(models.Model):
     reservation_key = models.CharField(max_length=255, unique=True)
     canceled = models.BooleanField(default=False)
     is_deleted = models.BooleanField(default=False)
+    # Pay-at-the-venue reservations. See Reservation for how these work.
+    no_show = models.BooleanField(default=False)
+    platform_fee_applied = models.BooleanField(default=False)
     refunded_at = models.DateTimeField(null=True, blank=True)
     refund_started_at = models.DateTimeField(null=True, blank=True)
     stripe_refund_id = models.CharField(

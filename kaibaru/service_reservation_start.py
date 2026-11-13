@@ -6,6 +6,7 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
+from .cash_reservations import allowed_payment_methods
 from .models import Club, Lesson, Reservation
 from .reservation_checkout_recovery import (
     read_stripe_payment,
@@ -373,6 +374,19 @@ def _prepare(token, force_new=False):
             _mark_paid(open_rows, now)
             return {"action": "done", **page}
 
+        if _pays_at_venue(open_rows):
+            if "cash" not in allowed_payment_methods(
+                club, lesson.reservation_payment_options
+            ):
+                raise ReservationStartError(
+                    "このレッスンでは現地でのお支払いを"
+                    "利用できなくなりました。もう一度お申し込みください。"
+                )
+            # Pay at the venue: no checkout. The booking is confirmed now
+            # and the owner marks the cash as received later.
+            _confirm_cash(open_rows)
+            return {"action": "done", **page}
+
         if not club.stripe_account_id:
             raise ReservationStartError(
                 "このクラブではオンライン決済が設定されていません。"
@@ -564,6 +578,7 @@ def _reusable_checkout_url(*, club, session_id):
 def _page_context(reservations, lesson, club):
     total = sum(reservation.amount for reservation in reservations)
     is_free = total == 0
+    is_cash = _pays_at_venue(reservations)
     kind = (
         "体験予約"
         if reservations[0].reservation_type
@@ -587,10 +602,11 @@ def _page_context(reservations, lesson, club):
         ],
         "total_amount": total,
         "is_free": is_free,
+        "is_cash": is_cash,
         "kind": kind,
         "home_url": f"https://{club.subdomain}.kaibaru.jp/",
         "continue_label": (
-            "予約を確定する" if is_free else "支払いへ進む"
+            "予約を確定する" if is_free or is_cash else "支払いへ進む"
         ),
     }
 
@@ -774,6 +790,33 @@ def _mark_paid(reservations, now):
         reservation.save(
             update_fields=["status", "paid_at", "is_deleted"]
         )
+        reservation_ids.append(reservation.id)
+
+    def send_confirmations(ids=tuple(reservation_ids)):
+        for reservation_id in ids:
+            send_visitor_reservation_confirmation_email.delay(
+                reservation_id
+            )
+
+    transaction.on_commit(send_confirmations)
+
+
+def _pays_at_venue(reservations):
+    return bool(reservations) and all(
+        reservation.payment_method == Reservation.PaymentMethod.CASH
+        and reservation.amount > 0
+        for reservation in reservations
+    )
+
+
+def _confirm_cash(reservations):
+    """Confirm pay-at-the-venue reservations. paid_at stays empty."""
+    reservation_ids = []
+
+    for reservation in reservations:
+        reservation.status = Reservation.Status.PAID
+        reservation.is_deleted = False
+        reservation.save(update_fields=["status", "is_deleted"])
         reservation_ids.append(reservation.id)
 
     def send_confirmations(ids=tuple(reservation_ids)):

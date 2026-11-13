@@ -399,6 +399,7 @@ def estimate_platform_bill_for_owner(user):
         "cash_fee_current_month_from_subscription_invoices_yen": 0,
         "cash_fee_current_month_from_expected_subscriptions_yen": 0,
         "cash_fee_current_month_from_other_invoices_yen": 0,
+        "cash_fee_current_month_from_reservations_yen": 0,
     }
     empty = {
         "club_count": 0,
@@ -496,6 +497,7 @@ def platform_billing_detail_for_owner(user):
             "members": [],
             "cash_invoices": [],
             "cash_expected": [],
+            "cash_reservations": [],
             "clubs": [],
         }
 
@@ -528,6 +530,7 @@ def platform_billing_detail_for_owner(user):
         line_items = {
             "cash_invoices": [],
             "cash_expected": [],
+            "cash_reservations": [],
             "source_year": None,
             "source_month": None,
         }
@@ -541,6 +544,7 @@ def platform_billing_detail_for_owner(user):
         "members": member_rows,
         "cash_invoices": line_items["cash_invoices"],
         "cash_expected": line_items["cash_expected"],
+        "cash_reservations": line_items.get("cash_reservations") or [],
         "clubs": club_rows,
         "cash_source_year": line_items["source_year"],
         "cash_source_month": line_items["source_month"],

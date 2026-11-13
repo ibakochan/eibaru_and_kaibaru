@@ -232,6 +232,49 @@ class KaibaruPageView(View):
 
 @login_required
 @require_POST
+def apply_cash_reservation_action(request):
+    """Owner marks a cash lesson/event reservation paid, unpaid, or no-show."""
+    from .cash_reservations import (
+        ACTIONS,
+        KIND_EVENT,
+        KIND_LESSON,
+        CashReservationError,
+        apply_cash_action,
+    )
+
+    try:
+        data = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "無効なリクエストです。"}, status=400)
+
+    kind = str(data.get("kind") or "").strip().lower()
+    action = str(data.get("action") or "").strip().lower()
+    reservation_id = data.get("reservation_id")
+
+    if kind not in (KIND_LESSON, KIND_EVENT):
+        return JsonResponse({"error": "予約の種類が正しくありません。"}, status=400)
+    if action not in ACTIONS:
+        return JsonResponse({"error": "この操作は利用できません。"}, status=400)
+    try:
+        reservation_id = int(reservation_id)
+    except (TypeError, ValueError):
+        return JsonResponse({"error": "予約が見つかりません。"}, status=404)
+
+    try:
+        payload = apply_cash_action(
+            kind=kind,
+            reservation_id=reservation_id,
+            action=action,
+            user=request.user,
+        )
+    except CashReservationError as exc:
+        return JsonResponse({"error": exc.message}, status=exc.status_code)
+
+    return JsonResponse(payload)
+
+
+@login_required
+@require_POST
 def bulk_mark_cash_invoices_paid(request):
 
     data = json.loads(request.body)

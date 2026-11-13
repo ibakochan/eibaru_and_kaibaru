@@ -13,6 +13,12 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
+from .cash_reservations import (
+    DEFAULT_PAYMENT_OPTION,
+    allowed_payment_methods,
+    clean_payment_option,
+    resolve_payment_method,
+)
 from .charge_amounts import (
     normalize_paid_amount,
     persisted_charge_amount,
@@ -248,11 +254,18 @@ def _require_registration_open(event):
         raise ValueError(message)
 
 
-def _require_stripe_for_price(club, amount):
-    if amount > 0 and not club.stripe_account_id:
-        raise ValueError(
-            "このクラブではオンライン決済が設定されていません。"
-        )
+def _event_payment_method(club, event, requested, amount):
+    """How a reservation is paid: "stripe", "cash", or "" when it is free.
+
+    Priced events are card or pay-at-the-venue, whichever the event offers.
+    """
+    return resolve_payment_method(
+        club=club,
+        option=event.reservation_payment_options,
+        requested=requested,
+        amount=amount,
+        subject="イベント",
+    ) or ""
 
 
 def _queue_confirmation(reservation_id):
@@ -283,6 +296,22 @@ def _paid_result(reservation):
     }
 
 
+_CARD_IN_PROGRESS_MESSAGE = (
+    "このイベントの予約はカード決済の手続き中です。"
+    "決済を完了するか、しばらくしてからもう一度お試しください。"
+)
+
+
+def _cash_result(reservation):
+    return {
+        "reservation_id": reservation.id,
+        "success": True,
+        "paid": False,
+        "payment_method": "cash",
+        "requires_checkout": False,
+    }
+
+
 def _email_sent_result(reservation):
     return {
         "reservation_id": reservation.id,
@@ -296,7 +325,14 @@ def _email_sent_result(reservation):
 class EventReservationService:
 
     @staticmethod
-    def create_member_reservation(*, event, member, price_id, terms_accepted=False):
+    def create_member_reservation(
+        *,
+        event,
+        member,
+        price_id,
+        terms_accepted=False,
+        payment_method="",
+    ):
         club = event.club
 
         if member.club_id != club.id or event.club_id != club.id:
@@ -323,7 +359,7 @@ class EventReservationService:
         price = selected_event_price(event, price_id)
         amount = normalize_paid_amount(price.amount)
         price_name = price.name
-        _require_stripe_for_price(club, amount)
+        _event_payment_method(club, event, payment_method, amount)
 
         if not member.full_name:
             raise ValueError("会員のお名前が登録されていません。")
@@ -356,7 +392,13 @@ class EventReservationService:
             price = selected_event_price(locked_event, price_id)
             amount = normalize_paid_amount(price.amount)
             price_name = price.name
-            _require_stripe_for_price(club, amount)
+            method = _event_payment_method(
+                club,
+                locked_event,
+                payment_method,
+                amount,
+            )
+            pays_at_venue = method == "cash"
 
             existing = (
                 EventReservation.objects
@@ -408,6 +450,8 @@ class EventReservationService:
             )
 
             if open_checkout is not None:
+                if pays_at_venue:
+                    raise ValueError(_CARD_IN_PROGRESS_MESSAGE)
                 if existing.is_deleted:
                     existing.is_deleted = False
                     existing.save(update_fields=["is_deleted"])
@@ -432,6 +476,8 @@ class EventReservationService:
                     return _paid_result(existing)
 
                 if payment_view.open_url:
+                    if pays_at_venue:
+                        raise ValueError(_CARD_IN_PROGRESS_MESSAGE)
                     if existing.is_deleted:
                         existing.is_deleted = False
                         existing.save(update_fields=["is_deleted"])
@@ -456,10 +502,10 @@ class EventReservationService:
                 existing.member = member
                 existing.user = member.owner
                 existing.reservation_type = EventReservation.ReservationType.MEMBER
-                existing.payment_method = "stripe" if amount > 0 else ""
+                existing.payment_method = method
                 existing.status = (
                     EventReservation.Status.PAID
-                    if amount == 0
+                    if amount == 0 or pays_at_venue
                     else EventReservation.Status.UNPAID
                 )
                 existing.full_name = full_name
@@ -470,7 +516,9 @@ class EventReservationService:
                 existing.currency = "jpy"
                 existing.canceled = False
                 existing.paid_at = now if amount == 0 else None
-                existing.checkout_started_at = now if amount > 0 else None
+                existing.checkout_started_at = (
+                    now if amount > 0 and not pays_at_venue else None
+                )
                 existing.stripe_checkout_session_id = None
                 existing.stripe_payment_intent_id = None
                 existing.confirmation_email_sent = False
@@ -484,10 +532,10 @@ class EventReservationService:
                     member=member,
                     user=member.owner,
                     reservation_type=EventReservation.ReservationType.MEMBER,
-                    payment_method="stripe" if amount > 0 else "",
+                    payment_method=method,
                     status=(
                         EventReservation.Status.PAID
-                        if amount == 0
+                        if amount == 0 or pays_at_venue
                         else EventReservation.Status.UNPAID
                     ),
                     full_name=full_name,
@@ -498,12 +546,18 @@ class EventReservationService:
                     currency="jpy",
                     reservation_key=reservation_key,
                     paid_at=now if amount == 0 else None,
-                    checkout_started_at=now if amount > 0 else None,
+                    checkout_started_at=(
+                        now if amount > 0 and not pays_at_venue else None
+                    ),
                 )
 
         if amount == 0:
             _queue_confirmation(reservation.id)
             return _paid_result(reservation)
+
+        if pays_at_venue:
+            _queue_confirmation(reservation.id)
+            return _cash_result(reservation)
 
         try:
             charged = _charge_member_off_session(
@@ -562,6 +616,7 @@ class EventReservationService:
         user=None,
         price_id=None,
         terms_accepted=False,
+        payment_method="",
     ):
         club = event.club
 
@@ -602,7 +657,7 @@ class EventReservationService:
         price = selected_event_price(event, price_id)
         amount = normalize_paid_amount(price.amount)
         price_name = price.name
-        _require_stripe_for_price(club, amount)
+        method = _event_payment_method(club, event, payment_method, amount)
         reservation_key = visitor_reservation_key(event, email)
 
         try:
@@ -617,6 +672,7 @@ class EventReservationService:
                     price_id=price_id,
                     reservation_key=reservation_key,
                     terms_accepted=terms_accepted,
+                    payment_method=payment_method,
                 )
                 _queue_start_email(token)
         except IntegrityError:
@@ -646,6 +702,7 @@ def _save_visitor_reservation(
     price_id,
     reservation_key,
     terms_accepted=False,
+    payment_method="",
 ):
     now = timezone.now()
     hold_cutoff = hold_cutoff_at(now)
@@ -661,7 +718,12 @@ def _save_visitor_reservation(
     price = selected_event_price(locked_event, price_id)
     amount = normalize_paid_amount(price.amount)
     price_name = price.name
-    _require_stripe_for_price(club, amount)
+    method = _event_payment_method(
+        club,
+        locked_event,
+        payment_method,
+        amount,
+    )
 
     existing = (
         EventReservation.objects
@@ -729,6 +791,7 @@ def _save_visitor_reservation(
             existing.full_name = full_name
             existing.phone_number = phone_number
             existing.amount = amount
+            existing.payment_method = method
             existing.price_name = price_name
             existing.user = user
             existing.requested_at = now
@@ -738,6 +801,7 @@ def _save_visitor_reservation(
                     "full_name",
                     "phone_number",
                     "amount",
+                    "payment_method",
                     "price_name",
                     "user",
                     "requested_at",
@@ -757,7 +821,7 @@ def _save_visitor_reservation(
         existing.club = club
         existing.user = user
         existing.member = None
-        existing.payment_method = "stripe" if amount > 0 else ""
+        existing.payment_method = method
         existing.reservation_type = EventReservation.ReservationType.VISITOR
         existing.status = EventReservation.Status.NOT_STARTED
         existing.full_name = full_name
@@ -787,7 +851,7 @@ def _save_visitor_reservation(
         club=club,
         member=None,
         user=user,
-        payment_method="stripe" if amount > 0 else "",
+        payment_method=method,
         reservation_type=EventReservation.ReservationType.VISITOR,
         status=EventReservation.Status.NOT_STARTED,
         full_name=full_name,
@@ -1158,6 +1222,7 @@ def _start_page(reservation):
     event = reservation.event
     club = reservation.club
     is_free = reservation.amount == 0
+    is_cash = not is_free and reservation.payment_method == "cash"
     return {
         "club_name": club.title or club.subdomain or "クラブ",
         "event_title": event.title,
@@ -1165,8 +1230,11 @@ def _start_page(reservation):
         "person_name": reservation.full_name,
         "total_amount": reservation.amount,
         "is_free": is_free,
+        "is_cash": is_cash,
         "home_url": f"https://{club.subdomain}.kaibaru.jp/",
-        "continue_label": "予約を確定する" if is_free else "支払いへ進む",
+        "continue_label": (
+            "予約を確定する" if is_free or is_cash else "支払いへ進む"
+        ),
     }
 
 
@@ -1250,6 +1318,21 @@ def _prepare_start(token, force_new=False):
             reservation.save(
                 update_fields=["status", "paid_at", "is_deleted"]
             )
+            _queue_confirmation(reservation.id)
+            return {"action": "done", **page}
+
+        if page["is_cash"]:
+            if "cash" not in allowed_payment_methods(
+                club, event.reservation_payment_options
+            ):
+                raise EventStartError(
+                    "このイベントでは現地でのお支払いを"
+                    "利用できなくなりました。もう一度お申し込みください。"
+                )
+            # Confirmed now; paid_at stays empty until the cash is received.
+            reservation.status = EventReservation.Status.PAID
+            reservation.is_deleted = False
+            reservation.save(update_fields=["status", "is_deleted"])
             _queue_confirmation(reservation.id)
             return {"action": "done", **page}
 
@@ -1897,6 +1980,14 @@ def save_section_event(*, club, section_id, title, payload):
         "starts_at": starts_at,
         "reservation_limit": _optional_cap(payload.get("reservation_limit")),
         "audience": audience,
+        "reservation_payment_options": clean_payment_option(
+            payload.get("payment_options"),
+            default=(
+                existing_event.reservation_payment_options
+                if existing_event is not None
+                else DEFAULT_PAYMENT_OPTION
+            ),
+        ),
         "title_color": _color(payload.get("title_color"), "#1c1917"),
         "description_color": _color(payload.get("description_color"), "#57534e"),
         "detail_color": _color(payload.get("detail_color"), "#44403c"),

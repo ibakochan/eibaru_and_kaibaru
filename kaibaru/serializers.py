@@ -2275,6 +2275,8 @@ class LessonSerializer(serializers.ModelSerializer):
             "visitor_reservation_max_count",
             "visitor_reservation_max_days_ahead",
 
+            "reservation_payment_options",
+
             "age_min",
             "age_max",
             "allowed_gender",
@@ -2284,6 +2286,17 @@ class LessonSerializer(serializers.ModelSerializer):
 
     def validate_allowed_gender(self, value):
         return validate_allowed_gender_value(value)
+
+    def validate_reservation_payment_options(self, value):
+        from .cash_reservations import PAYMENT_OPTIONS, clean_payment_option
+
+        try:
+            option = clean_payment_option(value)
+        except ValueError as exc:
+            raise serializers.ValidationError(str(exc)) from exc
+        if option not in PAYMENT_OPTIONS:
+            raise serializers.ValidationError("支払い方法の設定が正しくありません。")
+        return option
 
     def validate(self, attrs):
         club = (
@@ -2304,6 +2317,17 @@ class LessonSerializer(serializers.ModelSerializer):
         validate_reservation_cap_attrs(attrs, self.instance)
 
         from .charge_amounts import invalid_set_price
+        from .cash_reservations import OPTION_CASH
+
+        if "reservation_payment_options" in attrs:
+            if not club.stripe_account_id and attrs["reservation_payment_options"] != OPTION_CASH:
+                raise serializers.ValidationError({
+                    "reservation_payment_options": (
+                        "Stripe未連携のため、現地払いのみ設定できます。"
+                    )
+                })
+        elif not self.instance and not club.stripe_account_id:
+            attrs["reservation_payment_options"] = OPTION_CASH
 
         for field in (
             "trial_price",
@@ -2492,8 +2516,10 @@ def _event_is_past(event):
     return starts_on < timezone.localdate()
 
 
-def _event_reservation_detail(row):
-    return {
+def _event_reservation_detail(row, user=None):
+    from .cash_reservations import cash_state, owner_cash_flags
+
+    detail = {
         "id": row.id,
         "member": row.member_id,
         "member_name": row.member.full_name if row.member_id else "",
@@ -2507,7 +2533,13 @@ def _event_reservation_detail(row):
         "canceled": row.canceled,
         "refunded_at": row.refunded_at,
         "created_at": row.created_at,
+        "payment_method": row.payment_method,
+        "paid_at": row.paid_at,
+        "no_show": row.no_show,
+        "cash_status": cash_state(row),
     }
+    detail.update(owner_cash_flags(row, user))
+    return detail
 
 
 def _event_reservation_urls(row, user, event):
@@ -2667,6 +2699,7 @@ class EventSerializer(serializers.ModelSerializer):
             "prices",
             "reservation_limit",
             "audience",
+            "reservation_payment_options",
             "test",
             "competition",
             "duel",
@@ -2821,7 +2854,7 @@ class EventSerializer(serializers.ModelSerializer):
         placed_ids = placed_ids_for_event(event)
         cached = []
         for row in ordered:
-            detail = _event_reservation_detail(row)
+            detail = _event_reservation_detail(row, user)
             cancel, restore = _event_reservation_urls(row, user, event)
             if row.id in placed_ids and cancel:
                 cancel = None
@@ -2873,7 +2906,7 @@ class EventSerializer(serializers.ModelSerializer):
         placed_ids = placed_ids_for_event(event)
         details = []
         for row in rows:
-            detail = _event_reservation_detail(row)
+            detail = _event_reservation_detail(row, user)
             cancel, restore = _event_reservation_urls(row, user, event)
             placed = row.id in placed_ids
             if self._viewer_can_manage(event):
@@ -3750,6 +3783,11 @@ class ReservationSerializer(serializers.ModelSerializer):
     cancel_url = serializers.SerializerMethodField()
     restore_url = serializers.SerializerMethodField()
     can_refund = serializers.SerializerMethodField()
+    cash_status = serializers.SerializerMethodField()
+    can_mark_paid = serializers.SerializerMethodField()
+    can_unmark_paid = serializers.SerializerMethodField()
+    can_mark_no_show = serializers.SerializerMethodField()
+    can_clear_no_show = serializers.SerializerMethodField()
 
     class Meta:
         model = Reservation
@@ -3788,6 +3826,12 @@ class ReservationSerializer(serializers.ModelSerializer):
             "paid_at",
             "payment_method",
             "refunded_at",
+            "no_show",
+            "cash_status",
+            "can_mark_paid",
+            "can_unmark_paid",
+            "can_mark_no_show",
+            "can_clear_no_show",
 
             # Metadata
             "created_at",
@@ -3851,6 +3895,39 @@ class ReservationSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         user = getattr(request, "user", None)
         return reservation_is_refundable(obj, user)
+
+    def _cash_flags(self, obj):
+        flags = getattr(self, "_cash_flags_cache", None)
+        if flags is None:
+            flags = {}
+            self._cash_flags_cache = flags
+        cached = flags.get(obj.id)
+        if cached is not None:
+            return cached
+        from .cash_reservations import owner_cash_flags
+
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        cached = owner_cash_flags(obj, user)
+        flags[obj.id] = cached
+        return cached
+
+    def get_cash_status(self, obj):
+        from .cash_reservations import cash_state
+
+        return cash_state(obj)
+
+    def get_can_mark_paid(self, obj):
+        return self._cash_flags(obj)["can_mark_paid"]
+
+    def get_can_unmark_paid(self, obj):
+        return self._cash_flags(obj)["can_unmark_paid"]
+
+    def get_can_mark_no_show(self, obj):
+        return self._cash_flags(obj)["can_mark_no_show"]
+
+    def get_can_clear_no_show(self, obj):
+        return self._cash_flags(obj)["can_clear_no_show"]
 
     def get_instructor(self, obj):
         instructor = obj.lesson.instructor

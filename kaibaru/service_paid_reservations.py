@@ -1,7 +1,8 @@
-"""Paid lesson, trial, and event reservations charged through Stripe.
+"""Paid lesson, trial, and event reservations for income reporting.
 
-Ticket reservations are excluded. Refunded and deleted rows are excluded.
-The month is paid_at, or created_at when paid_at was not stored.
+Ticket reservations are excluded. Refunded, deleted, canceled, and no-show
+rows are excluded. Cash reservations only count after paid_at is set.
+Stripe rows use paid_at, or created_at when paid_at was not stored.
 """
 
 from django.db.models.functions import Coalesce
@@ -22,9 +23,12 @@ def _rows(model, club_ids, *, start, end, kind_for):
             status="paid",
             is_deleted=False,
             refunded_at__isnull=True,
+            canceled=False,
+            no_show=False,
             amount__gt=0,
         )
         .exclude(payment_method="ticket")
+        .exclude(payment_method="cash", paid_at__isnull=True)
         .select_related(related)
         .annotate(income_at=Coalesce("paid_at", "created_at"))
     )
@@ -44,6 +48,7 @@ def _rows(model, club_ids, *, start, end, kind_for):
             "paid_on": local.date().isoformat() if local else None,
             "income_at": income_at,
             "payment_intent_id": reservation.stripe_payment_intent_id or "",
+            "payment_method": reservation.payment_method or "",
         })
     return rows
 
@@ -80,9 +85,12 @@ def paid_reservation_counts_by_month(club_ids):
                 status="paid",
                 is_deleted=False,
                 refunded_at__isnull=True,
+                canceled=False,
+                no_show=False,
                 amount__gt=0,
             )
             .exclude(payment_method="ticket")
+            .exclude(payment_method="cash", paid_at__isnull=True)
             .annotate(income_at=Coalesce("paid_at", "created_at"))
             .values_list("income_at", flat=True)
         )

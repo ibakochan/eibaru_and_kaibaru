@@ -3,6 +3,7 @@ import secrets
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
+from .cash_reservations import resolve_payment_method
 from .models import Reservation
 from .reservation_checkout_recovery import (
     read_stripe_payment,
@@ -38,6 +39,7 @@ class VisitorReservationService:
         user=None,
         age=None,
         gender="",
+        payment_method="",
     ):
         prepared = _prepare_visitor_request(
             club=club,
@@ -49,6 +51,7 @@ class VisitorReservationService:
             user=user,
             age=age,
             gender=gender,
+            payment_method=payment_method,
         )
 
         try:
@@ -130,6 +133,7 @@ def _prepare_visitor_request(
     user,
     age,
     gender,
+    payment_method="",
 ):
     if lesson.club_id != club.id:
         raise ValueError(
@@ -179,10 +183,15 @@ def _prepare_visitor_request(
         ),
     )
 
-    if reservation_price > 0 and not club.stripe_account_id:
-        raise ValueError(
-            "このクラブではオンライン決済が設定されていません。"
-        )
+    # Free reservations keep the card label they always had. Priced ones
+    # are card or pay-at-the-venue, whichever this lesson offers.
+    payment_method = resolve_payment_method(
+        club=club,
+        option=lesson.reservation_payment_options,
+        requested=payment_method,
+        amount=reservation_price,
+        subject="レッスン",
+    ) or Reservation.PaymentMethod.STRIPE
 
     full_name = display_reservation_name(full_name)
     phone_number = (phone_number or "").strip()
@@ -223,6 +232,7 @@ def _prepare_visitor_request(
         "gender": gender,
         "reservation_price": reservation_price,
         "reservation_key": reservation_key,
+        "payment_method": payment_method,
     }
 
 
@@ -239,6 +249,7 @@ def _save_visitor_reservation(
     gender,
     reservation_price,
     reservation_key,
+    payment_method=Reservation.PaymentMethod.STRIPE,
 ):
     now = timezone.now()
     hold_cutoff = hold_cutoff_at(now)
@@ -316,6 +327,7 @@ def _save_visitor_reservation(
             existing.age = age
             existing.gender = gender
             existing.amount = reservation_price
+            existing.payment_method = payment_method
             existing.user = user
             existing.requested_at = now
             existing.save(
@@ -325,6 +337,7 @@ def _save_visitor_reservation(
                     "age",
                     "gender",
                     "amount",
+                    "payment_method",
                     "user",
                     "requested_at",
                 ]
@@ -344,7 +357,7 @@ def _save_visitor_reservation(
         existing.lesson = lesson
         existing.club = club
         existing.user = user
-        existing.payment_method = "stripe"
+        existing.payment_method = payment_method
         existing.reservation_type = Reservation.ReservationType.VISITOR
         existing.status = Reservation.Status.NOT_STARTED
         existing.full_name = full_name
@@ -381,7 +394,7 @@ def _save_visitor_reservation(
         club=club,
         member=None,
         user=user,
-        payment_method="stripe",
+        payment_method=payment_method,
         reservation_type=Reservation.ReservationType.VISITOR,
         status=Reservation.Status.NOT_STARTED,
         full_name=full_name,

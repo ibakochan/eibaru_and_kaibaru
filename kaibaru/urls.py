@@ -132,4 +132,9 @@ urlpatterns = [
     path('stripe_oauth_callback/', stripe_views.stripe_oauth_callback, name='stripe_oauth_callback'),
 
     path('bulk_mark_cash_invoices_paid/', views.bulk_mark_cash_invoices_paid, name='bulk_mark_cash_invoices_paid'),
+    path(
+        'apply_cash_reservation_action/',
+        views.apply_cash_reservation_action,
+        name='apply_cash_reservation_action',
+    ),
 ]

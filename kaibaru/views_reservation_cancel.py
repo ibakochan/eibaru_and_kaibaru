@@ -3,12 +3,26 @@ from django.http import JsonResponse
 from django.shortcuts import render
 from django.views.decorators.http import require_http_methods
 
+from .cash_reservations import cancel_blocked_message
 from .models import EventReservation, Reservation
 from .reservation_cancel import (
     cancel_is_closed,
     read_cancel_token,
     restore_url,
 )
+
+
+def _cash_cancel_block(request, reservation):
+    """Participants cannot cancel cash bookings already marked paid or no-show."""
+    user = getattr(request, "user", None)
+    owner = (
+        user is not None
+        and getattr(user, "is_authenticated", False)
+        and reservation.club.owner_id == user.id
+    )
+    if owner:
+        return None
+    return cancel_blocked_message(reservation)
 
 
 @require_http_methods(["GET", "POST"])
@@ -42,6 +56,12 @@ def cancel_reservation(request, token):
         context["message"] = "この予約はすでに終了しているため、キャンセルできません。"
         return _render(request, context)
 
+    cash_block = _cash_cancel_block(request, reservation)
+    if cash_block:
+        context["mode"] = "closed"
+        context["message"] = cash_block
+        return _render(request, context)
+
     placed = _placement_block(request, kind, reservation)
     if placed:
         context["mode"] = "closed"
@@ -72,6 +92,12 @@ def cancel_reservation(request, token):
         if cancel_is_closed(kind, locked):
             context["mode"] = "closed"
             context["message"] = "この予約はすでに終了しているため、キャンセルできません。"
+            return _render(request, context)
+
+        cash_block = _cash_cancel_block(request, locked)
+        if cash_block:
+            context["mode"] = "closed"
+            context["message"] = cash_block
             return _render(request, context)
 
         placed = _placement_block(request, kind, locked)
