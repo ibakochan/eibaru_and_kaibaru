@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "next_section_id": 11,
+  "next_section_id": 14,
   "sections": {
     "1": {
       "id": 1,
@@ -11,7 +11,7 @@
       "header": {
         "logo": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/hair_salon/logo.jpg",
         "logoHeight": 56,
-        "title": "ヘアサロン",
+        "title": "〇〇ヘアサロン",
         "subtitle": "髪を整えて、気持ちも整える。",
         "transparent": false,
         "collapseAllNav": false
@@ -28,33 +28,33 @@
         {
           "id": "hair-slide-1",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/hair_salon/entrance.jpg",
-          "heading": "ヘアサロンへようこそ",
-          "subheading": "写真と文章は「ホーム」右の鉛筆マークから変更できます（写真の例：店の外観）。",
+          "heading": "はじめての方も、かかりつけに。",
+          "subheading": "写真と文章は「ホーム」右の鉛筆マークから変更できます（写真の例：サロンの入口）。",
           "buttonText": "予約する",
           "buttonLink": "",
-          "buttonSectionId": 7,
+          "buttonSectionId": 11,
           "buttonBoxId": null,
           "textAlign": "center"
         },
         {
           "id": "hair-slide-2",
           "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/hair_salon/haircut.jpg",
-          "heading": "担当をご紹介",
-          "subheading": "写真の例：スタッフの写真。文章も鉛筆マークから変えられます。",
+          "heading": "なりたい印象から、一緒に。",
+          "subheading": "写真と文章は「ホーム」右の鉛筆マークから変更できます（写真の例：カットの様子）。",
           "buttonText": "スタッフを見る",
           "buttonLink": "",
-          "buttonSectionId": 5,
+          "buttonSectionId": 7,
           "buttonBoxId": null,
           "textAlign": "center"
         },
         {
           "id": "hair-slide-3",
-          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/hair_salon/stylist.jpg",
-          "heading": "メニューを選んで予約",
-          "subheading": "写真の例：施術の様子。基本料金と追加メニューを組み合わせて予約できます。",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/hair_salon/color.jpg",
+          "heading": "色も、質感も、相談しながら。",
+          "subheading": "写真と文章は「ホーム」右の鉛筆マークから変更できます（写真の例：カラーの様子）。",
           "buttonText": "メニューを見る",
           "buttonLink": "",
-          "buttonSectionId": 6,
+          "buttonSectionId": 5,
           "buttonBoxId": null,
           "textAlign": "center"
         }
@@ -80,40 +80,19 @@
         "version": 2,
         "boxes": [
           {
-            "id": "about-title",
-            "x": 50,
-            "y": 20,
-            "width": 1100,
-            "height": 64,
-            "order": 1,
-            "content": [
-              {
-                "type": "heading",
-                "level": 2,
-                "align": "center",
-                "children": [
-                  {
-                    "text": "サロンについて"
-                  }
-                ]
-              }
-            ]
-          },
-          {
             "id": "about-photo",
-            "x": 50,
-            "y": 100,
-            "width": 520,
-            "height": 280,
-            "order": 2,
+            "x": 40,
+            "y": 24,
+            "width": 560,
+            "height": 330,
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/hair_salon/entrance.jpg",
-                "width": 512,
-                "height": 272,
-                "x": 4,
-                "y": 0,
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/hair_salon/interior.jpg",
+                "width": 544,
+                "height": 306,
+                "x": 8,
+                "y": 6,
                 "aspectRatio": 1.7778,
                 "children": [
                   {
@@ -121,15 +100,15 @@
                   }
                 ]
               }
-            ]
+            ],
+            "order": 1
           },
           {
             "id": "about-cap",
-            "x": 50,
-            "y": 388,
-            "width": 520,
-            "height": 72,
-            "order": 3,
+            "x": 40,
+            "y": 362,
+            "width": 560,
+            "height": 96,
             "content": [
               {
                 "type": "block",
@@ -137,21 +116,41 @@
                 "align": "center",
                 "children": [
                   {
-                    "text": "▲ この写真を変更：サロンの外観や店内の写真。左上の「レイアウト編集」を押し、この枠に写真をドラッグすると変わります。",
+                    "text": "▲ この写真を変更：スタイリングスペースの写真。左上の「レイアウト編集」を押し、この枠に写真をドラッグすると変わります。",
                     "fontSize": 14,
                     "italic": true
                   }
                 ]
               }
-            ]
+            ],
+            "order": 2
           },
           {
-            "id": "about-body",
-            "x": 600,
-            "y": 100,
-            "width": 550,
-            "height": 220,
-            "order": 4,
+            "id": "about-title",
+            "x": 630,
+            "y": 24,
+            "width": 530,
+            "height": 56,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "サロンについて"
+                  }
+                ]
+              }
+            ],
+            "order": 3
+          },
+          {
+            "id": "about-copy",
+            "x": 630,
+            "y": 92,
+            "width": 530,
+            "height": 150,
             "content": [
               {
                 "type": "block",
@@ -159,26 +158,69 @@
                 "align": "left",
                 "children": [
                   {
-                    "text": "カット、カラー、パーマ、髪質改善。なりたい印象に合わせて、担当がメニューをご提案します。予約は下の「予約」から、メニュー名を選んでお取りください。",
+                    "text": "カット、カラー、パーマ、髪質改善。仕上がりまで同じ担当がつきます。",
                     "fontSize": 18
                   }
                 ]
               }
-            ]
+            ],
+            "order": 4
           },
           {
-            "id": "about-reserve",
-            "x": 600,
-            "y": 340,
+            "id": "about-list",
+            "x": 630,
+            "y": 254,
+            "width": 530,
+            "height": 160,
+            "content": [
+              {
+                "type": "list",
+                "ordered": false,
+                "children": [
+                  {
+                    "type": "list-item",
+                    "children": [
+                      {
+                        "text": "カウンセリングは予約の時間に含みます",
+                        "fontSize": 18
+                      }
+                    ]
+                  },
+                  {
+                    "type": "list-item",
+                    "children": [
+                      {
+                        "text": "シャンプーとブローは基本メニューに含まれます（例）",
+                        "fontSize": 18
+                      }
+                    ]
+                  },
+                  {
+                    "type": "list-item",
+                    "children": [
+                      {
+                        "text": "初めての方は15分ほど余裕をみてください（例）",
+                        "fontSize": 18
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            "order": 5
+          },
+          {
+            "id": "about-button",
+            "x": 630,
+            "y": 430,
             "width": 280,
-            "height": 80,
-            "order": 5,
+            "height": 88,
             "content": [
               {
                 "type": "button",
                 "label": "予約する",
                 "align": "center",
-                "sectionId": 7,
+                "sectionId": 11,
                 "boxId": null,
                 "children": [
                   {
@@ -186,7 +228,8 @@
                   }
                 ]
               }
-            ]
+            ],
+            "order": 6
           }
         ]
       }
@@ -194,6 +237,638 @@
     "5": {
       "id": 5,
       "order": 5,
+      "title": "メニュー",
+      "slug": "メニュー",
+      "type": "custom",
+      "icon": "featured",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "menu-title",
+            "x": 40,
+            "y": 20,
+            "width": 1120,
+            "height": 112,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "メニュー"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "料金は例です。予約の基本料金に、この名前で登録してください。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ],
+            "order": 1
+          },
+          {
+            "id": "menu-photo-0",
+            "x": 40,
+            "y": 148,
+            "width": 360,
+            "height": 206,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/hair_salon/haircut.jpg",
+                "width": 344,
+                "height": 193,
+                "x": 8,
+                "y": 6,
+                "aspectRatio": 1.7824,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              }
+            ],
+            "order": 2
+          },
+          {
+            "id": "menu-cap-0",
+            "x": 40,
+            "y": 364,
+            "width": 360,
+            "height": 88,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：カットの様子。左上の「レイアウト編集」を押し、この枠に写真をドラッグすると変わります。",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ]
+              }
+            ],
+            "order": 3
+          },
+          {
+            "id": "menu-title-0",
+            "x": 40,
+            "y": 460,
+            "width": 360,
+            "height": 48,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "カット（例）　5,500円〜"
+                  }
+                ]
+              }
+            ],
+            "order": 4
+          },
+          {
+            "id": "menu-body-0",
+            "x": 40,
+            "y": 516,
+            "width": 360,
+            "height": 120,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "シャンプー・ブロー込み。長さで所要時間と料金が変わります。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ],
+            "order": 5
+          },
+          {
+            "id": "menu-photo-1",
+            "x": 422,
+            "y": 148,
+            "width": 360,
+            "height": 206,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/hair_salon/color.jpg",
+                "width": 344,
+                "height": 193,
+                "x": 8,
+                "y": 6,
+                "aspectRatio": 1.7824,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              }
+            ],
+            "order": 6
+          },
+          {
+            "id": "menu-cap-1",
+            "x": 422,
+            "y": 364,
+            "width": 360,
+            "height": 88,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：カラーの様子。左上の「レイアウト編集」を押し、この枠に写真をドラッグすると変わります。",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ]
+              }
+            ],
+            "order": 7
+          },
+          {
+            "id": "menu-title-1",
+            "x": 422,
+            "y": 460,
+            "width": 360,
+            "height": 48,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "カラー（例）　8,800円〜"
+                  }
+                ]
+              }
+            ],
+            "order": 8
+          },
+          {
+            "id": "menu-body-1",
+            "x": 422,
+            "y": 516,
+            "width": 360,
+            "height": 120,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "ご希望の明るさまで。事前のカウンセリング込みです。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ],
+            "order": 9
+          },
+          {
+            "id": "menu-photo-2",
+            "x": 804,
+            "y": 148,
+            "width": 360,
+            "height": 206,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/hair_salon/perm.jpg",
+                "width": 344,
+                "height": 193,
+                "x": 8,
+                "y": 6,
+                "aspectRatio": 1.7824,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              }
+            ],
+            "order": 10
+          },
+          {
+            "id": "menu-cap-2",
+            "x": 804,
+            "y": 364,
+            "width": 360,
+            "height": 88,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：パーマの様子。左上の「レイアウト編集」を押し、この枠に写真をドラッグすると変わります。",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ]
+              }
+            ],
+            "order": 11
+          },
+          {
+            "id": "menu-title-2",
+            "x": 804,
+            "y": 460,
+            "width": 360,
+            "height": 48,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "パーマ（例）　9,900円〜"
+                  }
+                ]
+              }
+            ],
+            "order": 12
+          },
+          {
+            "id": "menu-body-2",
+            "x": 804,
+            "y": 516,
+            "width": 360,
+            "height": 120,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "やわらかい動きを出します。カットとのセットも選べます。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ],
+            "order": 13
+          },
+          {
+            "id": "menu-button",
+            "x": 40,
+            "y": 652,
+            "width": 1120,
+            "height": 88,
+            "content": [
+              {
+                "type": "button",
+                "label": "予約メニューを見る",
+                "align": "center",
+                "sectionId": 11,
+                "boxId": null,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              }
+            ],
+            "order": 14
+          }
+        ]
+      }
+    },
+    "6": {
+      "id": 6,
+      "order": 6,
+      "title": "スタイル",
+      "slug": "スタイル",
+      "type": "custom",
+      "icon": "award",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "look-title",
+            "x": 40,
+            "y": 20,
+            "width": 1120,
+            "height": 112,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "スタイル"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "仕上がりの例です。写真はお店の作品に差し替えてください。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ],
+            "order": 1
+          },
+          {
+            "id": "look-photo-0",
+            "x": 50,
+            "y": 148,
+            "width": 320,
+            "height": 412,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/hair_salon/style-bob.jpg",
+                "width": 300,
+                "height": 400,
+                "x": 8,
+                "y": 6,
+                "aspectRatio": 0.75,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              }
+            ],
+            "order": 2
+          },
+          {
+            "id": "look-cap-0",
+            "x": 50,
+            "y": 570,
+            "width": 320,
+            "height": 88,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：ボブの仕上がり。左上の「レイアウト編集」を押し、この枠に写真をドラッグすると変わります。",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ]
+              }
+            ],
+            "order": 3
+          },
+          {
+            "id": "look-title-0",
+            "x": 50,
+            "y": 666,
+            "width": 320,
+            "height": 48,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "ボブ"
+                  }
+                ]
+              }
+            ],
+            "order": 4
+          },
+          {
+            "id": "look-body-0",
+            "x": 50,
+            "y": 722,
+            "width": 320,
+            "height": 120,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "重さを残した、まとまりやすい長さ。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ],
+            "order": 5
+          },
+          {
+            "id": "look-photo-1",
+            "x": 442,
+            "y": 148,
+            "width": 320,
+            "height": 412,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/hair_salon/style-long.jpg",
+                "width": 300,
+                "height": 400,
+                "x": 8,
+                "y": 6,
+                "aspectRatio": 0.75,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              }
+            ],
+            "order": 6
+          },
+          {
+            "id": "look-cap-1",
+            "x": 442,
+            "y": 570,
+            "width": 320,
+            "height": 88,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：ロングの仕上がり。左上の「レイアウト編集」を押し、この枠に写真をドラッグすると変わります。",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ]
+              }
+            ],
+            "order": 7
+          },
+          {
+            "id": "look-title-1",
+            "x": 442,
+            "y": 666,
+            "width": 320,
+            "height": 48,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "ロング"
+                  }
+                ]
+              }
+            ],
+            "order": 8
+          },
+          {
+            "id": "look-body-1",
+            "x": 442,
+            "y": 722,
+            "width": 320,
+            "height": 120,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "ツヤを活かした、まっすぐなライン。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ],
+            "order": 9
+          },
+          {
+            "id": "look-photo-2",
+            "x": 834,
+            "y": 148,
+            "width": 320,
+            "height": 412,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/hair_salon/style-short.jpg",
+                "width": 300,
+                "height": 400,
+                "x": 8,
+                "y": 6,
+                "aspectRatio": 0.75,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              }
+            ],
+            "order": 10
+          },
+          {
+            "id": "look-cap-2",
+            "x": 834,
+            "y": 570,
+            "width": 320,
+            "height": 88,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：ショートの仕上がり。左上の「レイアウト編集」を押し、この枠に写真をドラッグすると変わります。",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ]
+              }
+            ],
+            "order": 11
+          },
+          {
+            "id": "look-title-2",
+            "x": 834,
+            "y": 666,
+            "width": 320,
+            "height": 48,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "ショート"
+                  }
+                ]
+              }
+            ],
+            "order": 12
+          },
+          {
+            "id": "look-body-2",
+            "x": 834,
+            "y": 722,
+            "width": 320,
+            "height": 120,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "軽さと、輪郭のきれいさ。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ],
+            "order": 13
+          }
+        ]
+      }
+    },
+    "7": {
+      "id": 7,
+      "order": 7,
       "title": "スタッフ紹介",
       "slug": "スタッフ紹介",
       "type": "custom",
@@ -204,10 +879,9 @@
           {
             "id": "staff-title",
             "x": 40,
-            "y": 16,
+            "y": 20,
             "width": 1120,
-            "height": 40,
-            "order": 1,
+            "height": 112,
             "content": [
               {
                 "type": "heading",
@@ -215,64 +889,54 @@
                 "align": "center",
                 "children": [
                   {
-                    "text": "スタッフ"
+                    "text": "スタッフ紹介"
                   }
                 ]
-              }
-            ]
-          },
-          {
-            "id": "staff-lead",
-            "x": 40,
-            "y": 60,
-            "width": 1120,
-            "height": 40,
-            "order": 2,
-            "content": [
+              },
               {
                 "type": "block",
                 "paragraphSize": 0.4,
                 "align": "center",
                 "children": [
                   {
-                    "text": "担当は店長、スタイリスト、アシスタントの3人です。名前と写真はレイアウト編集で差し替えてください。",
-                    "fontSize": 16
+                    "text": "名前と担当は例です。写真と文章を、実際のスタッフに変えてください。",
+                    "fontSize": 18
                   }
                 ]
               }
-            ]
+            ],
+            "order": 1
           },
           {
-            "id": "staff-0-photo",
-            "x": 40,
-            "y": 110,
-            "width": 340,
-            "height": 240,
-            "order": 3,
+            "id": "staff-photo-0",
+            "x": 50,
+            "y": 148,
+            "width": 320,
+            "height": 412,
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/hair_salon/stylist.jpg",
-                "width": 332,
-                "height": 232,
-                "x": 4,
-                "y": 0,
-                "aspectRatio": 1.7778,
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/hair_salon/owner.jpg",
+                "width": 300,
+                "height": 400,
+                "x": 8,
+                "y": 6,
+                "aspectRatio": 0.75,
                 "children": [
                   {
                     "text": ""
                   }
                 ]
               }
-            ]
+            ],
+            "order": 2
           },
           {
-            "id": "staff-0-cap",
-            "x": 40,
-            "y": 358,
-            "width": 340,
-            "height": 72,
-            "order": 4,
+            "id": "staff-cap-0",
+            "x": 50,
+            "y": 570,
+            "width": 320,
+            "height": 88,
             "content": [
               {
                 "type": "block",
@@ -280,41 +944,41 @@
                 "align": "center",
                 "children": [
                   {
-                    "text": "▲ この写真を変更：スタッフの写真。左上の「レイアウト編集」から、この枠に写真をドラッグすると変わります。",
+                    "text": "▲ この写真を変更：店長の写真。左上の「レイアウト編集」を押し、この枠に写真をドラッグすると変わります。",
                     "fontSize": 14,
                     "italic": true
                   }
                 ]
               }
-            ]
+            ],
+            "order": 3
           },
           {
-            "id": "staff-0-role",
-            "x": 40,
-            "y": 430,
-            "width": 340,
+            "id": "staff-title-0",
+            "x": 50,
+            "y": 666,
+            "width": 320,
             "height": 48,
-            "order": 5,
             "content": [
               {
                 "type": "heading",
                 "level": 3,
-                "align": "left",
+                "align": "center",
                 "children": [
                   {
-                    "text": "店長"
+                    "text": "店長　〇〇"
                   }
                 ]
               }
-            ]
+            ],
+            "order": 4
           },
           {
-            "id": "staff-0-bio",
-            "x": 40,
-            "y": 486,
-            "width": 340,
-            "height": 140,
-            "order": 6,
+            "id": "staff-body-0",
+            "x": 50,
+            "y": 722,
+            "width": 320,
+            "height": 120,
             "content": [
               {
                 "type": "block",
@@ -327,39 +991,39 @@
                   }
                 ]
               }
-            ]
+            ],
+            "order": 5
           },
           {
-            "id": "staff-1-photo",
-            "x": 420,
-            "y": 110,
-            "width": 340,
-            "height": 240,
-            "order": 7,
+            "id": "staff-photo-1",
+            "x": 442,
+            "y": 148,
+            "width": 320,
+            "height": 412,
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/hair_salon/haircut.jpg",
-                "width": 332,
-                "height": 232,
-                "x": 4,
-                "y": 0,
-                "aspectRatio": 1.7778,
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/hair_salon/stylist.jpg",
+                "width": 300,
+                "height": 400,
+                "x": 8,
+                "y": 6,
+                "aspectRatio": 0.75,
                 "children": [
                   {
                     "text": ""
                   }
                 ]
               }
-            ]
+            ],
+            "order": 6
           },
           {
-            "id": "staff-1-cap",
-            "x": 420,
-            "y": 358,
-            "width": 340,
-            "height": 72,
-            "order": 8,
+            "id": "staff-cap-1",
+            "x": 442,
+            "y": 570,
+            "width": 320,
+            "height": 88,
             "content": [
               {
                 "type": "block",
@@ -367,41 +1031,41 @@
                 "align": "center",
                 "children": [
                   {
-                    "text": "▲ この写真を変更：スタッフの写真。左上の「レイアウト編集」から、この枠に写真をドラッグすると変わります。",
+                    "text": "▲ この写真を変更：スタイリストの写真。左上の「レイアウト編集」を押し、この枠に写真をドラッグすると変わります。",
                     "fontSize": 14,
                     "italic": true
                   }
                 ]
               }
-            ]
+            ],
+            "order": 7
           },
           {
-            "id": "staff-1-role",
-            "x": 420,
-            "y": 430,
-            "width": 340,
+            "id": "staff-title-1",
+            "x": 442,
+            "y": 666,
+            "width": 320,
             "height": 48,
-            "order": 9,
             "content": [
               {
                 "type": "heading",
                 "level": 3,
-                "align": "left",
+                "align": "center",
                 "children": [
                   {
-                    "text": "スタイリスト"
+                    "text": "スタイリスト　〇〇"
                   }
                 ]
               }
-            ]
+            ],
+            "order": 8
           },
           {
-            "id": "staff-1-bio",
-            "x": 420,
-            "y": 486,
-            "width": 340,
-            "height": 140,
-            "order": 10,
+            "id": "staff-body-1",
+            "x": 442,
+            "y": 722,
+            "width": 320,
+            "height": 120,
             "content": [
               {
                 "type": "block",
@@ -414,39 +1078,39 @@
                   }
                 ]
               }
-            ]
+            ],
+            "order": 9
           },
           {
-            "id": "staff-2-photo",
-            "x": 800,
-            "y": 110,
-            "width": 340,
-            "height": 240,
-            "order": 11,
+            "id": "staff-photo-2",
+            "x": 834,
+            "y": 148,
+            "width": 320,
+            "height": 412,
             "content": [
               {
                 "type": "image",
-                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/hair_salon/team.jpg",
-                "width": 332,
-                "height": 232,
-                "x": 4,
-                "y": 0,
-                "aspectRatio": 1.7778,
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/hair_salon/assistant.jpg",
+                "width": 300,
+                "height": 400,
+                "x": 8,
+                "y": 6,
+                "aspectRatio": 0.75,
                 "children": [
                   {
                     "text": ""
                   }
                 ]
               }
-            ]
+            ],
+            "order": 10
           },
           {
-            "id": "staff-2-cap",
-            "x": 800,
-            "y": 358,
-            "width": 340,
-            "height": 72,
-            "order": 12,
+            "id": "staff-cap-2",
+            "x": 834,
+            "y": 570,
+            "width": 320,
+            "height": 88,
             "content": [
               {
                 "type": "block",
@@ -454,41 +1118,41 @@
                 "align": "center",
                 "children": [
                   {
-                    "text": "▲ この写真を変更：スタッフの写真。左上の「レイアウト編集」から、この枠に写真をドラッグすると変わります。",
+                    "text": "▲ この写真を変更：アシスタントの写真。左上の「レイアウト編集」を押し、この枠に写真をドラッグすると変わります。",
                     "fontSize": 14,
                     "italic": true
                   }
                 ]
               }
-            ]
+            ],
+            "order": 11
           },
           {
-            "id": "staff-2-role",
-            "x": 800,
-            "y": 430,
-            "width": 340,
+            "id": "staff-title-2",
+            "x": 834,
+            "y": 666,
+            "width": 320,
             "height": 48,
-            "order": 13,
             "content": [
               {
                 "type": "heading",
                 "level": 3,
-                "align": "left",
+                "align": "center",
                 "children": [
                   {
-                    "text": "アシスタント"
+                    "text": "アシスタント　〇〇"
                   }
                 ]
               }
-            ]
+            ],
+            "order": 12
           },
           {
-            "id": "staff-2-bio",
-            "x": 800,
-            "y": 486,
-            "width": 340,
-            "height": 140,
-            "order": 14,
+            "id": "staff-body-2",
+            "x": 834,
+            "y": 722,
+            "width": 320,
+            "height": 120,
             "content": [
               {
                 "type": "block",
@@ -496,33 +1160,33 @@
                 "align": "left",
                 "children": [
                   {
-                    "text": "シャンプーとヘッドスパを担当します。予約時の追加メニューからも選べます。",
+                    "text": "シャンプーとヘッドスパを担当します。予約の追加メニューからも選べます。",
                     "fontSize": 16
                   }
                 ]
               }
-            ]
+            ],
+            "order": 13
           }
         ]
       }
     },
-    "6": {
-      "id": 6,
-      "order": 6,
-      "title": "メニュー",
-      "slug": "メニュー",
+    "8": {
+      "id": 8,
+      "order": 8,
+      "title": "店内のご案内",
+      "slug": "店内のご案内",
       "type": "custom",
-      "icon": "featured",
+      "icon": "heart",
       "layout": {
         "version": 2,
         "boxes": [
           {
-            "id": "menu-title",
-            "x": 50,
+            "id": "salon-title",
+            "x": 40,
             "y": 20,
-            "width": 1100,
-            "height": 56,
-            "order": 1,
+            "width": 1120,
+            "height": 112,
             "content": [
               {
                 "type": "heading",
@@ -530,90 +1194,291 @@
                 "align": "center",
                 "children": [
                   {
-                    "text": "メニュー"
+                    "text": "店内のご案内"
                   }
                 ]
-              }
-            ]
-          },
-          {
-            "id": "menu-a",
-            "x": 50,
-            "y": 96,
-            "width": 1100,
-            "height": 90,
-            "order": 2,
-            "content": [
+              },
               {
                 "type": "block",
                 "paragraphSize": 0.4,
-                "align": "left",
-                "children": [
-                  {
-                    "text": "カット、カラー、パーマ、トリートメントなど、予約できるメニューは「予約」の料金に名前を付けて登録します。",
-                    "fontSize": 18
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "id": "menu-b",
-            "x": 50,
-            "y": 200,
-            "width": 1100,
-            "height": 90,
-            "order": 3,
-            "content": [
-              {
-                "type": "block",
-                "paragraphSize": 0.4,
-                "align": "left",
-                "children": [
-                  {
-                    "text": "例えば「カット（女性）」を基本料金にして、シャンプーやトリートメントを追加メニューにできます。",
-                    "fontSize": 18
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "id": "menu-btn",
-            "x": 50,
-            "y": 310,
-            "width": 280,
-            "height": 80,
-            "order": 4,
-            "content": [
-              {
-                "type": "button",
-                "label": "予約メニューを見る",
                 "align": "center",
-                "sectionId": 7,
-                "boxId": null,
+                "children": [
+                  {
+                    "text": "店内の雰囲気が伝わる写真です。待合、シャンプー台、スタッフの集合写真などに差し替えられます。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ],
+            "order": 1
+          },
+          {
+            "id": "salon-photo-0",
+            "x": 40,
+            "y": 148,
+            "width": 360,
+            "height": 206,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/hair_salon/shampoo.jpg",
+                "width": 344,
+                "height": 193,
+                "x": 8,
+                "y": 6,
+                "aspectRatio": 1.7824,
                 "children": [
                   {
                     "text": ""
                   }
                 ]
               }
-            ]
+            ],
+            "order": 2
+          },
+          {
+            "id": "salon-cap-0",
+            "x": 40,
+            "y": 364,
+            "width": 360,
+            "height": 88,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：シャンプー台の写真。左上の「レイアウト編集」を押し、この枠に写真をドラッグすると変わります。",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ]
+              }
+            ],
+            "order": 3
+          },
+          {
+            "id": "salon-title-0",
+            "x": 40,
+            "y": 460,
+            "width": 360,
+            "height": 48,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "シャンプー"
+                  }
+                ]
+              }
+            ],
+            "order": 4
+          },
+          {
+            "id": "salon-body-0",
+            "x": 40,
+            "y": 516,
+            "width": 360,
+            "height": 120,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "首に負担の少ない台で、ゆっくり流します。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ],
+            "order": 5
+          },
+          {
+            "id": "salon-photo-1",
+            "x": 422,
+            "y": 148,
+            "width": 360,
+            "height": 206,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/hair_salon/consultation.jpg",
+                "width": 344,
+                "height": 193,
+                "x": 8,
+                "y": 6,
+                "aspectRatio": 1.7824,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              }
+            ],
+            "order": 6
+          },
+          {
+            "id": "salon-cap-1",
+            "x": 422,
+            "y": 364,
+            "width": 360,
+            "height": 88,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：カウンセリングの写真。左上の「レイアウト編集」を押し、この枠に写真をドラッグすると変わります。",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ]
+              }
+            ],
+            "order": 7
+          },
+          {
+            "id": "salon-title-1",
+            "x": 422,
+            "y": 460,
+            "width": 360,
+            "height": 48,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "カウンセリング"
+                  }
+                ]
+              }
+            ],
+            "order": 8
+          },
+          {
+            "id": "salon-body-1",
+            "x": 422,
+            "y": 516,
+            "width": 360,
+            "height": 120,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "なりたい印象と、普段の扱いやすさを伺います。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ],
+            "order": 9
+          },
+          {
+            "id": "salon-photo-2",
+            "x": 804,
+            "y": 148,
+            "width": 360,
+            "height": 206,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/hair_salon/team.jpg",
+                "width": 344,
+                "height": 193,
+                "x": 8,
+                "y": 6,
+                "aspectRatio": 1.7824,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              }
+            ],
+            "order": 10
+          },
+          {
+            "id": "salon-cap-2",
+            "x": 804,
+            "y": 364,
+            "width": 360,
+            "height": 88,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：スタッフ集合の写真。左上の「レイアウト編集」を押し、この枠に写真をドラッグすると変わります。",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ]
+              }
+            ],
+            "order": 11
+          },
+          {
+            "id": "salon-title-2",
+            "x": 804,
+            "y": 460,
+            "width": 360,
+            "height": 48,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "スタッフ"
+                  }
+                ]
+              }
+            ],
+            "order": 12
+          },
+          {
+            "id": "salon-body-2",
+            "x": 804,
+            "y": 516,
+            "width": 360,
+            "height": 120,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "担当は予約のときに選べます。指名がない場合は空いている者が担当します。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ],
+            "order": 13
           }
         ]
       }
     },
-    "7": {
-      "id": 7,
-      "order": 7,
-      "title": "予約",
-      "slug": "予約",
-      "type": "schedule",
-      "icon": "schedule"
-    },
-    "8": {
-      "id": 8,
-      "order": 8,
+    "9": {
+      "id": 9,
+      "order": 9,
       "title": "ご予約の流れ",
       "slug": "ご予約の流れ",
       "type": "custom",
@@ -623,11 +1488,10 @@
         "boxes": [
           {
             "id": "flow-title",
-            "x": 50,
+            "x": 40,
             "y": 20,
-            "width": 1100,
-            "height": 56,
-            "order": 1,
+            "width": 1120,
+            "height": 112,
             "content": [
               {
                 "type": "heading",
@@ -638,16 +1502,27 @@
                     "text": "ご予約の流れ"
                   }
                 ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "予約画面では、基本のメニューを一つ選んでから、必要なものだけ追加できます。",
+                    "fontSize": 18
+                  }
+                ]
               }
-            ]
+            ],
+            "order": 1
           },
           {
-            "id": "flow-0-t",
-            "x": 50,
-            "y": 100,
-            "width": 350,
-            "height": 48,
-            "order": 2,
+            "id": "step-title-0",
+            "x": 40,
+            "y": 150,
+            "width": 360,
+            "height": 56,
             "content": [
               {
                 "type": "heading",
@@ -659,15 +1534,15 @@
                   }
                 ]
               }
-            ]
+            ],
+            "order": 2
           },
           {
-            "id": "flow-0-b",
-            "x": 50,
-            "y": 160,
-            "width": 350,
+            "id": "step-body-0",
+            "x": 40,
+            "y": 214,
+            "width": 360,
             "height": 140,
-            "order": 3,
             "content": [
               {
                 "type": "block",
@@ -675,20 +1550,20 @@
                 "align": "left",
                 "children": [
                   {
-                    "text": "予約の画面で、カットやカラーなどの基本料金を選びます。",
+                    "text": "予約の画面で、カットやカラーなどの基本料金を一つ選びます。",
                     "fontSize": 16
                   }
                 ]
               }
-            ]
+            ],
+            "order": 3
           },
           {
-            "id": "flow-1-t",
-            "x": 430,
-            "y": 100,
-            "width": 350,
-            "height": 48,
-            "order": 4,
+            "id": "step-title-1",
+            "x": 422,
+            "y": 150,
+            "width": 360,
+            "height": 56,
             "content": [
               {
                 "type": "heading",
@@ -700,15 +1575,15 @@
                   }
                 ]
               }
-            ]
+            ],
+            "order": 4
           },
           {
-            "id": "flow-1-b",
-            "x": 430,
-            "y": 160,
-            "width": 350,
+            "id": "step-body-1",
+            "x": 422,
+            "y": 214,
+            "width": 360,
             "height": 140,
-            "order": 5,
             "content": [
               {
                 "type": "block",
@@ -716,20 +1591,20 @@
                 "align": "left",
                 "children": [
                   {
-                    "text": "シャンプーやトリートメントなど、付けたいものだけ追加します。不要ならスキップできます。",
+                    "text": "トリートメントやヘッドスパなど、必要なものだけ足せます。不要ならそのまま進めます。",
                     "fontSize": 16
                   }
                 ]
               }
-            ]
+            ],
+            "order": 5
           },
           {
-            "id": "flow-2-t",
-            "x": 810,
-            "y": 100,
-            "width": 350,
-            "height": 48,
-            "order": 6,
+            "id": "step-title-2",
+            "x": 804,
+            "y": 150,
+            "width": 360,
+            "height": 56,
             "content": [
               {
                 "type": "heading",
@@ -737,19 +1612,19 @@
                 "align": "left",
                 "children": [
                   {
-                    "text": "来店して支払う"
+                    "text": "日時を決める"
                   }
                 ]
               }
-            ]
+            ],
+            "order": 6
           },
           {
-            "id": "flow-2-b",
-            "x": 810,
-            "y": 160,
-            "width": 350,
+            "id": "step-body-2",
+            "x": 804,
+            "y": 214,
+            "width": 360,
             "height": 140,
-            "order": 7,
             "content": [
               {
                 "type": "block",
@@ -757,19 +1632,218 @@
                 "align": "left",
                 "children": [
                   {
-                    "text": "日時を選んで予約します。お支払いはカード、または来店時に選べます。",
+                    "text": "空いている時間を選んで予約します。お支払いはカード、または来店時に選べます。",
                     "fontSize": 16
                   }
                 ]
               }
-            ]
+            ],
+            "order": 7
+          },
+          {
+            "id": "step-button",
+            "x": 40,
+            "y": 372,
+            "width": 1120,
+            "height": 88,
+            "content": [
+              {
+                "type": "button",
+                "label": "予約メニューを見る",
+                "align": "center",
+                "sectionId": 11,
+                "boxId": null,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              }
+            ],
+            "order": 8
           }
         ]
       }
     },
-    "9": {
-      "id": 9,
-      "order": 9,
+    "10": {
+      "id": 10,
+      "order": 10,
+      "title": "よくある質問",
+      "slug": "よくある質問",
+      "type": "custom",
+      "icon": "info",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "faq-title",
+            "x": 40,
+            "y": 20,
+            "width": 1120,
+            "height": 112,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "よくある質問"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "来店前によくいただく質問です。文章はレイアウト編集で書き換えられます。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ],
+            "order": 1
+          },
+          {
+            "id": "faq-0",
+            "x": 40,
+            "y": 148,
+            "width": 530,
+            "height": 156,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "Q. 予約は必要ですか？"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "A. ご予約制です。メニューを選んで、空いている日時をお取りください。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ],
+            "order": 2
+          },
+          {
+            "id": "faq-1",
+            "x": 630,
+            "y": 148,
+            "width": 530,
+            "height": 156,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "Q. どのくらい時間がかかりますか？"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "A. カットは約60分、カラーは約120分が目安です（例。メニューごとに変えてください）。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ],
+            "order": 3
+          },
+          {
+            "id": "faq-2",
+            "x": 40,
+            "y": 320,
+            "width": 530,
+            "height": 156,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "Q. 支払い方法は？"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "A. カード、または来店時のお支払いを選べます。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ],
+            "order": 4
+          },
+          {
+            "id": "faq-3",
+            "x": 630,
+            "y": 320,
+            "width": 530,
+            "height": 156,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "Q. 子どももお願いできますか？"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "A. キッズカットをメニューに追加できます（例）。予約画面の基本料金に名前を付けてください。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ],
+            "order": 5
+          }
+        ]
+      }
+    },
+    "11": {
+      "id": 11,
+      "order": 11,
+      "title": "予約",
+      "slug": "予約",
+      "type": "schedule",
+      "icon": "schedule"
+    },
+    "12": {
+      "id": 12,
+      "order": 12,
       "title": "アクセス",
       "slug": "アクセス",
       "type": "custom",
@@ -779,11 +1853,10 @@
         "boxes": [
           {
             "id": "access-title",
-            "x": 50,
-            "y": 24,
-            "width": 1100,
-            "height": 56,
-            "order": 1,
+            "x": 40,
+            "y": 20,
+            "width": 1120,
+            "height": 100,
             "content": [
               {
                 "type": "heading",
@@ -794,16 +1867,381 @@
                     "text": "アクセス"
                   }
                 ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "予約時間の5分前を目安にお越しください。",
+                    "fontSize": 18
+                  }
+                ]
               }
-            ]
+            ],
+            "order": 1
           },
           {
-            "id": "access-body",
-            "x": 50,
-            "y": 100,
-            "width": 1100,
-            "height": 120,
-            "order": 2,
+            "id": "access-info",
+            "x": 40,
+            "y": 140,
+            "width": 530,
+            "height": 280,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "所在地・ご連絡先"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "住所：",
+                    "fontSize": 18,
+                    "bold": true
+                  },
+                  {
+                    "type": "link",
+                    "url": "https://www.google.com/maps",
+                    "children": [
+                      {
+                        "text": "〒000-0000 〇〇県〇〇市〇〇 0-0-0",
+                        "fontSize": 18,
+                        "color": "#ffffff"
+                      }
+                    ]
+                  },
+                  {
+                    "text": " ",
+                    "fontSize": 18,
+                    "color": "#ffffff"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "電話：",
+                    "fontSize": 18,
+                    "bold": true
+                  },
+                  {
+                    "type": "link",
+                    "url": "tel:00000000000",
+                    "children": [
+                      {
+                        "text": "000-0000-0000",
+                        "fontSize": 18,
+                        "color": "#ffffff"
+                      }
+                    ]
+                  },
+                  {
+                    "text": " ",
+                    "fontSize": 18,
+                    "color": "#ffffff"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "営業時間：",
+                    "fontSize": 18,
+                    "bold": true
+                  },
+                  {
+                    "text": "〇:〇〇〜〇〇:〇〇（変更してください）",
+                    "fontSize": 18
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "定休日：",
+                    "fontSize": 18,
+                    "bold": true
+                  },
+                  {
+                    "text": "〇曜日（変更してください）",
+                    "fontSize": 18
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "最寄り：",
+                    "fontSize": 18,
+                    "bold": true
+                  },
+                  {
+                    "type": "link",
+                    "url": "https://www.google.com/maps",
+                    "children": [
+                      {
+                        "text": "〇〇駅より徒歩〇分",
+                        "fontSize": 18,
+                        "color": "#ffffff"
+                      }
+                    ]
+                  },
+                  {
+                    "text": " ",
+                    "fontSize": 18,
+                    "color": "#ffffff"
+                  }
+                ]
+              }
+            ],
+            "order": 2
+          },
+          {
+            "id": "access-map",
+            "x": 600,
+            "y": 140,
+            "width": 560,
+            "height": 420,
+            "content": [
+              {
+                "type": "map",
+                "provider": "osm",
+                "lat": 35.681236,
+                "lng": 139.767125,
+                "zoom": 15,
+                "height": 280,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "▲ これはサンプルの地図です。まず画面左上の「レイアウト編集」を押してください。地図のうしろにカーソルを置いてBackspaceキーで削除できます。追加するときは、文章の上の地図アイコンから実際のGoogleマップURLを貼ってください。",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ]
+              }
+            ],
+            "order": 3
+          },
+          {
+            "id": "social-x",
+            "x": 40,
+            "y": 596,
+            "width": 260,
+            "height": 88,
+            "content": [
+              {
+                "type": "block",
+                "align": "center",
+                "paragraphSize": 0.15,
+                "children": [
+                  {
+                    "text": ""
+                  },
+                  {
+                    "type": "icon",
+                    "icon": "x",
+                    "url": "https://x.com",
+                    "size": 40,
+                    "color": "#f6efe9",
+                    "children": [
+                      {
+                        "text": ""
+                      }
+                    ]
+                  },
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "align": "center",
+                "paragraphSize": 0.1,
+                "children": [
+                  {
+                    "text": "X",
+                    "fontSize": 16,
+                    "bold": true
+                  }
+                ]
+              }
+            ],
+            "order": 4
+          },
+          {
+            "id": "social-facebook",
+            "x": 325,
+            "y": 596,
+            "width": 260,
+            "height": 88,
+            "content": [
+              {
+                "type": "block",
+                "align": "center",
+                "paragraphSize": 0.15,
+                "children": [
+                  {
+                    "text": ""
+                  },
+                  {
+                    "type": "icon",
+                    "icon": "facebook",
+                    "url": "https://www.facebook.com",
+                    "size": 40,
+                    "color": "#f6efe9",
+                    "children": [
+                      {
+                        "text": ""
+                      }
+                    ]
+                  },
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "align": "center",
+                "paragraphSize": 0.1,
+                "children": [
+                  {
+                    "text": "Facebook",
+                    "fontSize": 16,
+                    "bold": true
+                  }
+                ]
+              }
+            ],
+            "order": 5
+          },
+          {
+            "id": "social-youtube",
+            "x": 610,
+            "y": 596,
+            "width": 260,
+            "height": 88,
+            "content": [
+              {
+                "type": "block",
+                "align": "center",
+                "paragraphSize": 0.15,
+                "children": [
+                  {
+                    "text": ""
+                  },
+                  {
+                    "type": "icon",
+                    "icon": "youtube",
+                    "url": "https://www.youtube.com",
+                    "size": 40,
+                    "color": "#f6efe9",
+                    "children": [
+                      {
+                        "text": ""
+                      }
+                    ]
+                  },
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "align": "center",
+                "paragraphSize": 0.1,
+                "children": [
+                  {
+                    "text": "YouTube",
+                    "fontSize": 16,
+                    "bold": true
+                  }
+                ]
+              }
+            ],
+            "order": 6
+          },
+          {
+            "id": "social-instagram",
+            "x": 895,
+            "y": 596,
+            "width": 260,
+            "height": 88,
+            "content": [
+              {
+                "type": "block",
+                "align": "center",
+                "paragraphSize": 0.15,
+                "children": [
+                  {
+                    "text": ""
+                  },
+                  {
+                    "type": "icon",
+                    "icon": "instagram",
+                    "url": "https://www.instagram.com",
+                    "size": 40,
+                    "color": "#f6efe9",
+                    "children": [
+                      {
+                        "text": ""
+                      }
+                    ]
+                  },
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "align": "center",
+                "paragraphSize": 0.1,
+                "children": [
+                  {
+                    "text": "Instagram",
+                    "fontSize": 16,
+                    "bold": true
+                  }
+                ]
+              }
+            ],
+            "order": 7
+          },
+          {
+            "id": "access-note",
+            "x": 40,
+            "y": 700,
+            "width": 1120,
+            "height": 72,
             "content": [
               {
                 "type": "block",
@@ -811,26 +2249,27 @@
                 "align": "center",
                 "children": [
                   {
-                    "text": "〇〇駅から徒歩〇分。住所、営業時間、定休日はレイアウト編集で書き換えてください。",
-                    "fontSize": 18
+                    "text": "今は各サイトのホームへのリンクです。自分のページがあれば、レイアウト編集でアイコンをクリックしてURLを貼ってください。無ければ枠の青い鉛筆から「ボックスを削除」。",
+                    "fontSize": 15,
+                    "italic": true
                   }
                 ]
               }
-            ]
+            ],
+            "order": 8
           },
           {
-            "id": "access-btn",
-            "x": 400,
-            "y": 240,
-            "width": 400,
-            "height": 80,
-            "order": 3,
+            "id": "access-inquiry",
+            "x": 40,
+            "y": 788,
+            "width": 1120,
+            "height": 88,
             "content": [
               {
                 "type": "button",
                 "label": "問い合わせフォーム",
                 "align": "center",
-                "sectionId": 10,
+                "sectionId": 13,
                 "boxId": null,
                 "children": [
                   {
@@ -838,7 +2277,8 @@
                   }
                 ]
               }
-            ]
+            ],
+            "order": 9
           }
         ]
       },
@@ -846,9 +2286,9 @@
         "backgroundColor": "#3f342f"
       }
     },
-    "10": {
-      "id": 10,
-      "order": 10,
+    "13": {
+      "id": 13,
+      "order": 13,
       "title": "問い合わせフォーム",
       "slug": "問い合わせフォーム",
       "type": "inquiry",
@@ -871,7 +2311,7 @@
         "icon": "contact",
         "icon_color": "#2563eb",
         "kind": "section",
-        "section_id": 10
+        "section_id": 13
       },
       {
         "id": "hair-access",
@@ -879,7 +2319,7 @@
         "icon": "access",
         "icon_color": "#dc2626",
         "kind": "section",
-        "section_id": 9
+        "section_id": 12
       },
       {
         "id": "hair-reserve",
@@ -887,7 +2327,7 @@
         "icon": "schedule",
         "icon_color": "#7c3aed",
         "kind": "section",
-        "section_id": 7
+        "section_id": 11
       }
     ]
   }
