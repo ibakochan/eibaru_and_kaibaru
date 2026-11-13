@@ -34,6 +34,7 @@ from .service_cash_subscription import MemberCashSubscriptionService
 
 from .service_add_plan_cash import CashAddPlanService
 from .service_reservation import MemberReservationService
+from .service_reservation_catalog import posted_addon_ids
 
 from .models import TicketType, TicketPackage, Club, Member, MembershipPlan, SubscriptionItem, Subscription, StripeCustomer, Lesson, PlatformClub, PlatformSubscription
 from .service_connected_account import (
@@ -2832,6 +2833,8 @@ def create_visitor_reservation(
             age=age,
             gender=gender,
             payment_method=request.POST.get("payment_method", ""),
+            price_id=request.POST.get("price_id") or None,
+            addon_ids=posted_addon_ids(request),
         )
 
     except ValueError as e:
@@ -2988,6 +2991,8 @@ def create_trial_reservation(
             user=user,
             participants=participants,
             payment_method=request.POST.get("payment_method", ""),
+            price_id=request.POST.get("price_id") or None,
+            addon_ids=posted_addon_ids(request),
         )
 
     except ValueError as e:
@@ -3163,6 +3168,8 @@ def create_member_reservation(
                 reservation_date=reservation_date,
                 payment_method=payment_method,
                 ticket_grant_id=ticket_grant_id,
+                price_id=request.POST.get("price_id") or None,
+                addon_ids=posted_addon_ids(request),
             )
         )
 

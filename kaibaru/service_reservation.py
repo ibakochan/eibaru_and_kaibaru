@@ -160,6 +160,7 @@ def _reuse_member_reservation(
     age,
     gender,
     amount,
+    price_name,
     reservation_date,
     status,
     paid_at,
@@ -179,6 +180,7 @@ def _reuse_member_reservation(
     existing.age = age
     existing.gender = gender
     existing.amount = amount
+    existing.price_name = price_name
     existing.currency = "jpy"
     existing.reservation_date = reservation_date
     existing.paid_at = paid_at
@@ -203,6 +205,8 @@ class MemberReservationService:
         reservation_date,
         payment_method,
         ticket_grant_id=None,
+        price_id=None,
+        addon_ids=None,
     ):
         # --------------------------------------------------
         # Basic ownership validation
@@ -263,20 +267,33 @@ class MemberReservationService:
         # NULL means use club price.
         # --------------------------------------------------
 
-        if lesson.member_reservation_price is not None:
-            reservation_price = (
-                lesson.member_reservation_price
-            )
-        else:
-            reservation_price = (
-                club.member_reservation_price
-            )
+        from .service_reservation_catalog import resolve_reservation_quote
 
-        if reservation_price is None:
-            raise ValueError(
-                "このレッスンでは会員予約を"
-                "受け付けていません。"
-            )
+        quote = resolve_reservation_quote(
+            lesson,
+            "member",
+            price_id,
+            addon_ids,
+        )
+        if quote is None:
+            if lesson.member_reservation_price is not None:
+                reservation_price = (
+                    lesson.member_reservation_price
+                )
+            else:
+                reservation_price = (
+                    club.member_reservation_price
+                )
+
+            if reservation_price is None:
+                raise ValueError(
+                    "このレッスンでは会員予約を"
+                    "受け付けていません。"
+                )
+            price_name = ""
+        else:
+            reservation_price = quote["amount"]
+            price_name = quote["price_name"]
 
         from .charge_amounts import normalize_paid_amount
 
@@ -750,6 +767,7 @@ class MemberReservationService:
                         age=reservation_age,
                         gender=reservation_gender,
                         amount=reservation_price,
+                        price_name=price_name,
                         currency="jpy",
                         reservation_date=reservation_date,
                         reservation_key=reservation_key,
@@ -768,6 +786,7 @@ class MemberReservationService:
                         age=reservation_age,
                         gender=reservation_gender,
                         amount=reservation_price,
+                        price_name=price_name,
                         reservation_date=reservation_date,
                         status=Reservation.Status.PAID,
                         paid_at=timezone.now(),
@@ -805,6 +824,7 @@ class MemberReservationService:
                         age=reservation_age,
                         gender=reservation_gender,
                         amount=reservation_price,
+                        price_name=price_name,
                         currency="jpy",
                         reservation_date=reservation_date,
                         reservation_key=reservation_key,
@@ -822,6 +842,7 @@ class MemberReservationService:
                         age=reservation_age,
                         gender=reservation_gender,
                         amount=reservation_price,
+                        price_name=price_name,
                         reservation_date=reservation_date,
                         status=Reservation.Status.PAID,
                         paid_at=None,
@@ -846,6 +867,7 @@ class MemberReservationService:
                         age=reservation_age,
                         gender=reservation_gender,
                         amount=reservation_price,
+                        price_name=price_name,
                         currency="jpy",
                         reservation_date=reservation_date,
                         reservation_key=reservation_key,
@@ -863,6 +885,7 @@ class MemberReservationService:
                         age=reservation_age,
                         gender=reservation_gender,
                         amount=reservation_price,
+                        price_name=price_name,
                         reservation_date=reservation_date,
                         status=Reservation.Status.UNPAID,
                         paid_at=None,

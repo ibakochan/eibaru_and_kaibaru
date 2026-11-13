@@ -40,6 +40,8 @@ class VisitorReservationService:
         age=None,
         gender="",
         payment_method="",
+        price_id=None,
+        addon_ids=None,
     ):
         prepared = _prepare_visitor_request(
             club=club,
@@ -52,6 +54,8 @@ class VisitorReservationService:
             age=age,
             gender=gender,
             payment_method=payment_method,
+            price_id=price_id,
+            addon_ids=addon_ids,
         )
 
         try:
@@ -134,6 +138,8 @@ def _prepare_visitor_request(
     age,
     gender,
     payment_method="",
+    price_id=None,
+    addon_ids=None,
 ):
     if lesson.club_id != club.id:
         raise ValueError(
@@ -150,15 +156,23 @@ def _prepare_visitor_request(
             "このレッスンではビジター予約を受け付けていません。"
         )
 
-    if lesson.visitor_reservation_price is not None:
-        reservation_price = lesson.visitor_reservation_price
-    else:
-        reservation_price = club.visitor_reservation_price
+    from .service_reservation_catalog import resolve_reservation_quote
 
-    if reservation_price is None:
-        raise ValueError(
-            "このレッスンはビジター予約を受け付けていません。"
-        )
+    quote = resolve_reservation_quote(lesson, "visitor", price_id, addon_ids)
+    if quote is None:
+        if lesson.visitor_reservation_price is not None:
+            reservation_price = lesson.visitor_reservation_price
+        else:
+            reservation_price = club.visitor_reservation_price
+
+        if reservation_price is None:
+            raise ValueError(
+                "このレッスンはビジター予約を受け付けていません。"
+            )
+        price_name = ""
+    else:
+        reservation_price = quote["amount"]
+        price_name = quote["price_name"]
 
     from .charge_amounts import normalize_paid_amount
 
@@ -231,6 +245,7 @@ def _prepare_visitor_request(
         "age": age,
         "gender": gender,
         "reservation_price": reservation_price,
+        "price_name": price_name,
         "reservation_key": reservation_key,
         "payment_method": payment_method,
     }
@@ -249,6 +264,7 @@ def _save_visitor_reservation(
     gender,
     reservation_price,
     reservation_key,
+    price_name="",
     payment_method=Reservation.PaymentMethod.STRIPE,
 ):
     now = timezone.now()
@@ -327,6 +343,7 @@ def _save_visitor_reservation(
             existing.age = age
             existing.gender = gender
             existing.amount = reservation_price
+            existing.price_name = price_name
             existing.payment_method = payment_method
             existing.user = user
             existing.requested_at = now
@@ -366,6 +383,7 @@ def _save_visitor_reservation(
         existing.age = age
         existing.gender = gender
         existing.amount = reservation_price
+        existing.price_name = price_name
         existing.currency = "jpy"
         existing.reservation_date = reservation_date
         existing.start_token = token
@@ -403,6 +421,7 @@ def _save_visitor_reservation(
         age=age,
         gender=gender,
         amount=reservation_price,
+        price_name=price_name,
         currency="jpy",
         reservation_date=reservation_date,
         reservation_key=reservation_key,

@@ -2234,6 +2234,8 @@ class LessonSerializer(serializers.ModelSerializer):
     total_participation = serializers.SerializerMethodField()
     monthly_participation = serializers.SerializerMethodField()
     monthly_average = serializers.SerializerMethodField()
+    reservation_menu = serializers.SerializerMethodField()
+    reservation_catalog = serializers.SerializerMethodField()
 
 
     class Meta:
@@ -2276,13 +2278,31 @@ class LessonSerializer(serializers.ModelSerializer):
             "visitor_reservation_max_days_ahead",
 
             "reservation_payment_options",
+            "reservation_menu",
+            "reservation_catalog",
 
             "age_min",
             "age_max",
             "allowed_gender",
             
         ]
-        read_only_fields = ["id"]
+        read_only_fields = ["id", "reservation_menu", "reservation_catalog"]
+
+    def get_reservation_menu(self, obj):
+        from .service_reservation_catalog import lesson_menu
+
+        return lesson_menu(obj)
+
+    def get_reservation_catalog(self, obj):
+        from .service_reservation_catalog import lesson_catalog_payload
+
+        return lesson_catalog_payload(obj)
+
+    def create(self, validated_data):
+        with transaction.atomic():
+            lesson = super().create(validated_data)
+            _sync_reservation_catalog(self, lesson, "lesson")
+        return lesson
 
     def validate_allowed_gender(self, value):
         return validate_allowed_gender_value(value)
@@ -2485,25 +2505,27 @@ class LessonSerializer(serializers.ModelSerializer):
         return round(total / months, 2)
 
     def update(self, instance, validated_data):
-        clear_allowed_plans = self.initial_data.get(
-            "clear_allowed_plans"
-        )
+        with transaction.atomic():
+            clear_allowed_plans = self.initial_data.get(
+                "clear_allowed_plans"
+            )
 
-        allowed_plans = validated_data.pop(
-            "allowed_plans",
-            None
-        )
+            allowed_plans = validated_data.pop(
+                "allowed_plans",
+                None
+            )
 
-        instance = super().update(
-            instance,
-            validated_data
-        )
+            instance = super().update(
+                instance,
+                validated_data
+            )
 
-        if clear_allowed_plans == "true":
-            instance.allowed_plans.clear()
-        elif allowed_plans is not None:
-            instance.allowed_plans.set(allowed_plans)
+            if clear_allowed_plans == "true":
+                instance.allowed_plans.clear()
+            elif allowed_plans is not None:
+                instance.allowed_plans.set(allowed_plans)
 
+            _sync_reservation_catalog(self, instance, "lesson")
         return instance
 
 
@@ -3194,6 +3216,7 @@ class ClubSerializer(serializers.ModelSerializer):
             "member_reservation_max_days_ahead",
             "visitor_reservation_max_count",
             "visitor_reservation_max_days_ahead",
+            "reservation_catalog",
 
             "ticket_types",
             "ticket_packages",
@@ -3213,6 +3236,19 @@ class ClubSerializer(serializers.ModelSerializer):
             "stripe_account_id",
             "stripe_subscription_id",
         ]
+
+    reservation_catalog = serializers.SerializerMethodField()
+
+    def get_reservation_catalog(self, obj):
+        from .service_reservation_catalog import club_catalog_payload
+
+        return club_catalog_payload(obj)
+
+    def update(self, instance, validated_data):
+        with transaction.atomic():
+            instance = super().update(instance, validated_data)
+            _sync_reservation_catalog(self, instance, "club")
+        return instance
 
     def validate_default_background_color(self, value):
         if value in (None, ""):
@@ -3487,6 +3523,26 @@ class ClubSerializer(serializers.ModelSerializer):
         ).data
 
  
+
+def _sync_reservation_catalog(serializer, instance, kind):
+    from .service_reservation_catalog import (
+        parse_catalog,
+        sync_club_catalog,
+        sync_lesson_catalog,
+    )
+
+    raw = serializer.initial_data.get("reservation_catalog")
+    if raw in (None, ""):
+        return
+    try:
+        payload = parse_catalog(raw)
+        if kind == "club":
+            sync_club_catalog(instance, payload)
+        else:
+            sync_lesson_catalog(instance, payload)
+    except ValueError as exc:
+        raise serializers.ValidationError({"reservation_catalog": str(exc)}) from exc
+
 
 class TicketTypeSerializer(serializers.ModelSerializer):
     eligible_plans = serializers.PrimaryKeyRelatedField(
@@ -3822,6 +3878,7 @@ class ReservationSerializer(serializers.ModelSerializer):
 
             # Payment
             "amount",
+            "price_name",
             "currency",
             "paid_at",
             "payment_method",

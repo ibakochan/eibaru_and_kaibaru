@@ -1206,6 +1206,9 @@ class Lesson(models.Model):
         default="stripe",
         help_text="stripe, cash (pay at the venue), or both.",
     )
+    # False: this lesson offers every club reservation price.
+    # True: it offers only the club prices it selected, plus its own.
+    reservation_menu_customized = models.BooleanField(default=False)
 
     visitor_reservation_price = models.PositiveIntegerField(
         null=True,
@@ -1265,6 +1268,97 @@ class Lesson(models.Model):
 
     def __str__(self):
         return f"{self.club.subdomain} - {self.get_weekday_display()} {self.start_time.strftime('%H:%M')}"
+
+
+class ReservationAddon(models.Model):
+    """An extra attached to a named reservation price. lesson is empty for the club catalog."""
+
+    club = models.ForeignKey(
+        Club,
+        on_delete=models.CASCADE,
+        related_name="reservation_addons",
+    )
+    lesson = models.ForeignKey(
+        Lesson,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="reservation_addons",
+    )
+    name = models.CharField(max_length=80)
+    amount = models.PositiveIntegerField(default=0)
+    position = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["position", "id"]
+
+
+class ReservationPrice(models.Model):
+    """A named base price. lesson is empty when this price belongs to the club catalog."""
+
+    class Audience(models.TextChoices):
+        VISITOR = "visitor", "Visitor"
+        MEMBER = "member", "Member"
+        TRIAL = "trial", "Trial"
+        ANY = "any", "Any"
+
+    club = models.ForeignKey(
+        Club,
+        on_delete=models.CASCADE,
+        related_name="reservation_prices",
+    )
+    lesson = models.ForeignKey(
+        Lesson,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="reservation_prices",
+    )
+    name = models.CharField(max_length=80)
+    amount = models.PositiveIntegerField(default=0)
+    position = models.PositiveIntegerField(default=0)
+    audience = models.CharField(
+        max_length=10,
+        choices=Audience.choices,
+        default=Audience.ANY,
+    )
+    addons = models.ManyToManyField(
+        ReservationAddon,
+        blank=True,
+        related_name="base_prices",
+    )
+
+    class Meta:
+        ordering = ["position", "id"]
+
+
+class LessonPriceOffer(models.Model):
+    """A club price this lesson offers. Add-ons follow the club unless overridden."""
+
+    lesson = models.ForeignKey(
+        Lesson,
+        on_delete=models.CASCADE,
+        related_name="price_offers",
+    )
+    price = models.ForeignKey(
+        ReservationPrice,
+        on_delete=models.CASCADE,
+        related_name="lesson_offers",
+    )
+    addons_overridden = models.BooleanField(default=False)
+    addons = models.ManyToManyField(
+        ReservationAddon,
+        blank=True,
+        related_name="offer_overrides",
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["lesson", "price"],
+                name="unique_lesson_price_offer",
+            )
+        ]
 
 
 class Reservation(models.Model):
@@ -1383,6 +1477,8 @@ class Reservation(models.Model):
     amount = models.PositiveIntegerField(
         default=0
     )
+    # Snapshot of the service the guest picked. Prices can change later.
+    price_name = models.CharField(max_length=200, blank=True, default="")
     net_yen = models.IntegerField(
         null=True,
         blank=True,

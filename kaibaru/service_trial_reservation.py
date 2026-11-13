@@ -67,6 +67,8 @@ class TrialReservationService:
         user=None,
         participants,
         payment_method="",
+        price_id=None,
+        addon_ids=None,
     ):
         prepared = _prepare_trial_request(
             club=club,
@@ -77,6 +79,8 @@ class TrialReservationService:
             user=user,
             participants=participants,
             payment_method=payment_method,
+            price_id=price_id,
+            addon_ids=addon_ids,
         )
 
         try:
@@ -133,6 +137,8 @@ def _prepare_trial_request(
     user,
     participants,
     payment_method="",
+    price_id=None,
+    addon_ids=None,
 ):
     if lesson.club_id != club.id:
         raise ValueError(
@@ -157,13 +163,21 @@ def _prepare_trial_request(
             "このレッスンでは体験予約を受け付けていません。"
         )
 
-    if lesson.trial_price is not None:
-        reservation_price = lesson.trial_price
-    else:
-        reservation_price = club.trial_price
+    from .service_reservation_catalog import resolve_reservation_quote
 
-    if reservation_price is None:
-        reservation_price = 0
+    quote = resolve_reservation_quote(lesson, "trial", price_id, addon_ids)
+    if quote is None:
+        if lesson.trial_price is not None:
+            reservation_price = lesson.trial_price
+        else:
+            reservation_price = club.trial_price
+
+        if reservation_price is None:
+            reservation_price = 0
+        price_name = ""
+    else:
+        reservation_price = quote["amount"]
+        price_name = quote["price_name"]
 
     from .charge_amounts import normalize_paid_amount
 
@@ -232,6 +246,7 @@ def _prepare_trial_request(
         "user": user,
         "people": people,
         "reservation_price": reservation_price,
+        "price_name": price_name,
         "keys": keys,
         "payment_method": payment_method,
     }
@@ -353,6 +368,7 @@ def _save_trial_reservations(
     people,
     reservation_price,
     keys,
+    price_name="",
     payment_method=Reservation.PaymentMethod.STRIPE,
 ):
     from django.utils import timezone
@@ -547,6 +563,7 @@ def _save_trial_reservations(
             existing.age = person["age"]
             existing.gender = person["gender"]
             existing.amount = reservation_price
+            existing.price_name = price_name
             existing.currency = "jpy"
             existing.reservation_date = reservation_date
             existing.start_token = token
@@ -575,6 +592,7 @@ def _save_trial_reservations(
             age=person["age"],
             gender=person["gender"],
             amount=reservation_price,
+            price_name=price_name,
             currency="jpy",
             reservation_date=reservation_date,
             reservation_key=key,
