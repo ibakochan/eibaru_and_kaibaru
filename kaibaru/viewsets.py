@@ -5321,21 +5321,26 @@ class ClubViewSet(viewsets.ModelViewSet):
                 {"detail": "クラブのオーナーだけがワーカーを作成できます。"},
                 status=status.HTTP_403_FORBIDDEN,
             )
-        payload, message = create_owner_worker(club, request.user, request.data)
+        payload, message = create_owner_worker(
+            club, request.user, request.data, request.FILES
+        )
         if message:
             return Response({"detail": message}, status=status.HTTP_400_BAD_REQUEST)
         return Response(payload, status=status.HTTP_201_CREATED)
 
     @action(
         detail=False,
-        methods=["get", "patch"],
+        methods=["get", "patch", "delete"],
         url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/workers/(?P<worker_id>\d+)",
     )
     def worker_record(self, request, subdomain=None, worker_id=None):
         from .service_worker_schedule import (
+            remove_owner_worker,
             replace_worker_availability,
             set_worker_courses,
             update_worker_profile,
+            update_worker_public_profile,
+            worker_deletion_summary,
             worker_detail,
         )
 
@@ -5345,7 +5350,16 @@ class ClubViewSet(viewsets.ModelViewSet):
         member = club.members.filter(id=worker_id, is_worker=True).first()
         if not member:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        if request.method == "DELETE":
+            payload, message = remove_owner_worker(club, request.user, member)
+            if message:
+                return Response({"detail": message}, status=400)
+            return Response(payload)
         if request.method == "GET":
+            if request.query_params.get("delete_preview") in ("1", "true", "True"):
+                if not request.user.is_authenticated or club.owner_id != request.user.id:
+                    return Response({"detail": "許可なし"}, status=403)
+                return Response(worker_deletion_summary(member))
             return Response(worker_detail(member))
         is_self = request.user.is_authenticated and member.user_id == request.user.id
         is_member_owner = (
@@ -5355,6 +5369,13 @@ class ClubViewSet(viewsets.ModelViewSet):
         if error and not is_self and not is_member_owner:
             return error
         data = request.data
+        if "introduction" in data or request.FILES.get("picture"):
+            payload, message = update_worker_public_profile(
+                member, data, request.FILES
+            )
+            if message:
+                return Response({"detail": message}, status=400)
+            member = club.members.filter(id=worker_id, is_worker=True).first()
         if "course_ids" in data:
             if error and not is_member_owner:
                 return error

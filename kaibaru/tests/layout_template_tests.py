@@ -28,7 +28,7 @@ MEMBER_ONLY_TYPES = ("join", "member", "teacher", "memberplans")
 CANVAS_WIDTH = 1205
 ALLOWED_TYPES = {
     "custom", "schedule", "service_schedule", "join", "member", "teacher",
-    "slideshow", "header", "memberplans", "inquiry", "video",
+    "staff", "slideshow", "header", "memberplans", "inquiry", "video",
 }
 ICONS = {
     "home", "schedule", "access", "contact", "phone", "time", "join",
@@ -73,7 +73,7 @@ class LayoutTemplateFileTests(SimpleTestCase):
 
         types = [s["type"] for s in ordered]
         if key in RESERVATION_TEMPLATE_KEYS:
-            required = ["header", "slideshow", "service_schedule", "inquiry", "video"]
+            required = ["header", "slideshow", "service_schedule", "inquiry", "video", "staff"]
             for banned in MEMBER_ONLY_TYPES:
                 self.assertNotIn(banned, types, banned)
             self.assertNotIn("schedule", types)
@@ -91,8 +91,8 @@ class LayoutTemplateFileTests(SimpleTestCase):
             self.assertEqual(member["profile_title"], "プロフィール")
             self.assertLess(join["order"], member["order"])
         else:
-            staff = next(s for s in ordered if s["title"] == "スタッフ紹介")
-            self.assertEqual(staff["type"], "custom")
+            staff = next(s for s in ordered if s["type"] == "staff")
+            self.assertEqual(staff["title"], "スタッフ")
 
         for sid, section in sections.items():
             self.assertEqual(section["id"], int(sid))

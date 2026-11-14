@@ -385,64 +385,117 @@ def _parse_birth_date(raw):
         return None
 
 
-def create_owner_worker(club, actor, payload):
+def _payload_get(payload, key, default=""):
+    if hasattr(payload, "getlist"):
+        value = payload.get(key, default)
+    else:
+        value = (payload or {}).get(key, default)
+    if value is None:
+        return default
+    return value
+
+
+def _apply_worker_picture(member, files=None):
+    if not files:
+        return
+    picture = files.get("picture") if hasattr(files, "get") else None
+    if picture in (None, "", False):
+        return
+    if hasattr(picture, "read"):
+        member.picture = picture
+        member.save(update_fields=["picture"])
+
+
+def create_owner_worker(club, actor, payload, files=None):
     """Club owner creates a managed worker, or marks themselves as a worker."""
     if not actor or not getattr(actor, "is_authenticated", False):
         return None, "ログインしてください。"
     if club.owner_id != actor.id:
         return None, "クラブのオーナーだけがワーカーを作成できます。"
 
-    as_self = payload.get("as_self") in (True, 1, "1", "true", "True")
+    as_self = _payload_get(payload, "as_self") in (True, 1, "1", "true", "True")
     from .utils import sync_worker_quantity
+    from django.db import IntegrityError
+
+    full_name = str(_payload_get(payload, "full_name") or "").strip()
+    furigana = str(_payload_get(payload, "furigana") or "").strip()
+    birth = _parse_birth_date(_payload_get(payload, "birth_date"))
+    gender = str(_payload_get(payload, "gender") or "female")
+    if gender not in ("male", "female"):
+        gender = "female"
+    phone = str(_payload_get(payload, "phone_number") or "")[:20] or None
+    introduction = str(_payload_get(payload, "introduction") or "")[:2000]
 
     if as_self:
+        if not full_name:
+            full_name = (actor.get_full_name() or "").strip() or (actor.email or "オーナー")
+        if birth is None:
+            birth = date(2000, 1, 1)
         existing = Member.objects.filter(club=club, user=actor).first()
         if existing is not None:
             if existing.is_worker:
                 ensure_worker_profile(existing)
                 return worker_detail(existing), None
+            update_fields = ["is_worker"]
             existing.is_worker = True
-            existing.save(update_fields=["is_worker"])
+            if full_name:
+                existing.full_name = full_name[:200]
+                update_fields.append("full_name")
+            if furigana:
+                existing.furigana = furigana[:200]
+                update_fields.append("furigana")
+            if birth:
+                existing.birth_date = birth
+                update_fields.append("birth_date")
+            existing.gender = gender
+            update_fields.append("gender")
+            if phone is not None:
+                existing.phone_number = phone
+                update_fields.append("phone_number")
+            if introduction:
+                existing.introduction = introduction
+                update_fields.append("introduction")
+            existing.save(update_fields=update_fields)
+            _apply_worker_picture(existing, files)
             ensure_worker_profile(existing)
             sync_worker_quantity(club)
             return worker_detail(existing), None
 
-        full_name = (payload.get("full_name") or "").strip()
-        if not full_name:
-            full_name = (actor.get_full_name() or "").strip() or (actor.email or "オーナー")
-        furigana = (payload.get("furigana") or "").strip()
-        birth = _parse_birth_date(payload.get("birth_date")) or date(2000, 1, 1)
-        gender = payload.get("gender") or "female"
-        if gender not in ("male", "female"):
-            gender = "female"
-        with transaction.atomic():
-            member = Member.objects.create(
-                club=club,
-                user=actor,
-                owner=actor,
-                full_name=full_name[:200],
-                furigana=furigana[:200],
-                birth_date=birth,
-                gender=gender,
-                phone_number=(payload.get("phone_number") or "")[:20] or None,
-                is_worker=True,
-                is_instructor=False,
-                is_manager=False,
-            )
-            ensure_worker_profile(member)
+        try:
+            with transaction.atomic():
+                member = Member.objects.create(
+                    club=club,
+                    user=actor,
+                    owner=actor,
+                    full_name=full_name[:200],
+                    furigana=furigana[:200],
+                    birth_date=birth,
+                    gender=gender,
+                    phone_number=phone,
+                    introduction=introduction,
+                    is_worker=True,
+                    is_instructor=False,
+                    is_manager=False,
+                )
+                _apply_worker_picture(member, files)
+                ensure_worker_profile(member)
+        except IntegrityError:
+            existing = Member.objects.filter(club=club, user=actor).first()
+            if existing is None:
+                return None, "ワーカーを作成できませんでした。"
+            if not existing.is_worker:
+                existing.is_worker = True
+                existing.save(update_fields=["is_worker"])
+                ensure_worker_profile(existing)
+                sync_worker_quantity(club)
+            return worker_detail(existing), None
         sync_worker_quantity(club)
         return worker_detail(member), None
 
-    full_name = (payload.get("full_name") or "").strip()
     if not full_name:
         return None, "お名前を入力してください。"
-    furigana = (payload.get("furigana") or "").strip()
-    birth = _parse_birth_date(payload.get("birth_date"))
     if birth is None:
         return None, "生年月日を入力してください。"
-    gender = payload.get("gender") or "female"
-    if gender not in ("male", "female"):
-        gender = "female"
 
     if Member.objects.filter(
         club=club,
@@ -452,22 +505,130 @@ def create_owner_worker(club, actor, payload):
     ).exists():
         return None, "同じ名前・生年月日の会員がすでにあります。"
 
-    with transaction.atomic():
-        member = Member.objects.create(
-            club=club,
-            user=None,
-            owner=actor,
-            full_name=full_name[:200],
-            furigana=furigana[:200],
-            birth_date=birth,
-            gender=gender,
-            phone_number=(payload.get("phone_number") or "")[:20] or None,
-            is_worker=True,
-            is_instructor=False,
-            is_manager=False,
-        )
-        ensure_worker_profile(member)
+    try:
+        with transaction.atomic():
+            member = Member.objects.create(
+                club=club,
+                user=None,
+                owner=actor,
+                full_name=full_name[:200],
+                furigana=furigana[:200],
+                birth_date=birth,
+                gender=gender,
+                phone_number=phone,
+                introduction=introduction,
+                is_worker=True,
+                is_instructor=False,
+                is_manager=False,
+            )
+            _apply_worker_picture(member, files)
+            ensure_worker_profile(member)
+    except IntegrityError:
+        return None, "同じ名前・生年月日の会員がすでにあります。"
     sync_worker_quantity(club)
+    return worker_detail(member), None
+
+
+def worker_deletion_summary(member):
+    """What removing this worker will discard (for the confirm modal)."""
+    from .models import (
+        ServiceReservation,
+        WorkerAvailability,
+        WorkerInvoice,
+        WorkerPay,
+        WorkerTimeOff,
+    )
+
+    profile = getattr(member, "worker_profile", None)
+    avail_count = WorkerAvailability.objects.filter(worker=member).count()
+    off_count = WorkerTimeOff.objects.filter(worker=member).count()
+    course_count = profile.courses.count() if profile else 0
+    pay_count = WorkerPay.objects.filter(worker=member).count()
+    invoice_count = WorkerInvoice.objects.filter(worker=member).count()
+    reservation_count = ServiceReservation.objects.filter(
+        worker=member, canceled=False, is_deleted=False
+    ).count()
+
+    lost = [
+        "ワーカーとしての登録",
+        "出勤時間（曜日）",
+        "休み（やすみ）",
+        "対応コース設定",
+        "時給・月の労働上限",
+        "ワーカー給与設定・明細との紐づけ",
+    ]
+    if member.introduction:
+        lost.append("紹介文")
+    if member.picture:
+        lost.append("プロフィール写真")
+
+    keep_member = bool(
+        member.user_id
+        and member.club_id
+        and member.user_id == member.club.owner_id
+    ) or bool(member.is_instructor or member.is_manager)
+
+    return {
+        "worker_id": member.id,
+        "full_name": member.full_name,
+        "mode": "demote" if keep_member else "hard_delete",
+        "lost": lost,
+        "counts": {
+            "availability": avail_count,
+            "time_offs": off_count,
+            "courses": course_count,
+            "pays": pay_count,
+            "invoices": invoice_count,
+            "reservations": reservation_count,
+        },
+        "fee_note": (
+            "このワーカー分として支払済みのプラットフォーム料金（月額¥500・日割り含む）は返金されません。"
+        ),
+        "delete_note": (
+            "代表アカウントの会員情報は残し、ワーカー設定だけ外します。"
+            if keep_member
+            else "会員レコードを完全に削除します。元に戻せません。"
+        ),
+    }
+
+
+def remove_owner_worker(club, actor, member):
+    """Hard-delete a managed worker, or demote the owner's own member."""
+    if not actor or club.owner_id != actor.id:
+        return None, "クラブのオーナーだけがワーカーを削除できます。"
+    if member.club_id != club.id or not member.is_worker:
+        return None, "ワーカーが見つかりません。"
+
+    from .utils import sync_worker_quantity
+    from .models import WorkerAvailability, WorkerProfile, WorkerTimeOff, WorkerPay
+
+    summary = worker_deletion_summary(member)
+    with transaction.atomic():
+        WorkerAvailability.objects.filter(worker=member).delete()
+        WorkerTimeOff.objects.filter(worker=member).delete()
+        WorkerPay.objects.filter(worker=member).delete()
+        WorkerProfile.objects.filter(worker=member).delete()
+        if summary["mode"] == "demote":
+            member.is_worker = False
+            member.save(update_fields=["is_worker"])
+        else:
+            member.delete()
+    sync_worker_quantity(club)
+    return {"ok": True, "mode": summary["mode"], "summary": summary}, None
+
+
+def update_worker_public_profile(member, payload, files=None):
+    """Owner/self can edit introduction and optional picture."""
+    if not member.is_worker:
+        return None, "ワーカーではありません。"
+    keys = set(getattr(payload, "keys", lambda: [])())
+    update_fields = []
+    if "introduction" in keys:
+        member.introduction = str(_payload_get(payload, "introduction") or "")[:2000]
+        update_fields.append("introduction")
+    if update_fields:
+        member.save(update_fields=update_fields)
+    _apply_worker_picture(member, files)
     return worker_detail(member), None
 
 
@@ -624,6 +785,9 @@ def worker_detail(member):
         "user_id": member.user_id,
         "owner_id": member.owner_id,
         "managed": member.user_id is None,
+        "is_self_owner": bool(
+            member.user_id and member.club_id and member.user_id == member.club.owner_id
+        ),
         "enrolled_at": profile.enrolled_at.isoformat() if profile else None,
         "monthly_hour_cap": profile.monthly_hour_cap if profile else None,
         "hourly_rate": profile.hourly_rate if profile else None,
