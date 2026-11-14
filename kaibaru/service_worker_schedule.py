@@ -44,11 +44,13 @@ def _weekday(day: date) -> int:
     return day.weekday()
 
 
-def windows_for(club, section_id=None):
+def windows_for(club, section_id=None, day=None):
     qs = ServiceWindow.objects.filter(club=club)
     if section_id is not None:
         qs = qs.filter(Q(section_id=section_id) | Q(section_id__isnull=True))
-    return list(qs.order_by("position", "earliest_start", "id"))
+    if day is not None:
+        qs = qs.filter(weekday=_weekday(day))
+    return list(qs.order_by("weekday", "position", "earliest_start", "id"))
 
 
 def courses_for(club, *, active_only=True):
@@ -171,9 +173,9 @@ def available_slots(club, course_id, day: date, section_id=None, step_minutes=SL
     course = ServiceCourse.objects.filter(club=club, id=course_id, active=True).first()
     if not course:
         return [], "コースが見つかりません。"
-    windows = windows_for(club, section_id)
+    windows = windows_for(club, section_id, day=day)
     if not windows:
-        return [], "予約可能な時間帯が設定されていません。"
+        return [], "この曜日の予約可能な時間帯が設定されていません。"
     workers = _qualified_workers(club, course)
     if not workers:
         return [], "このコースに対応できるワーカーがいません。"
@@ -271,7 +273,7 @@ def create_service_reservation(club, payload):
     except (TypeError, ValueError):
         section_id = None
 
-    windows = windows_for(club, section_id)
+    windows = windows_for(club, section_id, day=day)
     if not _window_allows(windows, _tmin(start), end_min):
         return None, "この時間帯は予約できません。"
 

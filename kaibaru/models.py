@@ -3381,8 +3381,8 @@ class ServiceCourse(models.Model):
 class ServiceWindow(models.Model):
     """Store open booking window for interval-based schedules.
 
-    Customers may start between earliest_start and latest_start. The
-    chosen course must finish by max_finish.
+    One row is one weekday. Customers may start between earliest_start
+    and latest_start. The chosen course must finish by max_finish.
     """
 
     club = models.ForeignKey(
@@ -3391,16 +3391,22 @@ class ServiceWindow(models.Model):
         related_name="service_windows",
     )
     section_id = models.IntegerField(null=True, blank=True, db_index=True)
+    weekday = models.PositiveSmallIntegerField(
+        default=0,
+        help_text="0=Monday … 6=Sunday",
+    )
     earliest_start = models.TimeField()
     latest_start = models.TimeField()
     max_finish = models.TimeField()
     position = models.PositiveIntegerField(default=0)
 
     class Meta:
-        ordering = ["position", "earliest_start", "id"]
+        ordering = ["weekday", "position", "earliest_start", "id"]
 
     def clean(self):
         super().clean()
+        if self.weekday is None or self.weekday < 0 or self.weekday > 6:
+            raise ValidationError({"weekday": "曜日を選択してください。"})
         if self.earliest_start and self.latest_start and self.earliest_start > self.latest_start:
             raise ValidationError({"latest_start": "開始の最遅時刻は最早時刻以降にしてください。"})
         if self.latest_start and self.max_finish and self.latest_start > self.max_finish:
@@ -3408,7 +3414,8 @@ class ServiceWindow(models.Model):
 
     def __str__(self):
         return (
-            f"{self.club_id} {self.earliest_start}-{self.latest_start}"
+            f"{self.club_id} wd{self.weekday} "
+            f"{self.earliest_start}-{self.latest_start}"
             f" (finish {self.max_finish})"
         )
 

@@ -5142,20 +5142,24 @@ class ClubViewSet(viewsets.ModelViewSet):
             section_id = int(section_id) if section_id not in (None, "") else None
         except (TypeError, ValueError):
             section_id = None
+        def _window_payload(w):
+            return {
+                "id": w.id,
+                "section_id": w.section_id,
+                "weekday": w.weekday,
+                "earliest_start": w.earliest_start.strftime("%H:%M"),
+                "latest_start": w.latest_start.strftime("%H:%M"),
+                "max_finish": w.max_finish.strftime("%H:%M"),
+                "position": w.position,
+            }
+
         if request.method == "GET":
             qs = ServiceWindow.objects.filter(club=club)
             if section_id is not None:
                 qs = qs.filter(section_id=section_id)
             return Response([
-                {
-                    "id": w.id,
-                    "section_id": w.section_id,
-                    "earliest_start": w.earliest_start.strftime("%H:%M"),
-                    "latest_start": w.latest_start.strftime("%H:%M"),
-                    "max_finish": w.max_finish.strftime("%H:%M"),
-                    "position": w.position,
-                }
-                for w in qs.order_by("position", "earliest_start", "id")
+                _window_payload(w)
+                for w in qs.order_by("weekday", "position", "earliest_start", "id")
             ])
         club, error = _staff_club(request, subdomain, "lessons")
         if error:
@@ -5168,22 +5172,45 @@ class ClubViewSet(viewsets.ModelViewSet):
             return Response({"detail": "時間帯を正しく入力してください。"}, status=400)
         if earliest > latest or latest > finish:
             return Response({"detail": "時間帯の順序が正しくありません。"}, status=400)
-        window = ServiceWindow.objects.create(
-            club=club,
-            section_id=section_id,
-            earliest_start=earliest,
-            latest_start=latest,
-            max_finish=finish,
-            position=int(request.data.get("position") or 0),
+
+        raw_weekdays = request.data.get("weekdays")
+        if raw_weekdays is None and request.data.get("weekday") is not None:
+            raw_weekdays = [request.data.get("weekday")]
+        if not isinstance(raw_weekdays, list) or not raw_weekdays:
+            return Response({"detail": "曜日を選択してください。"}, status=400)
+        weekdays = []
+        seen = set()
+        for raw in raw_weekdays:
+            try:
+                value = int(raw)
+            except (TypeError, ValueError):
+                return Response({"detail": "曜日が正しくありません。"}, status=400)
+            if value < 0 or value > 6:
+                return Response({"detail": "曜日が正しくありません。"}, status=400)
+            if value in seen:
+                continue
+            seen.add(value)
+            weekdays.append(value)
+
+        position = int(request.data.get("position") or 0)
+        created = [
+            ServiceWindow.objects.create(
+                club=club,
+                section_id=section_id,
+                weekday=weekday,
+                earliest_start=earliest,
+                latest_start=latest,
+                max_finish=finish,
+                position=position,
+            )
+            for weekday in weekdays
+        ]
+        if len(created) == 1:
+            return Response(_window_payload(created[0]), status=status.HTTP_201_CREATED)
+        return Response(
+            [_window_payload(row) for row in created],
+            status=status.HTTP_201_CREATED,
         )
-        return Response({
-            "id": window.id,
-            "section_id": window.section_id,
-            "earliest_start": window.earliest_start.strftime("%H:%M"),
-            "latest_start": window.latest_start.strftime("%H:%M"),
-            "max_finish": window.max_finish.strftime("%H:%M"),
-            "position": window.position,
-        }, status=status.HTTP_201_CREATED)
 
     @action(
         detail=False,
