@@ -5304,17 +5304,27 @@ class ClubViewSet(viewsets.ModelViewSet):
 
     @action(
         detail=False,
-        methods=["get"],
+        methods=["get", "post"],
         url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/workers",
     )
     def workers(self, request, subdomain=None):
-        from .service_worker_schedule import worker_detail
+        from .service_worker_schedule import create_owner_worker, worker_detail
 
         club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
         if not club:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
-        workers = club.members.filter(is_worker=True).order_by("full_name", "id")
-        return Response([worker_detail(member) for member in workers])
+        if request.method == "GET":
+            workers = club.members.filter(is_worker=True).order_by("full_name", "id")
+            return Response([worker_detail(member) for member in workers])
+        if not request.user.is_authenticated or club.owner_id != request.user.id:
+            return Response(
+                {"detail": "クラブのオーナーだけがワーカーを作成できます。"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        payload, message = create_owner_worker(club, request.user, request.data)
+        if message:
+            return Response({"detail": message}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(payload, status=status.HTTP_201_CREATED)
 
     @action(
         detail=False,
@@ -5338,12 +5348,15 @@ class ClubViewSet(viewsets.ModelViewSet):
         if request.method == "GET":
             return Response(worker_detail(member))
         is_self = request.user.is_authenticated and member.user_id == request.user.id
+        is_member_owner = (
+            request.user.is_authenticated and member.owner_id == request.user.id
+        )
         club_staff, error = _staff_club(request, subdomain, "lessons")
-        if error and not is_self:
+        if error and not is_self and not is_member_owner:
             return error
         data = request.data
         if "course_ids" in data:
-            if error:
+            if error and not is_member_owner:
                 return error
             _, message = set_worker_courses(member, data.get("course_ids"))
             if message:
@@ -5353,7 +5366,7 @@ class ClubViewSet(viewsets.ModelViewSet):
             if message:
                 return Response({"detail": message}, status=400)
         if "monthly_hour_cap" in data or "hourly_rate" in data:
-            if error:
+            if error and not is_member_owner:
                 return error
             payload, message = update_worker_profile(member, data)
             if message:
@@ -5376,8 +5389,11 @@ class ClubViewSet(viewsets.ModelViewSet):
         if not member:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
         is_self = request.user.is_authenticated and member.user_id == request.user.id
+        is_member_owner = (
+            request.user.is_authenticated and member.owner_id == request.user.id
+        )
         _, error = _staff_club(request, subdomain, "lessons")
-        if error and not is_self:
+        if error and not is_self and not is_member_owner:
             return error
         if request.method == "DELETE":
             if not time_off_id:

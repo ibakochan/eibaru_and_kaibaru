@@ -12,6 +12,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from .models import (
+    Member,
     ServiceCourse,
     ServiceReservation,
     ServiceWindow,
@@ -377,6 +378,99 @@ def ensure_worker_profile(member):
     return profile
 
 
+def _parse_birth_date(raw):
+    try:
+        return date.fromisoformat(str(raw)[:10])
+    except (TypeError, ValueError):
+        return None
+
+
+def create_owner_worker(club, actor, payload):
+    """Club owner creates a managed worker, or marks themselves as a worker."""
+    if not actor or not getattr(actor, "is_authenticated", False):
+        return None, "ログインしてください。"
+    if club.owner_id != actor.id:
+        return None, "クラブのオーナーだけがワーカーを作成できます。"
+
+    as_self = payload.get("as_self") in (True, 1, "1", "true", "True")
+    from .utils import sync_worker_quantity
+
+    if as_self:
+        existing = Member.objects.filter(club=club, user=actor).first()
+        if existing is not None:
+            if existing.is_worker:
+                ensure_worker_profile(existing)
+                return worker_detail(existing), None
+            existing.is_worker = True
+            existing.save(update_fields=["is_worker"])
+            ensure_worker_profile(existing)
+            sync_worker_quantity(club)
+            return worker_detail(existing), None
+
+        full_name = (payload.get("full_name") or "").strip()
+        if not full_name:
+            full_name = (actor.get_full_name() or "").strip() or (actor.email or "オーナー")
+        furigana = (payload.get("furigana") or "").strip()
+        birth = _parse_birth_date(payload.get("birth_date")) or date(2000, 1, 1)
+        gender = payload.get("gender") or "female"
+        if gender not in ("male", "female"):
+            gender = "female"
+        with transaction.atomic():
+            member = Member.objects.create(
+                club=club,
+                user=actor,
+                owner=actor,
+                full_name=full_name[:200],
+                furigana=furigana[:200],
+                birth_date=birth,
+                gender=gender,
+                phone_number=(payload.get("phone_number") or "")[:20] or None,
+                is_worker=True,
+                is_instructor=False,
+                is_manager=False,
+            )
+            ensure_worker_profile(member)
+        sync_worker_quantity(club)
+        return worker_detail(member), None
+
+    full_name = (payload.get("full_name") or "").strip()
+    if not full_name:
+        return None, "お名前を入力してください。"
+    furigana = (payload.get("furigana") or "").strip()
+    birth = _parse_birth_date(payload.get("birth_date"))
+    if birth is None:
+        return None, "生年月日を入力してください。"
+    gender = payload.get("gender") or "female"
+    if gender not in ("male", "female"):
+        gender = "female"
+
+    if Member.objects.filter(
+        club=club,
+        owner=actor,
+        full_name=full_name,
+        birth_date=birth,
+    ).exists():
+        return None, "同じ名前・生年月日の会員がすでにあります。"
+
+    with transaction.atomic():
+        member = Member.objects.create(
+            club=club,
+            user=None,
+            owner=actor,
+            full_name=full_name[:200],
+            furigana=furigana[:200],
+            birth_date=birth,
+            gender=gender,
+            phone_number=(payload.get("phone_number") or "")[:20] or None,
+            is_worker=True,
+            is_instructor=False,
+            is_manager=False,
+        )
+        ensure_worker_profile(member)
+    sync_worker_quantity(club)
+    return worker_detail(member), None
+
+
 def set_worker_courses(member, course_ids):
     profile = ensure_worker_profile(member)
     if profile is None:
@@ -527,6 +621,9 @@ def worker_detail(member):
         "full_name": member.full_name,
         "picture": member.picture.url if member.picture else None,
         "introduction": member.introduction or "",
+        "user_id": member.user_id,
+        "owner_id": member.owner_id,
+        "managed": member.user_id is None,
         "enrolled_at": profile.enrolled_at.isoformat() if profile else None,
         "monthly_hour_cap": profile.monthly_hour_cap if profile else None,
         "hourly_rate": profile.hourly_rate if profile else None,
