@@ -208,6 +208,7 @@ class ClubMonthlyIncomeAdmin(admin.ModelAdmin):
         "platform_fee_yen",
         "receipt_total_yen",
         "teacher_pay_yen",
+        "worker_pay_yen",
         "calculated_at",
         "created_at",
     )
@@ -287,3 +288,23 @@ admin.site.register(PlatformSubscription, PlatformSubscriptionAdmin)
 admin.site.register(PlatformClub, PlatformClubAdmin)
 admin.site.register(ClubSubscriptionMutation, ClubSubscriptionMutationAdmin)
 admin.site.register(ClubMonthlyIncome, ClubMonthlyIncomeAdmin)
+
+from .models import (
+    ServiceCourse,
+    ServiceReservation,
+    ServiceWindow,
+    WorkerAvailability,
+    WorkerInvoice,
+    WorkerPay,
+    WorkerProfile,
+    WorkerTimeOff,
+)
+
+admin.site.register(ServiceCourse)
+admin.site.register(ServiceWindow)
+admin.site.register(WorkerProfile)
+admin.site.register(WorkerAvailability)
+admin.site.register(WorkerTimeOff)
+admin.site.register(WorkerPay)
+admin.site.register(WorkerInvoice)
+admin.site.register(ServiceReservation)

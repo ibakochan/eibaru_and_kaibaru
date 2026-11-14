@@ -358,6 +358,8 @@ class ClubSubscriptionMutation(models.Model):
         RESUME_SUBSCRIPTION = "resume_subscription", "Resume subscription"
         SYNC_MEMBERS = "sync_members", "Sync members"
         MEMBER_QUANTITY = "member_quantity", "Member quantity"
+        SYNC_WORKERS = "sync_workers", "Sync workers"
+        WORKER_QUANTITY = "worker_quantity", "Worker quantity"
         SYNC_DOMAIN = "sync_domain", "Sync domain"
         DELETE_CLUB = "delete_club", "Delete club"
 
@@ -602,7 +604,11 @@ class Member(models.Model):
     birth_date = models.DateField(
         default=datetime.date(2000, 5, 4)
     )
-    is_instructor = models.BooleanField(default=False)   
+    is_instructor = models.BooleanField(default=False)
+    is_worker = models.BooleanField(
+        default=False,
+        help_text="Salon staff who take course bookings. Not a membership-plan member.",
+    )
     is_manager = models.BooleanField(default=False)
     introduction = models.TextField(null=True, blank=True)  
 
@@ -1816,6 +1822,10 @@ class JoinRequest(models.Model):
         blank=True,
         related_name="legacy_join_requests",
     )
+    is_worker = models.BooleanField(
+        default=False,
+        help_text="When true, acceptance creates a worker Member with no membership plan.",
+    )
 
     class Meta:
         unique_together = ("user", "club")
@@ -2960,6 +2970,7 @@ class ClubMonthlyIncome(models.Model):
     platform_fee_yen = models.IntegerField(default=0)
     receipt_total_yen = models.IntegerField(default=0)
     teacher_pay_yen = models.IntegerField(default=0)
+    worker_pay_yen = models.IntegerField(default=0)
     calculated_at = models.DateTimeField(
         null=True,
         blank=True,
@@ -3160,3 +3171,436 @@ class TeacherInvoiceLesson(models.Model):
 
     def __str__(self):
         return f"{self.lesson_title} x{self.times_taught}"
+
+
+class ServiceCourse(models.Model):
+    """A bookable salon course with a fixed duration and price."""
+
+    club = models.ForeignKey(
+        Club,
+        on_delete=models.CASCADE,
+        related_name="service_courses",
+    )
+    name = models.CharField(max_length=80)
+    duration_minutes = models.PositiveIntegerField(
+        help_text="How long the course takes, in minutes.",
+    )
+    amount = models.PositiveIntegerField(default=0)
+    description = models.TextField(blank=True, default="")
+    position = models.PositiveIntegerField(default=0)
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["position", "id"]
+
+    def clean(self):
+        super().clean()
+        if self.duration_minutes < 1:
+            raise ValidationError({"duration_minutes": "所要時間は1分以上にしてください。"})
+
+    def __str__(self):
+        return f"{self.club_id} {self.name} ({self.duration_minutes}m)"
+
+
+class ServiceWindow(models.Model):
+    """Store open booking window for interval-based schedules.
+
+    Customers may start between earliest_start and latest_start. The
+    chosen course must finish by max_finish.
+    """
+
+    club = models.ForeignKey(
+        Club,
+        on_delete=models.CASCADE,
+        related_name="service_windows",
+    )
+    section_id = models.IntegerField(null=True, blank=True, db_index=True)
+    earliest_start = models.TimeField()
+    latest_start = models.TimeField()
+    max_finish = models.TimeField()
+    position = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["position", "earliest_start", "id"]
+
+    def clean(self):
+        super().clean()
+        if self.earliest_start and self.latest_start and self.earliest_start > self.latest_start:
+            raise ValidationError({"latest_start": "開始の最遅時刻は最早時刻以降にしてください。"})
+        if self.latest_start and self.max_finish and self.latest_start > self.max_finish:
+            raise ValidationError({"max_finish": "終了上限は開始の最遅時刻以降にしてください。"})
+
+    def __str__(self):
+        return (
+            f"{self.club_id} {self.earliest_start}-{self.latest_start}"
+            f" (finish {self.max_finish})"
+        )
+
+
+class WorkerProfile(models.Model):
+    """Salon-worker settings for one Member flagged is_worker."""
+
+    worker = models.OneToOneField(
+        Member,
+        on_delete=models.CASCADE,
+        related_name="worker_profile",
+        limit_choices_to={"is_worker": True},
+    )
+    monthly_hour_cap = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Max bookable hours per calendar month. Empty means unlimited.",
+    )
+    hourly_rate = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Yen per hour. Used when no fixed monthly salary is set.",
+    )
+    enrolled_at = models.DateField(default=timezone.localdate)
+    courses = models.ManyToManyField(
+        ServiceCourse,
+        blank=True,
+        related_name="workers",
+        through="WorkerCourse",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def clean(self):
+        super().clean()
+        if self.worker_id and not self.worker.is_worker:
+            raise ValidationError({"worker": "会員をワーカーにしてから設定してください。"})
+
+    def __str__(self):
+        return f"worker:{self.worker_id}"
+
+
+class WorkerCourse(models.Model):
+    """Which courses a worker can perform."""
+
+    profile = models.ForeignKey(
+        WorkerProfile,
+        on_delete=models.CASCADE,
+        related_name="course_links",
+    )
+    course = models.ForeignKey(
+        ServiceCourse,
+        on_delete=models.CASCADE,
+        related_name="worker_links",
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["profile", "course"],
+                name="unique_worker_course",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        if (
+            self.profile_id
+            and self.course_id
+            and self.profile.worker.club_id != self.course.club_id
+        ):
+            raise ValidationError({"course": "コースが別のクラブのものです。"})
+
+    def __str__(self):
+        return f"{self.profile_id}:{self.course_id}"
+
+
+class WorkerAvailability(models.Model):
+    """Default weekly hours a worker is available for booking."""
+
+    worker = models.ForeignKey(
+        Member,
+        on_delete=models.CASCADE,
+        related_name="worker_availabilities",
+        limit_choices_to={"is_worker": True},
+    )
+    weekday = models.IntegerField(
+        choices=[
+            (0, "月曜日"),
+            (1, "火曜日"),
+            (2, "水曜日"),
+            (3, "木曜日"),
+            (4, "金曜日"),
+            (5, "土曜日"),
+            (6, "日曜日"),
+        ]
+    )
+    start_time = models.TimeField()
+    end_time = models.TimeField()
+
+    class Meta:
+        ordering = ["weekday", "start_time", "id"]
+
+    def clean(self):
+        super().clean()
+        if self.start_time and self.end_time and self.start_time >= self.end_time:
+            raise ValidationError({"end_time": "終了時刻は開始時刻より後にしてください。"})
+        if self.worker_id and not self.worker.is_worker:
+            raise ValidationError({"worker": "会員をワーカーにしてから設定してください。"})
+
+    def __str__(self):
+        return f"{self.worker_id} wd{self.weekday} {self.start_time}-{self.end_time}"
+
+
+class WorkerTimeOff(models.Model):
+    """Yasumi: a full day or a time range a worker is unavailable."""
+
+    worker = models.ForeignKey(
+        Member,
+        on_delete=models.CASCADE,
+        related_name="worker_time_offs",
+        limit_choices_to={"is_worker": True},
+    )
+    date = models.DateField()
+    start_time = models.TimeField(
+        null=True,
+        blank=True,
+        help_text="Empty with empty end_time means the whole day off.",
+    )
+    end_time = models.TimeField(null=True, blank=True)
+    note = models.CharField(max_length=200, blank=True, default="")
+
+    class Meta:
+        ordering = ["-date", "start_time", "id"]
+        indexes = [
+            models.Index(fields=["worker", "date"]),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.worker_id and not self.worker.is_worker:
+            raise ValidationError({"worker": "会員をワーカーにしてから設定してください。"})
+        if (self.start_time is None) != (self.end_time is None):
+            raise ValidationError("休みの開始と終了は両方入れるか、両方空にしてください。")
+        if self.start_time and self.end_time and self.start_time >= self.end_time:
+            raise ValidationError({"end_time": "終了時刻は開始時刻より後にしてください。"})
+
+    def __str__(self):
+        return f"{self.worker_id} {self.date} off"
+
+
+class WorkerPay(models.Model):
+    """How one club pays one worker.
+
+    monthly_amount is a fixed salary. Leave empty to use hourly_rate on
+    WorkerProfile, or to write statements by hand.
+    """
+
+    club = models.ForeignKey(
+        Club,
+        on_delete=models.CASCADE,
+        related_name="worker_pays",
+    )
+    worker = models.ForeignKey(
+        Member,
+        on_delete=models.CASCADE,
+        related_name="worker_pays",
+        limit_choices_to={"is_worker": True},
+    )
+    monthly_amount = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Fixed yen per month. Empty means no automatic fixed statement.",
+    )
+    active = models.BooleanField(default=True)
+    note = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["club", "worker"],
+                name="unique_worker_pay_per_club",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.worker_id and self.club_id:
+            if self.worker.club_id != self.club_id:
+                raise ValidationError(
+                    {"worker": "このワーカーはこのクラブの会員ではありません。"}
+                )
+            if not self.worker.is_worker:
+                raise ValidationError(
+                    {"worker": "会員をワーカーにしてから給与を設定してください。"}
+                )
+
+    def __str__(self):
+        return f"{self.club_id} {self.worker_id}"
+
+
+class WorkerInvoice(models.Model):
+    """What the club owes one worker for a calendar month."""
+
+    club = models.ForeignKey(
+        Club,
+        on_delete=models.CASCADE,
+        related_name="worker_invoices",
+    )
+    worker = models.ForeignKey(
+        Member,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="worker_invoices",
+    )
+    worker_name = models.CharField(max_length=200, blank=True, default="")
+    worker_pay = models.ForeignKey(
+        WorkerPay,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="invoices",
+    )
+    year = models.PositiveIntegerField()
+    month = models.PositiveIntegerField()
+    amount = models.PositiveIntegerField()
+    hours_worked = models.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        default=0,
+        help_text="Hours counted toward this statement.",
+    )
+    reservation_count = models.PositiveIntegerField(default=0)
+    note = models.TextField(blank=True, default="")
+    paid_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-year", "-month", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["worker_pay", "year", "month"],
+                name="unique_monthly_worker_invoice",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.month < 1 or self.month > 12:
+            raise ValidationError({"month": "月は1から12にしてください。"})
+        if self.worker_id and self.club_id and self.worker.club_id != self.club_id:
+            raise ValidationError(
+                {"worker": "このワーカーはこのクラブの会員ではありません。"}
+            )
+
+    def save(self, *args, **kwargs):
+        if self.worker_id and not self.worker_name:
+            self.worker_name = self.worker.full_name
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.club_id} {self.worker_id} {self.year}-{self.month}"
+
+
+class ServiceReservation(models.Model):
+    """Interval booking assigned to a worker and a course (no Lesson)."""
+
+    class ReservationType(models.TextChoices):
+        TRIAL = "trial", "Trial"
+        VISITOR = "visitor", "Visitor"
+        MEMBER = "member", "Member"
+
+    class Status(models.TextChoices):
+        UNPAID = "unpaid", "Unpaid"
+        PAID = "paid", "Paid"
+        NOT_STARTED = "not_started", "Not started"
+
+    class PaymentMethod(models.TextChoices):
+        STRIPE = "stripe", "Stripe"
+        TICKET = "ticket", "Ticket"
+        CASH = "cash", "Cash at the venue"
+
+    club = models.ForeignKey(
+        Club,
+        on_delete=models.CASCADE,
+        related_name="service_reservations",
+    )
+    course = models.ForeignKey(
+        ServiceCourse,
+        on_delete=models.PROTECT,
+        related_name="reservations",
+    )
+    worker = models.ForeignKey(
+        Member,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="service_reservations",
+        limit_choices_to={"is_worker": True},
+    )
+    section_id = models.IntegerField(null=True, blank=True, db_index=True)
+    member = models.ForeignKey(
+        Member,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="service_bookings",
+    )
+    user = models.ForeignKey(
+        CustomUser,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="service_reservations",
+    )
+    reservation_type = models.CharField(
+        max_length=20,
+        choices=ReservationType.choices,
+        default=ReservationType.VISITOR,
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.UNPAID,
+    )
+    payment_method = models.CharField(
+        max_length=20,
+        choices=PaymentMethod.choices,
+        null=True,
+        blank=True,
+    )
+    full_name = models.CharField(max_length=200)
+    email = models.EmailField()
+    phone_number = models.CharField(max_length=30, blank=True, default="")
+    amount = models.PositiveIntegerField(default=0)
+    price_name = models.CharField(max_length=200, blank=True, default="")
+    net_yen = models.IntegerField(null=True, blank=True)
+    currency = models.CharField(max_length=10, default="jpy")
+    reservation_date = models.DateField()
+    start_time = models.TimeField()
+    end_time = models.TimeField()
+    reservation_key = models.CharField(max_length=255, unique=True)
+    stripe_checkout_session_id = models.CharField(max_length=255, null=True, blank=True)
+    stripe_payment_intent_id = models.CharField(max_length=255, null=True, blank=True)
+    confirmation_email_sent = models.BooleanField(default=False)
+    canceled = models.BooleanField(default=False)
+    is_deleted = models.BooleanField(default=False)
+    no_show = models.BooleanField(default=False)
+    platform_fee_applied = models.BooleanField(default=False)
+    paid_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    refunded_at = models.DateTimeField(null=True, blank=True)
+    refund_started_at = models.DateTimeField(null=True, blank=True)
+    stripe_refund_id = models.CharField(max_length=255, null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["club", "reservation_date"]),
+            models.Index(fields=["worker", "reservation_date"]),
+            models.Index(fields=["course", "status"]),
+        ]
+
+    def __str__(self):
+        return (
+            f"{self.full_name} - {self.course_id} - "
+            f"{self.reservation_date} {self.start_time}"
+        )

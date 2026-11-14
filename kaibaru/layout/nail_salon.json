@@ -3260,7 +3260,7 @@
       "order": 11,
       "title": "予約",
       "slug": "予約",
-      "type": "schedule",
+      "type": "service_schedule",
       "icon": "schedule"
     },
     "12": {

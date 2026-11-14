@@ -35,7 +35,8 @@ def sync_member_quantity(club):
     stripe.api_key = settings.STRIPE_SECRET_KEY
 
     active_members = Member.objects.filter(
-        club=club
+        club=club,
+        is_worker=False,
     ).count()
 
     billable_members = max(active_members, 1)
@@ -99,5 +100,55 @@ def sync_member_quantity(club):
     )
 
 
+def sync_worker_quantity(club):
+    """Keep the ¥500/worker Stripe quantity aligned with is_worker Members."""
+    from .models import PlatformClub
 
+    if PlatformClub.objects.filter(club=club, awaiting_checkout=False).exists():
+        from .service_platform_subscription import queue_worker_sync
+        queue_worker_sync(club)
+        return
+
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+    if not club.stripe_subscription_id:
+        return
+
+    from .service_platform_subscription import worker_price_id
+
+    worker_count = Member.objects.filter(club=club, is_worker=True).count()
+    price_id = worker_price_id()
+    sub = stripe.Subscription.retrieve(club.stripe_subscription_id)
+    items = list(sub["items"]["data"])
+
+    def price_id_of(item):
+        price = item.get("price")
+        if isinstance(price, str):
+            return price
+        if isinstance(price, dict) and price.get("id"):
+            return price["id"]
+        details = (item.get("pricing") or {}).get("price_details") or {}
+        return details.get("price")
+
+    worker_item = next(
+        (item for item in items if price_id_of(item) == price_id),
+        None,
+    )
+    changes = []
+    if worker_count:
+        if worker_item:
+            if worker_item["quantity"] != worker_count:
+                changes.append({"id": worker_item["id"], "quantity": worker_count})
+        else:
+            changes.append({"price": price_id, "quantity": worker_count})
+    elif worker_item:
+        changes.append({"id": worker_item["id"], "deleted": True})
+
+    if not changes:
+        return
+
+    stripe.Subscription.modify(
+        sub.id,
+        items=changes,
+        proration_behavior="create_prorations",
+    )
 

@@ -26,6 +26,7 @@ from .models import (
     Invoice,
     Reservation,
     TeacherInvoice,
+    WorkerInvoice,
 )
 from .service_cash_platform_fee import month_bounds, previous_month
 from .service_platform_billing_history import platform_amount_paid_in_month
@@ -97,13 +98,20 @@ def allocate_fee_shares(amounts, fee):
     return shares
 
 
-def income_remainder(total_yen, platform_fee_yen, expense_total_yen, teacher_pay_yen=0):
-    """Cash left after the platform bill, receipts, and teacher payments."""
+def income_remainder(
+    total_yen,
+    platform_fee_yen,
+    expense_total_yen,
+    teacher_pay_yen=0,
+    worker_pay_yen=0,
+):
+    """Cash left after the platform bill, receipts, and staff payments."""
     return (
         int(total_yen or 0)
         - int(platform_fee_yen or 0)
         - int(expense_total_yen or 0)
         - int(teacher_pay_yen or 0)
+        - int(worker_pay_yen or 0)
     )
 
 
@@ -484,6 +492,17 @@ def _teacher_pay_for_month(club, year, month):
     return int(total or 0)
 
 
+def _worker_pay_for_month(club, year, month):
+    """Worker statements marked paid during this calendar month."""
+    start, end = month_bounds(year, month)
+    total = WorkerInvoice.objects.filter(
+        club=club,
+        paid_at__gte=start,
+        paid_at__lt=end,
+    ).aggregate(total=Sum("amount"))["total"]
+    return int(total or 0)
+
+
 def _is_current_month(year, month):
     today = timezone.localdate()
     return today.year == int(year) and today.month == int(month)
@@ -641,6 +660,7 @@ def _save_month_snapshot(club, year, month, start, invoices, reservations, platf
     """
     expense_total = _expense_total_for_month(club, year, month)
     teacher_pay = _teacher_pay_for_month(club, year, month)
+    worker_pay = _worker_pay_for_month(club, year, month)
     record = ClubMonthlyIncome.objects.filter(club=club, month=start).first()
     income_changed = (
         record is None
@@ -662,6 +682,7 @@ def _save_month_snapshot(club, year, month, start, invoices, reservations, platf
                 platform_fee_yen=platform_fee,
                 receipt_total_yen=expense_total,
                 teacher_pay_yen=teacher_pay,
+                worker_pay_yen=worker_pay,
                 calculated_at=calculated_at,
             )
         except IntegrityError:
@@ -674,17 +695,20 @@ def _save_month_snapshot(club, year, month, start, invoices, reservations, platf
         or int(record.platform_fee_yen or 0) != int(platform_fee)
         or int(record.receipt_total_yen or 0) != expense_total
         or int(record.teacher_pay_yen or 0) != teacher_pay
+        or int(record.worker_pay_yen or 0) != worker_pay
     ):
         record.total_yen = total
         record.platform_fee_yen = platform_fee
         record.receipt_total_yen = expense_total
         record.teacher_pay_yen = teacher_pay
+        record.worker_pay_yen = worker_pay
         record.calculated_at = calculated_at
         record.save(update_fields=[
             "total_yen",
             "platform_fee_yen",
             "receipt_total_yen",
             "teacher_pay_yen",
+            "worker_pay_yen",
             "calculated_at",
         ])
     return {
@@ -692,6 +716,7 @@ def _save_month_snapshot(club, year, month, start, invoices, reservations, platf
         "platform_fee_yen": int(platform_fee or 0),
         "expense_total_yen": int(record.receipt_total_yen or 0),
         "teacher_pay_yen": int(record.teacher_pay_yen or 0),
+        "worker_pay_yen": int(record.worker_pay_yen or 0),
     }
 
 
@@ -732,6 +757,7 @@ def member_income_month(club, user, year, month):
         total_yen = 0
         expense_total = 0
         teacher_pay = 0
+        worker_pay = 0
         for owned_club in owned:
             if owned_club.id == club.id:
                 club_figures = figures
@@ -742,14 +768,16 @@ def member_income_month(club, user, year, month):
             total_yen += club_figures["total_yen"]
             expense_total += club_figures["expense_total_yen"]
             teacher_pay += club_figures["teacher_pay_yen"]
+            worker_pay += club_figures.get("worker_pay_yen", 0)
         account = {
             "club_count": len(owned),
             "total_yen": total_yen,
             "platform_fee_yen": platform_fee,
             "expense_total_yen": expense_total,
             "teacher_pay_yen": teacher_pay,
+            "worker_pay_yen": worker_pay,
             "remainder_yen": income_remainder(
-                total_yen, platform_fee, expense_total, teacher_pay,
+                total_yen, platform_fee, expense_total, teacher_pay, worker_pay,
             ),
         }
 
@@ -769,11 +797,13 @@ def member_income_month(club, user, year, month):
         "platform_fee_yen": platform_fee,
         "expense_total_yen": figures["expense_total_yen"],
         "teacher_pay_yen": figures["teacher_pay_yen"],
+        "worker_pay_yen": figures.get("worker_pay_yen", 0),
         "remainder_yen": income_remainder(
             figures["total_yen"],
             club_platform_fee,
             figures["expense_total_yen"],
             figures["teacher_pay_yen"],
+            figures.get("worker_pay_yen", 0),
         ),
         "account": account,
         "invoices": rows,

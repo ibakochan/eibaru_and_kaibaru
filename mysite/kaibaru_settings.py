@@ -240,6 +240,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "kaibaru.tasks.create_monthly_instructor_invoices",
         "schedule": crontab(minute=0, hour=6, day_of_month="1"),
     },
+    "create-monthly-worker-invoices": {
+        "task": "kaibaru.tasks.create_monthly_worker_invoices",
+        "schedule": crontab(minute=10, hour=6, day_of_month="1"),
+    },
 }
 
 
@@ -254,6 +258,10 @@ STRIPE_BASE_PRICE_ID = "price_1SeNvyEuyKDnirof2pUdCR0v"
 STRIPE_BASE_PRICE_ID_REDUCED = "price_1UQzRZEuyKDnirofHlor1CAj"
 STRIPE_MEMBER_PRICE_ID = "price_1SeRBPEuyKDnirof40RPZZnw"
 STRIPE_MEMBER_PRICE_ID_REDUCED = "price_1UQzXIEuyKDnirofJDEOQsMr"
+STRIPE_WORKER_PRODUCT_ID = "prod_VckyHlwEN01QJC"
+# Set explicitly once created on the product (¥500 / month). Empty looks up
+# or creates the recurring monthly price on first use.
+STRIPE_WORKER_PRICE_ID = price_1UbVSEEuyKDnirofcp382Yle
 STRIPE_CUSTOM_DOMAIN_PRICE_ID = "price_1UWdj7EuyKDnirofTYIVi0AP"
 STRIPE_CUSTOM_DOMAIN_EXTRA_PRICE_ID = "price_1UWdlAEuyKDnirofQaW0HMGv"
 

@@ -1590,6 +1590,7 @@ class JoinRequestSerializer(serializers.ModelSerializer):
             "birth_date",
             "gender",
             "already_subscribed_plans",
+            "is_worker",
         ]
         read_only_fields = ["id", "status", "created_at", "levels"]
 
@@ -1615,7 +1616,19 @@ class JoinRequestSerializer(serializers.ModelSerializer):
         return Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
 
     def validate(self, attrs):
-        plans = attrs.get("already_subscribed_plans") or []
+        is_worker = attrs.get(
+            "is_worker",
+            getattr(self.instance, "is_worker", False),
+        )
+        raw = getattr(self, "initial_data", {}) or {}
+        if "is_worker" in raw:
+            is_worker = str(raw.get("is_worker")).lower() in ("true", "1", "yes")
+            attrs["is_worker"] = is_worker
+        if is_worker:
+            attrs["already_subscribed_plans"] = []
+            plans = []
+        else:
+            plans = attrs.get("already_subscribed_plans") or []
         birth_date = attrs.get("birth_date", getattr(self.instance, "birth_date", None))
         gender = attrs.get("gender")
 
@@ -1764,6 +1777,7 @@ class MemberSerializer(serializers.ModelSerializer):
             "manual_total_participation",
             "is_manager",
             "is_instructor",
+            "is_worker",
             "manager_permissions",
             "birth_date",
             "gender",
@@ -1782,6 +1796,7 @@ class MemberSerializer(serializers.ModelSerializer):
             "user",
             "is_manager",
             "is_instructor",
+            "is_worker",
             "manager_permissions",
             "accepted_join_terms",
         ]
@@ -1808,6 +1823,9 @@ class MemberSerializer(serializers.ModelSerializer):
                 pass
             else:
                 instance.is_instructor = str(data.get("is_instructor")).lower() in ("true", "1", "yes")
+
+        if (is_owner or has_permission(user, club, "members")) and "is_worker" in data:
+            instance.is_worker = str(data.get("is_worker")).lower() in ("true", "1", "yes")
 
         is_representative = (
             instance.user_id is not None and instance.user_id == instance.owner_id
@@ -1883,7 +1901,10 @@ class MemberSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         instance = super().create(validated_data)
         self._apply_role_flags(instance)
-        instance.save(update_fields=["is_instructor", "is_manager"])
+        instance.save(update_fields=["is_instructor", "is_worker", "is_manager"])
+        if instance.is_worker:
+            from .service_worker_schedule import ensure_worker_profile
+            ensure_worker_profile(instance)
         self._sync_manager_role(instance)
         self._sync_levels(instance)
         return instance

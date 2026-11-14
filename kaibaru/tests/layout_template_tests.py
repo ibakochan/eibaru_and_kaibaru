@@ -27,7 +27,7 @@ RESERVATION_TEMPLATE_KEYS = {"hair_salon", "nail_salon"}
 MEMBER_ONLY_TYPES = ("join", "member", "teacher", "memberplans")
 CANVAS_WIDTH = 1205
 ALLOWED_TYPES = {
-    "custom", "schedule", "join", "member", "teacher",
+    "custom", "schedule", "service_schedule", "join", "member", "teacher",
     "slideshow", "header", "memberplans", "inquiry", "video",
 }
 ICONS = {
@@ -72,11 +72,13 @@ class LayoutTemplateFileTests(SimpleTestCase):
         self.assertEqual(len(slugs), len(set(slugs)))
 
         types = [s["type"] for s in ordered]
-        required = ["header", "slideshow", "schedule", "inquiry", "video"]
         if key in RESERVATION_TEMPLATE_KEYS:
+            required = ["header", "slideshow", "service_schedule", "inquiry", "video"]
             for banned in MEMBER_ONLY_TYPES:
                 self.assertNotIn(banned, types, banned)
+            self.assertNotIn("schedule", types)
         else:
+            required = ["header", "slideshow", "schedule", "inquiry", "video"]
             required.extend(MEMBER_ONLY_TYPES)
         for unique in required:
             self.assertEqual(types.count(unique), 1, unique)
@@ -141,7 +143,11 @@ class LayoutTemplateFileTests(SimpleTestCase):
         self.assertIn(labels[2], {"予約はレッスンから", "予約する"})
         by_label = {button["label"]: button for button in sticky["buttons"]}
         access = next(section for section in ordered if section["title"] == "アクセス")
-        schedule = next(section for section in ordered if section["type"] == "schedule")
+        schedule = next(
+            section
+            for section in ordered
+            if section["type"] in ("schedule", "service_schedule")
+        )
         reserve = by_label[labels[2]]
         self.assertEqual(by_label["問い合わせフォーム"]["section_id"], inquiry["id"])
         self.assertEqual(by_label["アクセス"]["section_id"], access["id"])

@@ -58,8 +58,50 @@ CLUB_EXTRA_YEN = 1490
 MEMBER_FULL_YEN = 100
 MEMBER_REDUCED_YEN = 50
 MEMBER_FULL_CAP = 100
+WORKER_YEN = 500
 DOMAIN_YEN = 500
 DOMAIN_EXTRA_YEN = 250
+
+_worker_price_cache = {"id": None}
+
+
+def worker_price_id():
+    """Resolve the ¥500/worker monthly Stripe price for STRIPE_WORKER_PRODUCT_ID."""
+    configured = getattr(settings, "STRIPE_WORKER_PRICE_ID", "") or ""
+    if configured:
+        return configured
+    if _worker_price_cache["id"]:
+        return _worker_price_cache["id"]
+    _stripe()
+    product_id = settings.STRIPE_WORKER_PRODUCT_ID
+    prices = stripe.Price.list(product=product_id, active=True, limit=20)
+    for price in prices.data:
+        recurring = price.get("recurring") or {}
+        if (
+            price.get("unit_amount") == WORKER_YEN
+            and (price.get("currency") or "").lower() == "jpy"
+            and recurring.get("interval") == "month"
+        ):
+            _worker_price_cache["id"] = price["id"]
+            return price["id"]
+    created = stripe.Price.create(
+        product=product_id,
+        unit_amount=WORKER_YEN,
+        currency="jpy",
+        recurring={"interval": "month"},
+        nickname="Worker ¥500",
+    )
+    _worker_price_cache["id"] = created["id"]
+    return created["id"]
+
+
+def billable_member_count(clubs):
+    """Members who are not salon workers (workers use the separate ¥500 fee)."""
+    return Member.objects.filter(club__in=clubs, is_worker=False).count()
+
+
+def billable_worker_count(clubs):
+    return Member.objects.filter(club__in=clubs, is_worker=True).count()
 
 
 def _next_calendar_month(day):
@@ -404,6 +446,7 @@ def estimate_platform_bill_for_owner(user):
     empty = {
         "club_count": 0,
         "member_count": 0,
+        "worker_count": 0,
         "full_price_members": 0,
         "reduced_members": 0,
         "extra_clubs": 0,
@@ -411,6 +454,7 @@ def estimate_platform_bill_for_owner(user):
         "club_extra_yen": 0,
         "member_full_yen": 0,
         "member_reduced_yen": 0,
+        "worker_yen": 0,
         "domain_count": 0,
         "extra_domains": 0,
         "domain_yen": 0,
@@ -450,7 +494,8 @@ def estimate_platform_bill_for_owner(user):
             "stripe_application_fee_yen": _stripe_take_yen(cash_club_ids, cash_fees),
         }
 
-    member_count = Member.objects.filter(club__in=clubs).count()
+    member_count = billable_member_count(clubs)
+    worker_count = billable_worker_count(clubs)
     full_price_members = min(member_count, MEMBER_FULL_CAP)
     reduced_members = max(member_count - MEMBER_FULL_CAP, 0)
     extra_clubs = max(club_count - 1, 0)
@@ -458,11 +503,13 @@ def estimate_platform_bill_for_owner(user):
     club_extra_yen = extra_clubs * CLUB_EXTRA_YEN
     member_full_yen = full_price_members * MEMBER_FULL_YEN
     member_reduced_yen = reduced_members * MEMBER_REDUCED_YEN
+    worker_yen = worker_count * WORKER_YEN
     subscription_yen = (
         club_base_yen
         + club_extra_yen
         + member_full_yen
         + member_reduced_yen
+        + worker_yen
         + domain_yen
     )
     cash_fee_next_yen = cash_fees.get("cash_fee_next_yen", 0)
@@ -470,6 +517,7 @@ def estimate_platform_bill_for_owner(user):
     return {
         "club_count": club_count,
         "member_count": member_count,
+        "worker_count": worker_count,
         "full_price_members": full_price_members,
         "reduced_members": reduced_members,
         "extra_clubs": extra_clubs,
@@ -477,6 +525,7 @@ def estimate_platform_bill_for_owner(user):
         "club_extra_yen": club_extra_yen,
         "member_full_yen": member_full_yen,
         "member_reduced_yen": member_reduced_yen,
+        "worker_yen": worker_yen,
         **domain_fees,
         "subscription_yen": subscription_yen,
         "total_yen": subscription_yen + cash_fee_next_yen,
@@ -600,12 +649,17 @@ def _stripe():
 
 
 def _price_ids():
-    return [
+    ids = [
         settings.STRIPE_BASE_PRICE_ID,
         settings.STRIPE_BASE_PRICE_ID_REDUCED,
         settings.STRIPE_MEMBER_PRICE_ID,
         settings.STRIPE_MEMBER_PRICE_ID_REDUCED,
     ]
+    try:
+        ids.append(worker_price_id())
+    except Exception:
+        logger.exception("[PLATFORM SUB] could not resolve worker price id")
+    return ids
 
 
 def near_payment(platform_sub):
@@ -694,7 +748,8 @@ def _desired_quantities(platform_sub):
     clubs = _covered_clubs(platform_sub)
     if not clubs:
         return {}
-    member_count = Member.objects.filter(club__in=clubs).count()
+    member_count = billable_member_count(clubs)
+    worker_count = billable_worker_count(clubs)
     quantities = {settings.STRIPE_BASE_PRICE_ID: 1}
     extra_clubs = len(clubs) - 1
     if extra_clubs > 0:
@@ -705,6 +760,8 @@ def _desired_quantities(platform_sub):
         quantities[settings.STRIPE_MEMBER_PRICE_ID] = full_price_members
     if reduced_members:
         quantities[settings.STRIPE_MEMBER_PRICE_ID_REDUCED] = reduced_members
+    if worker_count:
+        quantities[worker_price_id()] = worker_count
     return quantities
 
 
@@ -805,7 +862,8 @@ def _create_mutation(platform_sub, mutation_type, club):
 def _checkout_line_items(platform_sub, extra_club):
     quantities = _desired_quantities(platform_sub)
     if not quantities:
-        member_count = Member.objects.filter(club=extra_club).count()
+        member_count = billable_member_count([extra_club])
+        worker_count = billable_worker_count([extra_club])
         quantities = {settings.STRIPE_BASE_PRICE_ID: 1}
         full_price_members = min(member_count, 100)
         reduced_members = max(member_count - 100, 0)
@@ -813,6 +871,8 @@ def _checkout_line_items(platform_sub, extra_club):
             quantities[settings.STRIPE_MEMBER_PRICE_ID] = full_price_members
         if reduced_members:
             quantities[settings.STRIPE_MEMBER_PRICE_ID_REDUCED] = reduced_members
+        if worker_count:
+            quantities[worker_price_id()] = worker_count
     return [
         {"price": price_id, "quantity": quantity}
         for price_id, quantity in quantities.items()
@@ -1067,6 +1127,8 @@ def _apply_stripe(mutation):
     if mutation.type in (
         ClubSubscriptionMutation.MutationType.SYNC_MEMBERS,
         ClubSubscriptionMutation.MutationType.MEMBER_QUANTITY,
+        ClubSubscriptionMutation.MutationType.SYNC_WORKERS,
+        ClubSubscriptionMutation.MutationType.WORKER_QUANTITY,
     ):
         _apply_quantities(platform_sub, mutation)
         return
@@ -1359,6 +1421,10 @@ MEMBER_QUANTITY_TYPES = (
     ClubSubscriptionMutation.MutationType.MEMBER_QUANTITY,
     ClubSubscriptionMutation.MutationType.SYNC_MEMBERS,
 )
+WORKER_QUANTITY_TYPES = (
+    ClubSubscriptionMutation.MutationType.WORKER_QUANTITY,
+    ClubSubscriptionMutation.MutationType.SYNC_WORKERS,
+)
 DOMAIN_QUANTITY_TYPES = (
     ClubSubscriptionMutation.MutationType.SYNC_DOMAIN,
 )
@@ -1442,6 +1508,29 @@ def queue_member_sync(club):
         club,
         ClubSubscriptionMutation.MutationType.MEMBER_QUANTITY,
         MEMBER_QUANTITY_TYPES,
+        delay,
+    )
+
+
+def queue_worker_sync(club):
+    link = (
+        PlatformClub.objects
+        .filter(club=club, awaiting_checkout=False)
+        .select_related("platform_subscription")
+        .first()
+    )
+    if not link or not link.platform_subscription.stripe_subscription_id:
+        return
+
+    def delay():
+        from .tasks import reconcile_worker_quantity_mutations
+        reconcile_worker_quantity_mutations.delay()
+
+    _queue_quantity_sync(
+        link.platform_subscription,
+        club,
+        ClubSubscriptionMutation.MutationType.WORKER_QUANTITY,
+        WORKER_QUANTITY_TYPES,
         delay,
     )
 

@@ -1609,7 +1609,20 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        sync_member_quantity(club)
+        from .utils import sync_worker_quantity
+
+        worker_accepted = Member.objects.filter(
+            id__in=created_member_ids,
+            is_worker=True,
+        ).exists()
+        member_accepted = Member.objects.filter(
+            id__in=created_member_ids,
+            is_worker=False,
+        ).exists()
+        if member_accepted:
+            sync_member_quantity(club)
+        if worker_accepted:
+            sync_worker_quantity(club)
 
         return Response(
             {
@@ -1650,19 +1663,24 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
                     other_information=jr.other_information,
                     picture=new_picture,
                     accepted_join_terms=jr.accepted_join_terms or "",
+                    is_worker=bool(jr.is_worker),
                 )
-                copy_join_request_levels(jr, member)
+                if member.is_worker:
+                    from .service_worker_schedule import ensure_worker_profile
+                    ensure_worker_profile(member)
+                else:
+                    copy_join_request_levels(jr, member)
 
-                legacy_plans = list(
-                    jr.already_subscribed_plans.all()
-                )
-
-                if legacy_plans:
-                    LegacySubscriptionService.create_legacy_subscription(
-                        club=jr.club,
-                        member=member,
-                        plans=legacy_plans,
+                    legacy_plans = list(
+                        jr.already_subscribed_plans.all()
                     )
+
+                    if legacy_plans:
+                        LegacySubscriptionService.create_legacy_subscription(
+                            club=jr.club,
+                            member=member,
+                            plans=legacy_plans,
+                        )
     
                 created_member_ids.append(member.id)
 
@@ -1725,7 +1743,13 @@ class MemberViewSet(viewsets.ModelViewSet):
             )
         response = super().create(request, *args, **kwargs)
         if response.status_code == 201 and club is not None:
-            sync_member_quantity(club)
+            member_id = response.data.get("id")
+            created = Member.objects.filter(id=member_id).first() if member_id else None
+            if created and created.is_worker:
+                from .utils import sync_worker_quantity
+                sync_worker_quantity(club)
+            else:
+                sync_member_quantity(club)
         return response
 
     def perform_create(self, serializer):
@@ -1854,8 +1878,13 @@ class MemberViewSet(viewsets.ModelViewSet):
         member.ticket_grants.update(member_name=full_name)
         member.teacher_invoices.update(instructor_name=full_name)
 
+        was_worker = bool(member.is_worker)
         member.delete()
-        sync_member_quantity(club)
+        if was_worker:
+            from .utils import sync_worker_quantity
+            sync_worker_quantity(club)
+        else:
+            sync_member_quantity(club)
 
         return Response({"status": "deleted"}, status=status.HTTP_200_OK)
 
@@ -4861,6 +4890,428 @@ class ClubViewSet(viewsets.ModelViewSet):
         if message:
             return Response({"detail": message}, status=status.HTTP_400_BAD_REQUEST)
         return Response(payload)
+
+    @action(
+        detail=False,
+        methods=["get", "post"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/service-courses",
+    )
+    def service_courses(self, request, subdomain=None):
+        from .models import ServiceCourse
+
+        club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
+        if not club:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        if request.method == "GET":
+            active_only = str(request.query_params.get("all", "")).lower() not in (
+                "1", "true", "yes",
+            )
+            qs = ServiceCourse.objects.filter(club=club)
+            if active_only:
+                qs = qs.filter(active=True)
+            return Response([
+                {
+                    "id": c.id,
+                    "name": c.name,
+                    "duration_minutes": c.duration_minutes,
+                    "amount": c.amount,
+                    "description": c.description,
+                    "position": c.position,
+                    "active": c.active,
+                }
+                for c in qs.order_by("position", "id")
+            ])
+        club, error = _staff_club(request, subdomain, "lessons")
+        if error:
+            return error
+        try:
+            duration = int(request.data.get("duration_minutes"))
+            amount = int(request.data.get("amount") or 0)
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "所要時間と料金を正しく入力してください。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        name = (request.data.get("name") or "").strip()
+        if not name:
+            return Response({"detail": "コース名を入力してください。"}, status=400)
+        if duration < 1:
+            return Response({"detail": "所要時間は1分以上にしてください。"}, status=400)
+        course = ServiceCourse.objects.create(
+            club=club,
+            name=name[:80],
+            duration_minutes=duration,
+            amount=max(0, amount),
+            description=(request.data.get("description") or "")[:2000],
+            position=int(request.data.get("position") or 0),
+            active=str(request.data.get("active", "true")).lower() in ("true", "1", "yes"),
+        )
+        return Response(
+            {
+                "id": course.id,
+                "name": course.name,
+                "duration_minutes": course.duration_minutes,
+                "amount": course.amount,
+                "description": course.description,
+                "position": course.position,
+                "active": course.active,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(
+        detail=False,
+        methods=["patch", "delete"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/service-courses/(?P<course_id>\d+)",
+    )
+    def service_course_record(self, request, subdomain=None, course_id=None):
+        from .models import ServiceCourse
+
+        club, error = _staff_club(request, subdomain, "lessons")
+        if error:
+            return error
+        course = ServiceCourse.objects.filter(club=club, id=course_id).first()
+        if not course:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        if request.method == "DELETE":
+            course.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        if "name" in request.data:
+            name = (request.data.get("name") or "").strip()
+            if not name:
+                return Response({"detail": "コース名を入力してください。"}, status=400)
+            course.name = name[:80]
+        if "duration_minutes" in request.data:
+            try:
+                duration = int(request.data.get("duration_minutes"))
+            except (TypeError, ValueError):
+                return Response({"detail": "所要時間を正しく入力してください。"}, status=400)
+            if duration < 1:
+                return Response({"detail": "所要時間は1分以上にしてください。"}, status=400)
+            course.duration_minutes = duration
+        if "amount" in request.data:
+            try:
+                course.amount = max(0, int(request.data.get("amount") or 0))
+            except (TypeError, ValueError):
+                return Response({"detail": "料金を正しく入力してください。"}, status=400)
+        if "description" in request.data:
+            course.description = (request.data.get("description") or "")[:2000]
+        if "position" in request.data:
+            try:
+                course.position = int(request.data.get("position") or 0)
+            except (TypeError, ValueError):
+                pass
+        if "active" in request.data:
+            course.active = str(request.data.get("active")).lower() in ("true", "1", "yes")
+        course.save()
+        return Response({
+            "id": course.id,
+            "name": course.name,
+            "duration_minutes": course.duration_minutes,
+            "amount": course.amount,
+            "description": course.description,
+            "position": course.position,
+            "active": course.active,
+        })
+
+    @action(
+        detail=False,
+        methods=["get", "post"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/service-windows",
+    )
+    def service_windows(self, request, subdomain=None):
+        from .models import ServiceWindow
+
+        club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
+        if not club:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        section_id = request.query_params.get("section_id") or request.data.get("section_id")
+        try:
+            section_id = int(section_id) if section_id not in (None, "") else None
+        except (TypeError, ValueError):
+            section_id = None
+        if request.method == "GET":
+            qs = ServiceWindow.objects.filter(club=club)
+            if section_id is not None:
+                qs = qs.filter(section_id=section_id)
+            return Response([
+                {
+                    "id": w.id,
+                    "section_id": w.section_id,
+                    "earliest_start": w.earliest_start.strftime("%H:%M"),
+                    "latest_start": w.latest_start.strftime("%H:%M"),
+                    "max_finish": w.max_finish.strftime("%H:%M"),
+                    "position": w.position,
+                }
+                for w in qs.order_by("position", "earliest_start", "id")
+            ])
+        club, error = _staff_club(request, subdomain, "lessons")
+        if error:
+            return error
+        from .service_worker_schedule import _parse_hhmm
+        earliest = _parse_hhmm(request.data.get("earliest_start"))
+        latest = _parse_hhmm(request.data.get("latest_start"))
+        finish = _parse_hhmm(request.data.get("max_finish"))
+        if not earliest or not latest or not finish:
+            return Response({"detail": "時間帯を正しく入力してください。"}, status=400)
+        if earliest > latest or latest > finish:
+            return Response({"detail": "時間帯の順序が正しくありません。"}, status=400)
+        window = ServiceWindow.objects.create(
+            club=club,
+            section_id=section_id,
+            earliest_start=earliest,
+            latest_start=latest,
+            max_finish=finish,
+            position=int(request.data.get("position") or 0),
+        )
+        return Response({
+            "id": window.id,
+            "section_id": window.section_id,
+            "earliest_start": window.earliest_start.strftime("%H:%M"),
+            "latest_start": window.latest_start.strftime("%H:%M"),
+            "max_finish": window.max_finish.strftime("%H:%M"),
+            "position": window.position,
+        }, status=status.HTTP_201_CREATED)
+
+    @action(
+        detail=False,
+        methods=["delete"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/service-windows/(?P<window_id>\d+)",
+    )
+    def service_window_record(self, request, subdomain=None, window_id=None):
+        from .models import ServiceWindow
+
+        club, error = _staff_club(request, subdomain, "lessons")
+        if error:
+            return error
+        deleted, _ = ServiceWindow.objects.filter(club=club, id=window_id).delete()
+        if not deleted:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/service-slots",
+    )
+    def service_slots(self, request, subdomain=None):
+        from datetime import date as date_cls
+        from .service_worker_schedule import available_slots
+
+        club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
+        if not club:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            course_id = int(request.query_params.get("course_id"))
+            day = date_cls.fromisoformat(str(request.query_params.get("date"))[:10])
+        except (TypeError, ValueError):
+            return Response({"detail": "コースと日付を指定してください。"}, status=400)
+        section_id = request.query_params.get("section_id")
+        try:
+            section_id = int(section_id) if section_id not in (None, "") else None
+        except (TypeError, ValueError):
+            section_id = None
+        slots, message = available_slots(club, course_id, day, section_id)
+        if message:
+            return Response({"detail": message, "slots": []}, status=400)
+        return Response({"slots": slots})
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/service-reservations",
+    )
+    def service_reservations(self, request, subdomain=None):
+        from .service_worker_schedule import create_service_reservation
+
+        club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
+        if not club:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        payload, message = create_service_reservation(club, request.data)
+        if message:
+            return Response({"detail": message}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(payload, status=status.HTTP_201_CREATED)
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/workers",
+    )
+    def workers(self, request, subdomain=None):
+        from .service_worker_schedule import worker_detail
+
+        club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
+        if not club:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        workers = club.members.filter(is_worker=True).order_by("full_name", "id")
+        return Response([worker_detail(member) for member in workers])
+
+    @action(
+        detail=False,
+        methods=["get", "patch"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/workers/(?P<worker_id>\d+)",
+    )
+    def worker_record(self, request, subdomain=None, worker_id=None):
+        from .service_worker_schedule import (
+            replace_worker_availability,
+            set_worker_courses,
+            update_worker_profile,
+            worker_detail,
+        )
+
+        club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
+        if not club:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        member = club.members.filter(id=worker_id, is_worker=True).first()
+        if not member:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        if request.method == "GET":
+            return Response(worker_detail(member))
+        is_self = request.user.is_authenticated and member.user_id == request.user.id
+        club_staff, error = _staff_club(request, subdomain, "lessons")
+        if error and not is_self:
+            return error
+        data = request.data
+        if "course_ids" in data:
+            if error:
+                return error
+            _, message = set_worker_courses(member, data.get("course_ids"))
+            if message:
+                return Response({"detail": message}, status=400)
+        if "availability" in data:
+            _, message = replace_worker_availability(member, data.get("availability"))
+            if message:
+                return Response({"detail": message}, status=400)
+        if "monthly_hour_cap" in data or "hourly_rate" in data:
+            if error:
+                return error
+            payload, message = update_worker_profile(member, data)
+            if message:
+                return Response({"detail": message}, status=400)
+            return Response(payload)
+        return Response(worker_detail(member))
+
+    @action(
+        detail=False,
+        methods=["post", "delete"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/workers/(?P<worker_id>\d+)/time-offs(?:/(?P<time_off_id>\d+))?",
+    )
+    def worker_time_offs(self, request, subdomain=None, worker_id=None, time_off_id=None):
+        from .service_worker_schedule import add_worker_time_off, delete_worker_time_off
+
+        club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
+        if not club:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        member = club.members.filter(id=worker_id, is_worker=True).first()
+        if not member:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        is_self = request.user.is_authenticated and member.user_id == request.user.id
+        _, error = _staff_club(request, subdomain, "lessons")
+        if error and not is_self:
+            return error
+        if request.method == "DELETE":
+            if not time_off_id:
+                return Response({"detail": "休みを指定してください。"}, status=400)
+            if not delete_worker_time_off(member, time_off_id):
+                return Response({"detail": "Not found"}, status=404)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        payload, message = add_worker_time_off(member, request.data)
+        if message:
+            return Response({"detail": message}, status=400)
+        return Response(payload, status=status.HTTP_201_CREATED)
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/worker-pay",
+    )
+    def worker_pay(self, request, subdomain=None):
+        from .service_worker_pay import worker_pay_overview
+
+        club, error = _staff_club(request, subdomain, "teacher_pay")
+        if error:
+            return error
+        return Response(worker_pay_overview(club))
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/worker-pays",
+    )
+    def worker_pays(self, request, subdomain=None):
+        from .service_worker_pay import save_worker_pay
+
+        club, error = _staff_club(request, subdomain, "teacher_pay")
+        if error:
+            return error
+        payload, message = save_worker_pay(club, request.data, request.user)
+        if message:
+            return Response({"detail": message}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(payload)
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/worker-invoices",
+    )
+    def worker_invoices(self, request, subdomain=None):
+        from .service_worker_pay import create_worker_invoice
+
+        club, error = _staff_club(request, subdomain, "teacher_pay")
+        if error:
+            return error
+        payload, message = create_worker_invoice(club, request.data, request.user)
+        if message:
+            return Response({"detail": message}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(payload, status=status.HTTP_201_CREATED)
+
+    @action(
+        detail=False,
+        methods=["patch", "delete"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/worker-invoices/(?P<invoice_id>\d+)",
+    )
+    def worker_invoice_record(self, request, subdomain=None, invoice_id=None):
+        from .service_worker_pay import delete_worker_invoice, update_worker_invoice
+
+        club, error = _staff_club(request, subdomain, "teacher_pay")
+        if error:
+            return error
+        if request.method == "DELETE":
+            deleted, message = delete_worker_invoice(club, invoice_id, request.user)
+            if message:
+                return Response({"detail": message}, status=status.HTTP_400_BAD_REQUEST)
+            if not deleted:
+                return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        payload, message = update_worker_invoice(club, invoice_id, request.data, request.user)
+        if payload is None and message is None:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        if message:
+            return Response({"detail": message}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(payload)
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/workers/(?P<worker_id>\d+)/history",
+    )
+    def worker_history(self, request, subdomain=None, worker_id=None):
+        from .service_worker_pay import worker_history_month, worker_history_months
+
+        club, error = _staff_club(request, subdomain, "teacher_pay")
+        if error:
+            return error
+        member = club.members.filter(id=worker_id, is_worker=True).first()
+        if not member:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        year = request.query_params.get("year")
+        month = request.query_params.get("month")
+        if year and month:
+            try:
+                return Response(worker_history_month(member, int(year), int(month)))
+            except (TypeError, ValueError):
+                return Response({"detail": "年月が正しくありません。"}, status=400)
+        return Response(worker_history_months(member))
 
     @action(detail=True, methods=["post"], url_path="pricing_preview")
     def pricing_preview(self, request, pk=None):

@@ -386,6 +386,15 @@ def reconcile_member_quantity_mutations():
     reconcile_open_mutations_of_type(MEMBER_QUANTITY_TYPES)
 
 
+@shared_task(name="kaibaru.tasks.reconcile_worker_quantity_mutations")
+def reconcile_worker_quantity_mutations():
+    """Retry a worker-count sync that did not finish."""
+    from .service_platform_subscription import WORKER_QUANTITY_TYPES
+
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+    reconcile_open_mutations_of_type(WORKER_QUANTITY_TYPES)
+
+
 @shared_task(name="kaibaru.tasks.cleanup_deleted_clubs")
 def cleanup_deleted_clubs():
     """Unsubscribe, delete members, remove the domain, and delete the club's own pictures."""
@@ -1009,6 +1018,21 @@ def create_monthly_instructor_invoices():
         logger.exception("[TEACHER PAY] Monthly statements failed")
         raise
     logger.info("[TEACHER PAY] Finished monthly statements result=%s", result)
+    return result
+
+
+@shared_task
+def create_monthly_worker_invoices():
+    """Create last month's statement for each worker on fixed or hourly pay."""
+    from .service_worker_pay import create_monthly_worker_invoices as build_worker_invoices
+
+    logger.info("[WORKER PAY] Starting monthly statements")
+    try:
+        result = build_worker_invoices()
+    except Exception:
+        logger.exception("[WORKER PAY] Monthly statements failed")
+        raise
+    logger.info("[WORKER PAY] Finished monthly statements result=%s", result)
     return result
 
 
