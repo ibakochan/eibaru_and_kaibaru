@@ -179,6 +179,12 @@ def _line_payload(line):
         "lesson_id": line.lesson_id,
         "lesson_title": line.lesson_title,
         "times_taught": line.times_taught,
+        "occurrence_date": (
+            line.occurrence_date.isoformat()
+            if getattr(line, "occurrence_date", None)
+            else None
+        ),
+        "fee_yen": getattr(line, "fee_yen", None),
     }
 
 
@@ -245,7 +251,9 @@ def teacher_pay_overview(club):
         former.setdefault(invoice.instructor_name or "削除された会員", []).append(
             _invoice_payload(invoice)
         )
-    lessons = club.lessons.all().order_by("weekday", "start_time", "id")
+    lessons = club.lessons.select_related("club").order_by("weekday", "start_time", "id")
+    from .service_instructor_sessions import lesson_fee_yen
+
     return {
         "lessons": [
             {
@@ -254,6 +262,7 @@ def teacher_pay_overview(club):
                 "weekday": lesson.weekday,
                 "start_time": lesson.start_time.strftime("%H:%M"),
                 "end_time": lesson.end_time.strftime("%H:%M"),
+                "instructor_fee": lesson_fee_yen(lesson),
             }
             for lesson in lessons
         ],

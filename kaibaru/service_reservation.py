@@ -255,6 +255,10 @@ class MemberReservationService:
                 "選択した日付がレッスンの曜日と一致していません。"
             )
 
+        from .service_instructor_sessions import assert_lesson_date_open
+
+        assert_lesson_date_open(lesson, reservation_date)
+
         assert_member_eligible_for_lesson(member, lesson)
 
         assert_reservation_horizon(

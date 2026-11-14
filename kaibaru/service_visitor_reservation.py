@@ -171,6 +171,10 @@ def _prepare_visitor_request(
             "選択した日付がレッスンの曜日と一致していません。"
         )
 
+    from .service_instructor_sessions import assert_lesson_date_open
+
+    assert_lesson_date_open(lesson, reservation_date)
+
     assert_visitor_eligible_for_lesson(
         age=age,
         gender=gender,

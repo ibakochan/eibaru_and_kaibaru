@@ -180,6 +180,10 @@ def _prepare_trial_request(
             "選択した日付がレッスンの曜日と一致していません。"
         )
 
+    from .service_instructor_sessions import assert_lesson_date_open
+
+    assert_lesson_date_open(lesson, reservation_date)
+
     assert_reservation_horizon(
         reservation_date=reservation_date,
         max_days_ahead=None,

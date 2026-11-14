@@ -261,7 +261,7 @@ STRIPE_MEMBER_PRICE_ID_REDUCED = "price_1UQzXIEuyKDnirofJDEOQsMr"
 STRIPE_WORKER_PRODUCT_ID = "prod_VckyHlwEN01QJC"
 # Set explicitly once created on the product (¥500 / month). Empty looks up
 # or creates the recurring monthly price on first use.
-STRIPE_WORKER_PRICE_ID = price_1UbVSEEuyKDnirofcp382Yle
+STRIPE_WORKER_PRICE_ID = "price_1UbVSEEuyKDnirofcp382Yle"
 STRIPE_CUSTOM_DOMAIN_PRICE_ID = "price_1UWdj7EuyKDnirofTYIVi0AP"
 STRIPE_CUSTOM_DOMAIN_EXTRA_PRICE_ID = "price_1UWdlAEuyKDnirofQaW0HMGv"
 

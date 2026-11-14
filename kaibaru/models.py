@@ -160,6 +160,11 @@ class Club(models.Model):
         default=0,
         help_text="入会金 (one-time fee charged when a member joins)"
     )
+    default_instructor_lesson_fee = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Default yen paid to each instructor per lesson taught. Lessons may override.",
+    )
 
     JOIN_PICTURE_MODE_CHOICES = [
         ("off", "Optional"),
@@ -1243,11 +1248,157 @@ class Lesson(models.Model):
         blank=True,
         help_text="If set, only this gender may reserve. Empty means any gender.",
     )
+    instructor_fee = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Yen paid to each instructor for this lesson. Empty uses the club default.",
+    )
+    default_instructors = models.ManyToManyField(
+        "Member",
+        blank=True,
+        related_name="default_lessons",
+        through="LessonInstructor",
+        limit_choices_to={"is_instructor": True},
+    )
 
     creation_date = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"{self.club.subdomain} - {self.get_weekday_display()} {self.start_time.strftime('%H:%M')}"
+
+
+class LessonInstructor(models.Model):
+    """Default instructors assigned to a recurring lesson (can be several)."""
+
+    lesson = models.ForeignKey(
+        Lesson,
+        on_delete=models.CASCADE,
+        related_name="lesson_instructors",
+    )
+    instructor = models.ForeignKey(
+        Member,
+        on_delete=models.CASCADE,
+        related_name="lesson_instructor_links",
+        limit_choices_to={"is_instructor": True},
+    )
+    position = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["position", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["lesson", "instructor"],
+                name="unique_lesson_default_instructor",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.instructor_id and self.lesson_id:
+            if self.instructor.club_id != self.lesson.club_id:
+                raise ValidationError(
+                    {"instructor": "この指導者はこのクラブの会員ではありません。"}
+                )
+            if not self.instructor.is_instructor:
+                raise ValidationError(
+                    {"instructor": "会員を指導者にしてから設定してください。"}
+                )
+
+    def __str__(self):
+        return f"{self.lesson_id}:{self.instructor_id}"
+
+
+class LessonDateCancel(models.Model):
+    """Marks one calendar date of a recurring lesson as canceled."""
+
+    lesson = models.ForeignKey(
+        Lesson,
+        on_delete=models.CASCADE,
+        related_name="date_cancels",
+    )
+    date = models.DateField()
+    note = models.CharField(max_length=200, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["lesson", "date"],
+                name="unique_lesson_date_cancel",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["lesson", "date"]),
+        ]
+
+    def __str__(self):
+        return f"{self.lesson_id} canceled {self.date}"
+
+
+class LessonDateStaff(models.Model):
+    """Replacement instructors for one date of a recurring lesson.
+
+    When this row exists, it replaces the lesson's default instructors for
+    that date. An empty instructor list means nobody is assigned that day,
+    but the lesson is not canceled unless LessonDateCancel exists.
+    """
+
+    lesson = models.ForeignKey(
+        Lesson,
+        on_delete=models.CASCADE,
+        related_name="date_staffs",
+    )
+    date = models.DateField()
+    note = models.CharField(max_length=200, blank=True, default="")
+    instructors = models.ManyToManyField(
+        Member,
+        blank=True,
+        related_name="lesson_date_staff_assignments",
+        through="LessonDateStaffMember",
+        limit_choices_to={"is_instructor": True},
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["lesson", "date"],
+                name="unique_lesson_date_staff",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["lesson", "date"]),
+        ]
+
+    def __str__(self):
+        return f"{self.lesson_id} staff {self.date}"
+
+
+class LessonDateStaffMember(models.Model):
+    staff = models.ForeignKey(
+        LessonDateStaff,
+        on_delete=models.CASCADE,
+        related_name="members",
+    )
+    instructor = models.ForeignKey(
+        Member,
+        on_delete=models.CASCADE,
+        related_name="lesson_date_staff_links",
+        limit_choices_to={"is_instructor": True},
+    )
+    position = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["position", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["staff", "instructor"],
+                name="unique_lesson_date_staff_member",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.staff_id}:{self.instructor_id}"
 
 
 class ReservationAddon(models.Model):
@@ -3140,7 +3291,12 @@ class TeacherInvoice(models.Model):
 
 
 class TeacherInvoiceLesson(models.Model):
-    """One class on a teacher statement, and how many times it was taught."""
+    """One class on a teacher statement, and how many times it was taught.
+
+    occurrence_date + fee_yen are set when a dated session is applied from
+    the instructor lesson fee flow. Older hand-written lines may leave them
+    empty and only use times_taught.
+    """
 
     invoice = models.ForeignKey(
         TeacherInvoice,
@@ -3156,6 +3312,25 @@ class TeacherInvoiceLesson(models.Model):
     )
     lesson_title = models.CharField(max_length=200, blank=True, default="")
     times_taught = models.PositiveIntegerField()
+    occurrence_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Calendar date of the taught session, when applied from fees.",
+    )
+    fee_yen = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Yen for this dated session. Empty on hand-written aggregate lines.",
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["invoice", "lesson", "occurrence_date"],
+                condition=Q(occurrence_date__isnull=False, lesson__isnull=False),
+                name="unique_invoice_lesson_occurrence",
+            ),
+        ]
 
     def clean(self):
         super().clean()

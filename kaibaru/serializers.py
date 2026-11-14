@@ -2214,7 +2214,14 @@ class MemberSerializer(serializers.ModelSerializer):
 
 class LessonSerializer(serializers.ModelSerializer):
     instructor = serializers.SerializerMethodField()
+    instructors = serializers.SerializerMethodField()
     instructor_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
+    instructor_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        write_only=True,
+        required=False,
+    )
+    instructor_fee = BlankableIntegerField(required=False, allow_null=True)
     club = serializers.PrimaryKeyRelatedField(read_only=True)
 
     allowed_plans = serializers.PrimaryKeyRelatedField(many=True, queryset=MembershipPlan.objects.all(), required=False)
@@ -2265,8 +2272,11 @@ class LessonSerializer(serializers.ModelSerializer):
             "id",
             "club",
             "instructor",
+            "instructors",
             "section_id",
             "instructor_id",
+            "instructor_ids",
+            "instructor_fee",
             "title",
             "weekday",
             "start_time",
@@ -2304,7 +2314,7 @@ class LessonSerializer(serializers.ModelSerializer):
             "allowed_gender",
             
         ]
-        read_only_fields = ["id", "reservation_menu", "reservation_catalog"]
+        read_only_fields = ["id", "reservation_menu", "reservation_catalog", "instructors"]
 
     def get_reservation_menu(self, obj):
         from .service_reservation_catalog import lesson_menu
@@ -2490,9 +2500,26 @@ class LessonSerializer(serializers.ModelSerializer):
         return attrs  
   
     def get_instructor(self, obj):
-        if obj.instructor:
-            return {"id": obj.instructor.id, "full_name": obj.instructor.full_name}
-        return None
+        instructors = self.get_instructors(obj)
+        return instructors[0] if instructors else None
+
+    def get_instructors(self, obj):
+        from .models import LessonInstructor
+
+        links = list(
+            LessonInstructor.objects.filter(lesson=obj)
+            .select_related("instructor")
+            .order_by("position", "id")
+        )
+        if links:
+            return [
+                {"id": link.instructor_id, "full_name": link.instructor.full_name}
+                for link in links
+                if link.instructor_id
+            ]
+        if obj.instructor_id and obj.instructor:
+            return [{"id": obj.instructor.id, "full_name": obj.instructor.full_name}]
+        return []
     
     def get_total_participation(self, obj):
         annotated = getattr(obj, "annotated_total_participation", None)
@@ -2516,6 +2543,41 @@ class LessonSerializer(serializers.ModelSerializer):
         months = max(days / 30, 1)  
         return round(total / months, 2)
 
+    def _sync_instructors(self, instance):
+        from .service_instructor_sessions import set_default_instructors
+
+        data = getattr(self, "initial_data", {}) or {}
+        if "instructor_ids" in data:
+            if hasattr(data, "getlist"):
+                raw = data.getlist("instructor_ids")
+            else:
+                raw = data.get("instructor_ids")
+            if isinstance(raw, str):
+                raw = [part for part in raw.split(",") if part.strip()]
+            if not isinstance(raw, list):
+                raw = [raw] if raw not in (None, "") else []
+            raw = [item for item in raw if item not in (None, "")]
+            payload, message = set_default_instructors(instance, raw)
+            if message:
+                raise serializers.ValidationError({"instructor_ids": message})
+            return payload
+        if "instructor_id" in data:
+            raw = data.get("instructor_id")
+            ids = [] if raw in (None, "", "null") else [raw]
+            payload, message = set_default_instructors(instance, ids)
+            if message:
+                raise serializers.ValidationError({"instructor_id": message})
+            return payload
+        return None
+
+    def create(self, validated_data):
+        validated_data.pop("instructor_ids", None)
+        with transaction.atomic():
+            instance = super().create(validated_data)
+            self._sync_instructors(instance)
+            _sync_reservation_catalog(self, instance, "lesson")
+        return instance
+
     def update(self, instance, validated_data):
         with transaction.atomic():
             clear_allowed_plans = self.initial_data.get(
@@ -2526,6 +2588,7 @@ class LessonSerializer(serializers.ModelSerializer):
                 "allowed_plans",
                 None
             )
+            validated_data.pop("instructor_ids", None)
 
             instance = super().update(
                 instance,
@@ -2537,6 +2600,7 @@ class LessonSerializer(serializers.ModelSerializer):
             elif allowed_plans is not None:
                 instance.allowed_plans.set(allowed_plans)
 
+            self._sync_instructors(instance)
             _sync_reservation_catalog(self, instance, "lesson")
         return instance
 
@@ -3196,6 +3260,7 @@ class ClubSerializer(serializers.ModelSerializer):
             "stripe_anchor_date",
             "has_member_subscription",
             "joining_fee",
+            "default_instructor_lesson_fee",
             "join_picture_mode",
             "join_picture_min_age",
             "join_terms",
@@ -3278,6 +3343,7 @@ class ClubSerializer(serializers.ModelSerializer):
 
         for field in (
             "joining_fee",
+            "default_instructor_lesson_fee",
         ):
             if field not in attrs or attrs.get(field) is None:
                 continue

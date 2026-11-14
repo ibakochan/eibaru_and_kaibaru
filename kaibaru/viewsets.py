@@ -3911,8 +3911,28 @@ class LessonViewSet(viewsets.ModelViewSet):
                 }
             )
         instructor = None
+        instructor_ids = self.request.data.get("instructor_ids")
         instructor_id = self.request.data.get("instructor_id")
-        if instructor_id:
+        if instructor_ids not in (None, ""):
+            if isinstance(instructor_ids, str):
+                raw_ids = [part for part in instructor_ids.split(",") if part.strip()]
+            elif isinstance(instructor_ids, list):
+                raw_ids = instructor_ids
+            else:
+                raw_ids = [instructor_ids]
+            try:
+                parsed = [int(value) for value in raw_ids]
+            except (TypeError, ValueError):
+                raise serializers.ValidationError({"instructor_ids": "Invalid ID."})
+            members = list(
+                Member.objects.filter(id__in=parsed, is_instructor=True, club=club)
+            )
+            if len(members) != len(set(parsed)):
+                raise serializers.ValidationError(
+                    {"instructor_ids": "Instructor not found or not valid."}
+                )
+            instructor = members[0] if members else None
+        elif instructor_id:
             try:
                 instructor_id = int(instructor_id)
                 instructor = Member.objects.filter(id=instructor_id, is_instructor=True, club=club).first()
@@ -3935,6 +3955,54 @@ class LessonViewSet(viewsets.ModelViewSet):
             raise serializers.ValidationError({"detail": LESSON_PERMISSION_MESSAGE})
         instance.delete()
 
+    @action(
+        detail=True,
+        methods=["get", "post", "delete"],
+        url_path=r"date/(?P<day>\d{4}-\d{2}-\d{2})",
+    )
+    def date_override(self, request, pk=None, day=None):
+        from datetime import date as date_cls
+        from .service_instructor_sessions import (
+            cancel_lesson_date,
+            clear_lesson_date_staff,
+            lesson_date_status,
+            set_lesson_date_staff,
+            uncancel_lesson_date,
+        )
+
+        lesson = self.get_object()
+        if not has_permission(request.user, lesson.club, "lessons"):
+            return Response({"detail": LESSON_PERMISSION_MESSAGE}, status=403)
+        try:
+            day_value = date_cls.fromisoformat(day)
+        except ValueError:
+            return Response({"detail": "日付が正しくありません。"}, status=400)
+
+        if request.method == "GET":
+            return Response(lesson_date_status(lesson, day_value))
+
+        action_name = (request.data.get("action") or "").strip()
+        if request.method == "DELETE" or action_name == "clear_staff":
+            clear_lesson_date_staff(lesson, day_value)
+            return Response(lesson_date_status(lesson, day_value))
+        if action_name == "cancel":
+            return Response(
+                cancel_lesson_date(lesson, day_value, request.data.get("note") or "")
+            )
+        if action_name == "uncancel":
+            uncancel_lesson_date(lesson, day_value)
+            return Response(lesson_date_status(lesson, day_value))
+        if action_name == "set_staff":
+            payload, message = set_lesson_date_staff(
+                lesson,
+                day_value,
+                request.data.get("instructor_ids") or [],
+                request.data.get("note") or "",
+            )
+            if message:
+                return Response({"detail": message}, status=400)
+            return Response(payload)
+        return Response({"detail": "操作を指定してください。"}, status=400)
 
 
 class ParticipationViewSet(viewsets.ModelViewSet):
@@ -4887,6 +4955,50 @@ class ClubViewSet(viewsets.ModelViewSet):
         payload, message = update_teacher_invoice(club, invoice_id, request.data, request.user)
         if payload is None and message is None:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        if message:
+            return Response({"detail": message}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(payload)
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/instructors/(?P<instructor_id>\d+)/sessions",
+    )
+    def instructor_sessions(self, request, subdomain=None, instructor_id=None):
+        from .service_instructor_sessions import sessions_for_instructor
+
+        club, error = _staff_club(request, subdomain, "teacher_pay")
+        if error:
+            return error
+        member = club.members.filter(id=instructor_id).filter(
+            Q(is_instructor=True) | Q(is_manager=True)
+        ).first()
+        if not member:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            year = int(request.query_params.get("year"))
+            month = int(request.query_params.get("month"))
+        except (TypeError, ValueError):
+            return Response({"detail": "年月を指定してください。"}, status=400)
+        return Response(sessions_for_instructor(club, member, year, month))
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/instructors/(?P<instructor_id>\d+)/apply-sessions",
+    )
+    def apply_instructor_sessions(self, request, subdomain=None, instructor_id=None):
+        from .service_instructor_sessions import apply_sessions
+
+        club, error = _staff_club(request, subdomain, "teacher_pay")
+        if error:
+            return error
+        member = club.members.filter(id=instructor_id).filter(
+            Q(is_instructor=True) | Q(is_manager=True)
+        ).first()
+        if not member:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        payload, message = apply_sessions(club, member, request.data, request.user)
         if message:
             return Response({"detail": message}, status=status.HTTP_400_BAD_REQUEST)
         return Response(payload)
