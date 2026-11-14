@@ -168,18 +168,26 @@ def _window_allows(windows, start_min: int, end_min: int) -> bool:
     return False
 
 
-def available_slots(club, course_id, day: date, section_id=None, step_minutes=SLOT_STEP_MINUTES):
-    """Return start times that at least one qualified worker can take."""
+def resolve_slot_step(club, step_minutes=None):
+    if step_minutes in (15, 30, 60):
+        return int(step_minutes)
+    step = getattr(club, "service_slot_step_minutes", None)
+    if step in (15, 30, 60):
+        return int(step)
+    return SLOT_STEP_MINUTES
+
+
+def available_slots(club, course_id, day: date, section_id=None, step_minutes=None):
+    """Return timed slots with availability for the day schedule UI."""
     course = ServiceCourse.objects.filter(club=club, id=course_id, active=True).first()
     if not course:
-        return [], "コースが見つかりません。"
+        return None, "コースが見つかりません。"
     windows = windows_for(club, section_id, day=day)
     if not windows:
-        return [], "この曜日の予約可能な時間帯が設定されていません。"
-    workers = _qualified_workers(club, course)
-    if not workers:
-        return [], "このコースに対応できるワーカーがいません。"
+        return None, "この曜日の予約可能な時間帯が設定されていません。"
 
+    step = resolve_slot_step(club, step_minutes)
+    workers = _qualified_workers(club, course)
     duration = int(course.duration_minutes)
     candidates = set()
     for window in windows:
@@ -191,11 +199,12 @@ def available_slots(club, course_id, day: date, section_id=None, step_minutes=SL
             end = cursor + duration
             if end <= finish:
                 candidates.add(cursor)
-            cursor += step_minutes
+            cursor += step
 
-    open_starts = []
+    slots = []
     for start_min in sorted(candidates):
         end_min = start_min + duration
+        available = False
         for worker in workers:
             if not _under_hour_cap(worker, day, duration):
                 continue
@@ -204,9 +213,17 @@ def available_slots(club, course_id, day: date, section_id=None, step_minutes=SL
                 _busy_ranges(worker, day),
             )
             if any(s <= start_min and end_min <= e for s, e in free):
-                open_starts.append(_from_min(start_min).strftime("%H:%M"))
+                available = True
                 break
-    return open_starts, None
+        slots.append({
+            "time": _from_min(start_min).strftime("%H:%M"),
+            "available": available,
+        })
+    return {
+        "slots": slots,
+        "step_minutes": step,
+        "available_count": sum(1 for row in slots if row["available"]),
+    }, None
 
 
 def pick_worker(club, course, day: date, start: time, end: time):

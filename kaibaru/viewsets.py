@@ -5250,10 +5250,41 @@ class ClubViewSet(viewsets.ModelViewSet):
             section_id = int(section_id) if section_id not in (None, "") else None
         except (TypeError, ValueError):
             section_id = None
-        slots, message = available_slots(club, course_id, day, section_id)
+        payload, message = available_slots(club, course_id, day, section_id)
         if message:
             return Response({"detail": message, "slots": []}, status=400)
-        return Response({"slots": slots})
+        return Response(payload)
+
+    @action(
+        detail=False,
+        methods=["get", "post"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/service-settings",
+    )
+    def service_settings(self, request, subdomain=None):
+        club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
+        if not club:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        if request.method == "GET":
+            return Response({
+                "service_slot_step_minutes": getattr(
+                    club, "service_slot_step_minutes", 15
+                ) or 15,
+            })
+        club, error = _staff_club(request, subdomain, "lessons")
+        if error:
+            return error
+        try:
+            step = int(request.data.get("service_slot_step_minutes"))
+        except (TypeError, ValueError):
+            return Response({"detail": "予約間隔を選んでください。"}, status=400)
+        if step not in (15, 30, 60):
+            return Response(
+                {"detail": "予約間隔は15分・30分・60分から選んでください。"},
+                status=400,
+            )
+        club.service_slot_step_minutes = step
+        club.save(update_fields=["service_slot_step_minutes"])
+        return Response({"service_slot_step_minutes": club.service_slot_step_minutes})
 
     @action(
         detail=False,

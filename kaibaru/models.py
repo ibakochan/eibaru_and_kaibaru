@@ -165,6 +165,16 @@ class Club(models.Model):
         blank=True,
         help_text="Default yen paid to each instructor per lesson taught. Lessons may override.",
     )
+    SERVICE_SLOT_STEP_CHOICES = (
+        (15, "15 minutes"),
+        (30, "30 minutes"),
+        (60, "60 minutes"),
+    )
+    service_slot_step_minutes = models.PositiveSmallIntegerField(
+        choices=SERVICE_SLOT_STEP_CHOICES,
+        default=15,
+        help_text="Booking start interval for service_schedule (15 / 30 / 60).",
+    )
 
     JOIN_PICTURE_MODE_CHOICES = [
         ("off", "Optional"),
