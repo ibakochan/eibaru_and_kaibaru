@@ -23,7 +23,7 @@ from kaibaru.models import Club, Event, Lesson
 from kaibaru.signals import club_created_signal
 
 EXAMPLE_PIC_PREFIX = "https://storage.googleapis.com/sitepicsforkaibaru/layouts/"
-RESERVATION_TEMPLATE_KEYS = {"hair_salon", "nail_salon"}
+RESERVATION_TEMPLATE_KEYS = {"hair_salon", "nail_salon", "massage_salon"}
 MEMBER_ONLY_TYPES = ("join", "member", "teacher", "memberplans")
 CANVAS_WIDTH = 1205
 ALLOWED_TYPES = {

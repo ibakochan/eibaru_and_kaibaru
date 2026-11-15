@@ -1,0 +1,2974 @@
+{
+  "version": 1,
+  "next_section_id": 14,
+  "sections": {
+    "1": {
+      "id": 1,
+      "order": 1,
+      "title": "ヘッダー",
+      "slug": "header",
+      "type": "header",
+      "header": {
+        "logo": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/massage_salon/logo.jpg",
+        "logoHeight": 56,
+        "title": "〇〇マッサージサロン",
+        "subtitle": "からだを、静かにほどく。",
+        "transparent": false,
+        "collapseAllNav": false
+      }
+    },
+    "2": {
+      "id": 2,
+      "order": 2,
+      "title": "ホーム",
+      "slug": "home",
+      "type": "slideshow",
+      "icon": "home",
+      "slides": [
+        {
+          "id": "massage-slide-1",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/massage_salon/interior.jpg",
+          "heading": "はじめての方も、静かに休める場所。",
+          "subheading": "写真と文章は「ホーム」右の鉛筆マークから変更できます（写真の例：施術室）。",
+          "buttonText": "予約する",
+          "buttonLink": "",
+          "buttonSectionId": 11,
+          "buttonBoxId": null,
+          "textAlign": "center"
+        },
+        {
+          "id": "massage-slide-2",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/massage_salon/massage.jpg",
+          "heading": "凝りも、疲れも、相談しながら。",
+          "subheading": "写真と文章は「ホーム」右の鉛筆マークから変更できます（写真の例：マッサージの様子）。",
+          "buttonText": "メニューを見る",
+          "buttonLink": "",
+          "buttonSectionId": 5,
+          "buttonBoxId": null,
+          "textAlign": "center"
+        },
+        {
+          "id": "massage-slide-3",
+          "image": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/massage_salon/oils.jpg",
+          "heading": "香りの力で、深くゆるむ。",
+          "subheading": "写真と文章は「ホーム」右の鉛筆マークから変更できます（写真の例：アロマオイル）。",
+          "buttonText": "コースを見る",
+          "buttonLink": "",
+          "buttonSectionId": 6,
+          "buttonBoxId": null,
+          "textAlign": "center"
+        }
+      ]
+    },
+    "3": {
+      "id": 3,
+      "order": 3,
+      "title": "動画",
+      "slug": "video",
+      "type": "video",
+      "show_in_menu": true,
+      "video_url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/default/hero.mp4"
+    },
+    "4": {
+      "id": 4,
+      "order": 4,
+      "title": "サロンについて",
+      "slug": "サロンについて",
+      "type": "custom",
+      "icon": "info",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "about-photo",
+            "x": 40,
+            "y": 24,
+            "width": 560,
+            "height": 330,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/massage_salon/interior.jpg",
+                "width": 544,
+                "height": 306,
+                "x": 8,
+                "y": 6,
+                "aspectRatio": 1.7778,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              }
+            ],
+            "order": 1
+          },
+          {
+            "id": "about-cap",
+            "x": 40,
+            "y": 362,
+            "width": 560,
+            "height": 96,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：店内の写真。左上の「レイアウト編集」を押し、この枠に写真をドラッグすると変わります。",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ]
+              }
+            ],
+            "order": 2
+          },
+          {
+            "id": "about-title",
+            "x": 630,
+            "y": 24,
+            "width": 530,
+            "height": 56,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "サロンについて"
+                  }
+                ]
+              }
+            ],
+            "order": 3
+          },
+          {
+            "id": "about-copy",
+            "x": 630,
+            "y": 92,
+            "width": 530,
+            "height": 150,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "オイル、アロマ、フット。一人ずつ、呼吸に合わせて進めます。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ],
+            "order": 4
+          },
+          {
+            "id": "about-list",
+            "x": 630,
+            "y": 254,
+            "width": 530,
+            "height": 160,
+            "content": [
+              {
+                "type": "list",
+                "ordered": false,
+                "children": [
+                  {
+                    "type": "list-item",
+                    "children": [
+                      {
+                        "text": "短縮コースも追加できます（例）",
+                        "fontSize": 18
+                      }
+                    ]
+                  },
+                  {
+                    "type": "list-item",
+                    "children": [
+                      {
+                        "text": "気になる部位があれば、予約時に書いてください",
+                        "fontSize": 18
+                      }
+                    ]
+                  },
+                  {
+                    "type": "list-item",
+                    "children": [
+                      {
+                        "text": "初めての方は問診のため15分ほど余裕をみてください（例）",
+                        "fontSize": 18
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            "order": 5
+          },
+          {
+            "id": "about-button",
+            "x": 630,
+            "y": 430,
+            "width": 280,
+            "height": 88,
+            "content": [
+              {
+                "type": "button",
+                "label": "予約する",
+                "align": "center",
+                "sectionId": 11,
+                "boxId": null,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              }
+            ],
+            "order": 6
+          }
+        ]
+      }
+    },
+    "5": {
+      "id": 5,
+      "order": 5,
+      "title": "メニュー",
+      "slug": "メニュー",
+      "type": "custom",
+      "icon": "featured",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "menu-title",
+            "x": 40,
+            "y": 20,
+            "width": 1120,
+            "height": 112,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "メニュー"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "料金は例です。予約の基本料金に、この名前で登録してください。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ],
+            "order": 1
+          },
+          {
+            "id": "menu-photo-0",
+            "x": 40,
+            "y": 148,
+            "width": 360,
+            "height": 206,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/massage_salon/massage.jpg",
+                "width": 344,
+                "height": 193,
+                "x": 8,
+                "y": 6,
+                "aspectRatio": 1.7824,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              }
+            ],
+            "order": 2
+          },
+          {
+            "id": "menu-cap-0",
+            "x": 40,
+            "y": 364,
+            "width": 360,
+            "height": 88,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：オイルマッサージの様子。左上の「レイアウト編集」を押し、この枠に写真をドラッグすると変わります。",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ]
+              }
+            ],
+            "order": 3
+          },
+          {
+            "id": "menu-title-0",
+            "x": 40,
+            "y": 460,
+            "width": 360,
+            "height": 48,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "オイルマッサージ（例）　6,600円〜"
+                  }
+                ]
+              }
+            ],
+            "order": 4
+          },
+          {
+            "id": "menu-body-0",
+            "x": 40,
+            "y": 516,
+            "width": 360,
+            "height": 120,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "全身をオイルでほぐし、巡りを整えます。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ],
+            "order": 5
+          },
+          {
+            "id": "menu-photo-1",
+            "x": 422,
+            "y": 148,
+            "width": 360,
+            "height": 206,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/massage_salon/aromatherapy.jpg",
+                "width": 344,
+                "height": 193,
+                "x": 8,
+                "y": 6,
+                "aspectRatio": 1.7824,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              }
+            ],
+            "order": 6
+          },
+          {
+            "id": "menu-cap-1",
+            "x": 422,
+            "y": 364,
+            "width": 360,
+            "height": 88,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：アロマトリートメントの様子。左上の「レイアウト編集」を押し、この枠に写真をドラッグすると変わります。",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ]
+              }
+            ],
+            "order": 7
+          },
+          {
+            "id": "menu-title-1",
+            "x": 422,
+            "y": 460,
+            "width": 360,
+            "height": 48,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "アロマトリートメント（例）　8,800円〜"
+                  }
+                ]
+              }
+            ],
+            "order": 8
+          },
+          {
+            "id": "menu-body-1",
+            "x": 422,
+            "y": 516,
+            "width": 360,
+            "height": 120,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "香りで深くリラックス。お好みのオイルを選べます。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ],
+            "order": 9
+          },
+          {
+            "id": "menu-photo-2",
+            "x": 804,
+            "y": 148,
+            "width": 360,
+            "height": 206,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/massage_salon/foot.jpg",
+                "width": 344,
+                "height": 193,
+                "x": 8,
+                "y": 6,
+                "aspectRatio": 1.7824,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              }
+            ],
+            "order": 10
+          },
+          {
+            "id": "menu-cap-2",
+            "x": 804,
+            "y": 364,
+            "width": 360,
+            "height": 88,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：フットマッサージの様子。左上の「レイアウト編集」を押し、この枠に写真をドラッグすると変わります。",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ]
+              }
+            ],
+            "order": 11
+          },
+          {
+            "id": "menu-title-2",
+            "x": 804,
+            "y": 460,
+            "width": 360,
+            "height": 48,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "フットマッサージ（例）　4,400円〜"
+                  }
+                ]
+              }
+            ],
+            "order": 12
+          },
+          {
+            "id": "menu-body-2",
+            "x": 804,
+            "y": 516,
+            "width": 360,
+            "height": 120,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "ふくらはぎから足裏まで丁寧にほぐします。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ],
+            "order": 13
+          },
+          {
+            "id": "menu-button",
+            "x": 40,
+            "y": 652,
+            "width": 1120,
+            "height": 88,
+            "content": [
+              {
+                "type": "button",
+                "label": "予約メニューを見る",
+                "align": "center",
+                "sectionId": 11,
+                "boxId": null,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              }
+            ],
+            "order": 14
+          }
+        ]
+      }
+    },
+    "6": {
+      "id": 6,
+      "order": 6,
+      "title": "コースの雰囲気",
+      "slug": "コースの雰囲気",
+      "type": "custom",
+      "icon": "award",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "look-title",
+            "x": 40,
+            "y": 20,
+            "width": 1120,
+            "height": 112,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "コースの雰囲気"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "施術の雰囲気の例です。写真はお店の様子に差し替えてください。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ],
+            "order": 1
+          },
+          {
+            "id": "look-photo-0",
+            "x": 40,
+            "y": 148,
+            "width": 360,
+            "height": 206,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/massage_salon/relaxation.jpg",
+                "width": 344,
+                "height": 193,
+                "x": 8,
+                "y": 6,
+                "aspectRatio": 1.7824,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              }
+            ],
+            "order": 2
+          },
+          {
+            "id": "look-cap-0",
+            "x": 40,
+            "y": 364,
+            "width": 360,
+            "height": 88,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：リラックス空間の写真。左上の「レイアウト編集」を押し、この枠に写真をドラッグすると変わります。",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ]
+              }
+            ],
+            "order": 3
+          },
+          {
+            "id": "look-title-0",
+            "x": 40,
+            "y": 460,
+            "width": 360,
+            "height": 48,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "フレンチ"
+                  }
+                ]
+              }
+            ],
+            "order": 4
+          },
+          {
+            "id": "look-body-0",
+            "x": 40,
+            "y": 516,
+            "width": 360,
+            "height": 120,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "静かな光と、やわらかい音。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ],
+            "order": 5
+          },
+          {
+            "id": "look-photo-1",
+            "x": 422,
+            "y": 148,
+            "width": 360,
+            "height": 206,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/massage_salon/hotstone.jpg",
+                "width": 344,
+                "height": 193,
+                "x": 8,
+                "y": 6,
+                "aspectRatio": 1.7824,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              }
+            ],
+            "order": 6
+          },
+          {
+            "id": "look-cap-1",
+            "x": 422,
+            "y": 364,
+            "width": 360,
+            "height": 88,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：ホットストーンの様子。左上の「レイアウト編集」を押し、この枠に写真をドラッグすると変わります。",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ]
+              }
+            ],
+            "order": 7
+          },
+          {
+            "id": "look-title-1",
+            "x": 422,
+            "y": 460,
+            "width": 360,
+            "height": 48,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "フラワー"
+                  }
+                ]
+              }
+            ],
+            "order": 8
+          },
+          {
+            "id": "look-body-1",
+            "x": 422,
+            "y": 516,
+            "width": 360,
+            "height": 120,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "温めたストーンで、深くほどく。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ],
+            "order": 9
+          },
+          {
+            "id": "look-photo-2",
+            "x": 804,
+            "y": 148,
+            "width": 360,
+            "height": 206,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/massage_salon/oils.jpg",
+                "width": 344,
+                "height": 193,
+                "x": 8,
+                "y": 6,
+                "aspectRatio": 1.7824,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              }
+            ],
+            "order": 10
+          },
+          {
+            "id": "look-cap-2",
+            "x": 804,
+            "y": 364,
+            "width": 360,
+            "height": 88,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：オイルの写真。左上の「レイアウト編集」を押し、この枠に写真をドラッグすると変わります。",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ]
+              }
+            ],
+            "order": 11
+          },
+          {
+            "id": "look-title-2",
+            "x": 804,
+            "y": 460,
+            "width": 360,
+            "height": 48,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "カラー"
+                  }
+                ]
+              }
+            ],
+            "order": 12
+          },
+          {
+            "id": "look-body-2",
+            "x": 804,
+            "y": 516,
+            "width": 360,
+            "height": 120,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "香り見本から選べます。写真は実際のオイルに変えてください。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ],
+            "order": 13
+          }
+        ]
+      }
+    },
+    "7": {
+      "id": 7,
+      "order": 7,
+      "title": "スタッフ",
+      "slug": "スタッフ",
+      "type": "staff",
+      "icon": "smile",
+      "show_in_menu": true
+    },
+    "8": {
+      "id": 8,
+      "order": 8,
+      "title": "店内のご案内",
+      "slug": "店内のご案内",
+      "type": "custom",
+      "icon": "heart",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "salon-title",
+            "x": 40,
+            "y": 20,
+            "width": 1120,
+            "height": 112,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "店内のご案内"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "店内の雰囲気が伝わる写真です。施術室、待合、受付などに差し替えられます。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ],
+            "order": 1
+          },
+          {
+            "id": "salon-photo-0",
+            "x": 40,
+            "y": 148,
+            "width": 360,
+            "height": 206,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/massage_salon/room.jpg",
+                "width": 344,
+                "height": 193,
+                "x": 8,
+                "y": 6,
+                "aspectRatio": 1.7824,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              }
+            ],
+            "order": 2
+          },
+          {
+            "id": "salon-cap-0",
+            "x": 40,
+            "y": 364,
+            "width": 360,
+            "height": 88,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：施術室の写真。左上の「レイアウト編集」を押し、この枠に写真をドラッグすると変わります。",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ]
+              }
+            ],
+            "order": 3
+          },
+          {
+            "id": "salon-title-0",
+            "x": 40,
+            "y": 460,
+            "width": 360,
+            "height": 48,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "デスク"
+                  }
+                ]
+              }
+            ],
+            "order": 4
+          },
+          {
+            "id": "salon-body-0",
+            "x": 40,
+            "y": 516,
+            "width": 360,
+            "height": 120,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "一人ずつ、静かな個室で施術します。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ],
+            "order": 5
+          },
+          {
+            "id": "salon-photo-1",
+            "x": 422,
+            "y": 148,
+            "width": 360,
+            "height": 206,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/massage_salon/waiting.jpg",
+                "width": 344,
+                "height": 193,
+                "x": 8,
+                "y": 6,
+                "aspectRatio": 1.7824,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              }
+            ],
+            "order": 6
+          },
+          {
+            "id": "salon-cap-1",
+            "x": 422,
+            "y": 364,
+            "width": 360,
+            "height": 88,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：待合スペースの写真。左上の「レイアウト編集」を押し、この枠に写真をドラッグすると変わります。",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ]
+              }
+            ],
+            "order": 7
+          },
+          {
+            "id": "salon-title-1",
+            "x": 422,
+            "y": 460,
+            "width": 360,
+            "height": 48,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "ペディキュア"
+                  }
+                ]
+              }
+            ],
+            "order": 8
+          },
+          {
+            "id": "salon-body-1",
+            "x": 422,
+            "y": 516,
+            "width": 360,
+            "height": 120,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "待合でも、ゆったりとお過ごしください。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ],
+            "order": 9
+          },
+          {
+            "id": "salon-photo-2",
+            "x": 804,
+            "y": 148,
+            "width": 360,
+            "height": 206,
+            "content": [
+              {
+                "type": "image",
+                "url": "https://storage.googleapis.com/sitepicsforkaibaru/layouts/massage_salon/reception.jpg",
+                "width": 344,
+                "height": 193,
+                "x": 8,
+                "y": 6,
+                "aspectRatio": 1.7824,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "children": [
+                  {
+                    "text": "",
+                    "fontSize": 22
+                  }
+                ]
+              }
+            ],
+            "order": 10
+          },
+          {
+            "id": "salon-cap-2",
+            "x": 804,
+            "y": 364,
+            "width": 360,
+            "height": 88,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "▲ この写真を変更：受付の写真。左上の「レイアウト編集」を押し、この枠に写真をドラッグすると変わります。",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ]
+              }
+            ],
+            "order": 11
+          },
+          {
+            "id": "salon-title-2",
+            "x": 804,
+            "y": 460,
+            "width": 360,
+            "height": 48,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "受付"
+                  }
+                ]
+              }
+            ],
+            "order": 12
+          },
+          {
+            "id": "salon-body-2",
+            "x": 804,
+            "y": 516,
+            "width": 360,
+            "height": 120,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "予約時間の5分前を目安にお越しください。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ],
+            "order": 13
+          }
+        ]
+      }
+    },
+    "9": {
+      "id": 9,
+      "order": 9,
+      "title": "ご予約の流れ",
+      "slug": "ご予約の流れ",
+      "type": "custom",
+      "icon": "check",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "flow-title",
+            "x": 40,
+            "y": 20,
+            "width": 1120,
+            "height": 112,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "ご予約の流れ"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "予約画面では、基本のメニューを一つ選んでから、必要なものだけ追加できます。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ],
+            "order": 1
+          },
+          {
+            "id": "step-title-0",
+            "x": 40,
+            "y": 150,
+            "width": 360,
+            "height": 56,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "メニューを選ぶ"
+                  }
+                ]
+              }
+            ],
+            "order": 2
+          },
+          {
+            "id": "step-body-0",
+            "x": 40,
+            "y": 214,
+            "width": 360,
+            "height": 140,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "予約の画面で、オイルやアロマなどの基本コースを一つ選びます。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ],
+            "order": 3
+          },
+          {
+            "id": "step-title-1",
+            "x": 422,
+            "y": 150,
+            "width": 360,
+            "height": 56,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "追加を選ぶ"
+                  }
+                ]
+              }
+            ],
+            "order": 4
+          },
+          {
+            "id": "step-body-1",
+            "x": 422,
+            "y": 214,
+            "width": 360,
+            "height": 140,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "延長や部位集中など、必要なものだけ足せます。不要ならそのまま進めます。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ],
+            "order": 5
+          },
+          {
+            "id": "step-title-2",
+            "x": 804,
+            "y": 150,
+            "width": 360,
+            "height": 56,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "日時を決める"
+                  }
+                ]
+              }
+            ],
+            "order": 6
+          },
+          {
+            "id": "step-body-2",
+            "x": 804,
+            "y": 214,
+            "width": 360,
+            "height": 140,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "空いている時間を選んで予約します。お支払いはカード、または来店時に選べます。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ],
+            "order": 7
+          },
+          {
+            "id": "step-button",
+            "x": 40,
+            "y": 372,
+            "width": 1120,
+            "height": 88,
+            "content": [
+              {
+                "type": "button",
+                "label": "予約メニューを見る",
+                "align": "center",
+                "sectionId": 11,
+                "boxId": null,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              }
+            ],
+            "order": 8
+          }
+        ]
+      }
+    },
+    "10": {
+      "id": 10,
+      "order": 10,
+      "title": "よくある質問",
+      "slug": "よくある質問",
+      "type": "custom",
+      "icon": "info",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "faq-title",
+            "x": 40,
+            "y": 20,
+            "width": 1120,
+            "height": 112,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "よくある質問"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "来店前によくいただく質問です。文章はレイアウト編集で書き換えられます。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ],
+            "order": 1
+          },
+          {
+            "id": "faq-0",
+            "x": 40,
+            "y": 148,
+            "width": 530,
+            "height": 156,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "Q. 予約は必要ですか？"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "A. ご予約制です。メニューを選んで、空いている日時をお取りください。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ],
+            "order": 2
+          },
+          {
+            "id": "faq-1",
+            "x": 630,
+            "y": 148,
+            "width": 530,
+            "height": 156,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "Q. 施術時間の目安は？"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "A. コースにより60〜90分が目安です。メニューでご確認ください（例）。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ],
+            "order": 3
+          },
+          {
+            "id": "faq-2",
+            "x": 40,
+            "y": 320,
+            "width": 530,
+            "height": 156,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "Q. 服装はどうすればよいですか？"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "A. 動きやすい服でお越しください。お着替えをご用意している場合もあります（例）。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ],
+            "order": 4
+          },
+          {
+            "id": "faq-3",
+            "x": 630,
+            "y": 320,
+            "width": 530,
+            "height": 156,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "Q. 支払い方法は？"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "A. カード、または来店時のお支払いを選べます。",
+                    "fontSize": 16
+                  }
+                ]
+              }
+            ],
+            "order": 5
+          }
+        ]
+      }
+    },
+    "11": {
+      "id": 11,
+      "order": 11,
+      "title": "予約",
+      "slug": "予約",
+      "type": "service_schedule",
+      "icon": "schedule"
+    },
+    "12": {
+      "id": 12,
+      "order": 12,
+      "title": "アクセス",
+      "slug": "アクセス",
+      "type": "custom",
+      "icon": "access",
+      "layout": {
+        "version": 2,
+        "boxes": [
+          {
+            "id": "access-title",
+            "x": 40,
+            "y": 20,
+            "width": 1120,
+            "height": 100,
+            "content": [
+              {
+                "type": "heading",
+                "level": 2,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "アクセス"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "予約時間の5分前を目安にお越しください。",
+                    "fontSize": 18
+                  }
+                ]
+              }
+            ],
+            "order": 1
+          },
+          {
+            "id": "access-info",
+            "x": 40,
+            "y": 140,
+            "width": 530,
+            "height": 280,
+            "content": [
+              {
+                "type": "heading",
+                "level": 3,
+                "align": "left",
+                "children": [
+                  {
+                    "text": "所在地・ご連絡先"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "住所：",
+                    "fontSize": 18,
+                    "bold": true
+                  },
+                  {
+                    "type": "link",
+                    "url": "https://www.google.com/maps",
+                    "children": [
+                      {
+                        "text": "〒000-0000 〇〇県〇〇市〇〇 0-0-0",
+                        "fontSize": 18,
+                        "color": "#ffffff"
+                      }
+                    ]
+                  },
+                  {
+                    "text": " ",
+                    "fontSize": 18,
+                    "color": "#ffffff"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "電話：",
+                    "fontSize": 18,
+                    "bold": true
+                  },
+                  {
+                    "type": "link",
+                    "url": "tel:00000000000",
+                    "children": [
+                      {
+                        "text": "000-0000-0000",
+                        "fontSize": 18,
+                        "color": "#ffffff"
+                      }
+                    ]
+                  },
+                  {
+                    "text": " ",
+                    "fontSize": 18,
+                    "color": "#ffffff"
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "営業時間：",
+                    "fontSize": 18,
+                    "bold": true
+                  },
+                  {
+                    "text": "〇:〇〇〜〇〇:〇〇（変更してください）",
+                    "fontSize": 18
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "定休日：",
+                    "fontSize": 18,
+                    "bold": true
+                  },
+                  {
+                    "text": "〇曜日（変更してください）",
+                    "fontSize": 18
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "children": [
+                  {
+                    "text": "最寄り：",
+                    "fontSize": 18,
+                    "bold": true
+                  },
+                  {
+                    "type": "link",
+                    "url": "https://www.google.com/maps",
+                    "children": [
+                      {
+                        "text": "〇〇駅より徒歩〇分",
+                        "fontSize": 18,
+                        "color": "#ffffff"
+                      }
+                    ]
+                  },
+                  {
+                    "text": " ",
+                    "fontSize": 18,
+                    "color": "#ffffff"
+                  }
+                ]
+              }
+            ],
+            "order": 2
+          },
+          {
+            "id": "access-map",
+            "x": 600,
+            "y": 140,
+            "width": 560,
+            "height": 420,
+            "content": [
+              {
+                "type": "map",
+                "provider": "osm",
+                "lat": 35.681236,
+                "lng": 139.767125,
+                "zoom": 15,
+                "height": 280,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "▲ これはサンプルの地図です。まず画面左上の「レイアウト編集」を押してください。地図のうしろにカーソルを置いてBackspaceキーで削除できます。追加するときは、文章の上の地図アイコンから実際のGoogleマップURLを貼ってください。",
+                    "fontSize": 14,
+                    "italic": true
+                  }
+                ]
+              }
+            ],
+            "order": 3
+          },
+          {
+            "id": "social-x",
+            "x": 40,
+            "y": 596,
+            "width": 260,
+            "height": 88,
+            "content": [
+              {
+                "type": "block",
+                "align": "center",
+                "paragraphSize": 0.15,
+                "children": [
+                  {
+                    "text": ""
+                  },
+                  {
+                    "type": "icon",
+                    "icon": "x",
+                    "url": "https://x.com",
+                    "size": 40,
+                    "color": "#ffe4ea",
+                    "children": [
+                      {
+                        "text": ""
+                      }
+                    ]
+                  },
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "align": "center",
+                "paragraphSize": 0.1,
+                "children": [
+                  {
+                    "text": "X",
+                    "fontSize": 16,
+                    "bold": true
+                  }
+                ]
+              }
+            ],
+            "order": 4
+          },
+          {
+            "id": "social-facebook",
+            "x": 325,
+            "y": 596,
+            "width": 260,
+            "height": 88,
+            "content": [
+              {
+                "type": "block",
+                "align": "center",
+                "paragraphSize": 0.15,
+                "children": [
+                  {
+                    "text": ""
+                  },
+                  {
+                    "type": "icon",
+                    "icon": "facebook",
+                    "url": "https://www.facebook.com",
+                    "size": 40,
+                    "color": "#ffe4ea",
+                    "children": [
+                      {
+                        "text": ""
+                      }
+                    ]
+                  },
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "align": "center",
+                "paragraphSize": 0.1,
+                "children": [
+                  {
+                    "text": "Facebook",
+                    "fontSize": 16,
+                    "bold": true
+                  }
+                ]
+              }
+            ],
+            "order": 5
+          },
+          {
+            "id": "social-youtube",
+            "x": 610,
+            "y": 596,
+            "width": 260,
+            "height": 88,
+            "content": [
+              {
+                "type": "block",
+                "align": "center",
+                "paragraphSize": 0.15,
+                "children": [
+                  {
+                    "text": ""
+                  },
+                  {
+                    "type": "icon",
+                    "icon": "youtube",
+                    "url": "https://www.youtube.com",
+                    "size": 40,
+                    "color": "#ffe4ea",
+                    "children": [
+                      {
+                        "text": ""
+                      }
+                    ]
+                  },
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "align": "center",
+                "paragraphSize": 0.1,
+                "children": [
+                  {
+                    "text": "YouTube",
+                    "fontSize": 16,
+                    "bold": true
+                  }
+                ]
+              }
+            ],
+            "order": 6
+          },
+          {
+            "id": "social-instagram",
+            "x": 895,
+            "y": 596,
+            "width": 260,
+            "height": 88,
+            "content": [
+              {
+                "type": "block",
+                "align": "center",
+                "paragraphSize": 0.15,
+                "children": [
+                  {
+                    "text": ""
+                  },
+                  {
+                    "type": "icon",
+                    "icon": "instagram",
+                    "url": "https://www.instagram.com",
+                    "size": 40,
+                    "color": "#ffe4ea",
+                    "children": [
+                      {
+                        "text": ""
+                      }
+                    ]
+                  },
+                  {
+                    "text": ""
+                  }
+                ]
+              },
+              {
+                "type": "block",
+                "align": "center",
+                "paragraphSize": 0.1,
+                "children": [
+                  {
+                    "text": "Instagram",
+                    "fontSize": 16,
+                    "bold": true
+                  }
+                ]
+              }
+            ],
+            "order": 7
+          },
+          {
+            "id": "access-note",
+            "x": 40,
+            "y": 700,
+            "width": 1120,
+            "height": 72,
+            "content": [
+              {
+                "type": "block",
+                "paragraphSize": 0.4,
+                "align": "center",
+                "children": [
+                  {
+                    "text": "今は各サイトのホームへのリンクです。自分のページがあれば、レイアウト編集でアイコンをクリックしてURLを貼ってください。無ければ枠の青い鉛筆から「ボックスを削除」。",
+                    "fontSize": 15,
+                    "italic": true
+                  }
+                ]
+              }
+            ],
+            "order": 8
+          },
+          {
+            "id": "access-inquiry",
+            "x": 40,
+            "y": 788,
+            "width": 1120,
+            "height": 88,
+            "content": [
+              {
+                "type": "button",
+                "label": "問い合わせフォーム",
+                "align": "center",
+                "sectionId": 13,
+                "boxId": null,
+                "children": [
+                  {
+                    "text": ""
+                  }
+                ]
+              }
+            ],
+            "order": 9
+          }
+        ]
+      },
+      "style": {
+        "backgroundColor": "#2f3f38"
+      }
+    },
+    "13": {
+      "id": 13,
+      "order": 13,
+      "title": "問い合わせフォーム",
+      "slug": "問い合わせフォーム",
+      "type": "inquiry",
+      "icon": "contact",
+      "show_in_menu": false
+    }
+  },
+  "sticky_nav": {
+    "style": {
+      "shape": "rounded",
+      "button_color": "#5f7d6e",
+      "text_color": "#ffffff",
+      "tray_color": "#eef5f2"
+    },
+    "hide_from_section_id": 4,
+    "buttons": [
+      {
+        "id": "massage-inquiry",
+        "label": "問い合わせフォーム",
+        "icon": "contact",
+        "icon_color": "#2563eb",
+        "kind": "section",
+        "section_id": 13
+      },
+      {
+        "id": "massage-access",
+        "label": "アクセス",
+        "icon": "access",
+        "icon_color": "#dc2626",
+        "kind": "section",
+        "section_id": 12
+      },
+      {
+        "id": "massage-reserve",
+        "label": "予約する",
+        "icon": "schedule",
+        "icon_color": "#7c3aed",
+        "kind": "section",
+        "section_id": 11
+      }
+    ]
+  }
+}
