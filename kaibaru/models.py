@@ -54,6 +54,17 @@ def club_video_upload_to(instance, filename):
 def club_lessons_upload_to(instance, filename):
     return club_folder_upload_to("lessons")(instance, filename)
 
+
+def club_service_courses_upload_to(instance, filename):
+    import os
+    import uuid
+
+    club_subdomain = getattr(instance.club, "subdomain", "unknown_club")
+    ext = os.path.splitext(filename or "")[1].lower()
+    if ext not in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
+        ext = ".jpg"
+    return f"{club_subdomain}/service_courses/{uuid.uuid4().hex}{ext}"
+
 def club_member_pictures_upload_to(instance, filename):
     return club_folder_upload_to("members")(instance, filename)
 
@@ -186,6 +197,15 @@ class Club(models.Model):
         ],
         default="stripe",
         help_text="stripe, cash (pay at the venue), or both for service_schedule.",
+    )
+    # When false, service bookings always get a random free worker.
+    # When true, the booker may pick "おまかせ" (random) or a free worker.
+    service_allow_choose_worker = models.BooleanField(
+        default=False,
+        help_text=(
+            "If true, service_schedule bookers may choose a worker "
+            "(or leave it random). If false, assignment is always random."
+        ),
     )
 
     JOIN_PICTURE_MODE_CHOICES = [
@@ -3380,11 +3400,22 @@ class ServiceCourse(models.Model):
         related_name="service_courses",
     )
     name = models.CharField(max_length=80)
+    # Short line under the name on the public menu card.
+    tagline = models.CharField(max_length=120, blank=True, default="")
+    # Optional label on the photo, e.g. 人気 / おすすめ / 初めての方へ.
+    badge = models.CharField(max_length=40, blank=True, default="")
     duration_minutes = models.PositiveIntegerField(
         help_text="How long the course takes, in minutes.",
     )
     amount = models.PositiveIntegerField(default=0)
     description = models.TextField(blank=True, default="")
+    # One included item per line; shown as bullets on the menu card.
+    includes = models.TextField(blank=True, default="")
+    picture = models.ImageField(
+        upload_to=club_service_courses_upload_to,
+        null=True,
+        blank=True,
+    )
     position = models.PositiveIntegerField(default=0)
     active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -3740,6 +3771,16 @@ class ServiceReservation(models.Model):
         null=True,
         blank=True,
         related_name="service_reservations",
+        limit_choices_to={"is_worker": True},
+    )
+    # Optional request from the booker when service_allow_choose_worker is on.
+    # Confirmed into `worker` only when the start link succeeds.
+    preferred_worker = models.ForeignKey(
+        Member,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="preferred_service_reservations",
         limit_choices_to={"is_worker": True},
     )
     section_id = models.IntegerField(null=True, blank=True, db_index=True)

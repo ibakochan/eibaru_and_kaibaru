@@ -176,6 +176,36 @@ def resolve_slot_step(club, step_minutes=None):
     return SLOT_STEP_MINUTES
 
 
+def free_workers_for_slot(
+    club,
+    course,
+    day: date,
+    start: time,
+    end: time,
+    *,
+    exclude_reservation_id=None,
+):
+    """Qualified workers who are free for [start, end) on day."""
+    duration = _tmin(end) - _tmin(start)
+    free_workers = []
+    for worker in _qualified_workers(club, course):
+        if not _under_hour_cap(worker, day, duration):
+            continue
+        free = _free_ranges(
+            _availability_ranges(worker, day),
+            _busy_ranges(
+                worker,
+                day,
+                exclude_reservation_id=exclude_reservation_id,
+            ),
+        )
+        start_min = _tmin(start)
+        end_min = _tmin(end)
+        if any(s <= start_min and end_min <= e for s, e in free):
+            free_workers.append(worker)
+    return free_workers
+
+
 def available_slots(club, course_id, day: date, section_id=None, step_minutes=None):
     """Return timed slots with availability for the day schedule UI."""
     course = ServiceCourse.objects.filter(club=club, id=course_id, active=True).first()
@@ -185,12 +215,14 @@ def available_slots(club, course_id, day: date, section_id=None, step_minutes=No
     if not windows:
         return None, "この曜日の予約可能な時間帯が設定されていません。"
 
+    include_workers = bool(getattr(club, "service_allow_choose_worker", False))
     today = timezone.localdate()
     if day < today:
         return {
             "slots": [],
             "step_minutes": resolve_slot_step(club, step_minutes),
             "available_count": 0,
+            "allow_choose_worker": include_workers,
         }, None
 
     step = resolve_slot_step(club, step_minutes)
@@ -212,9 +244,9 @@ def available_slots(club, course_id, day: date, section_id=None, step_minutes=No
     slots = []
     for start_min in sorted(candidates):
         end_min = start_min + duration
-        available = False
+        free_for_slot = []
         if now_min is not None and start_min <= now_min:
-            available = False
+            free_for_slot = []
         else:
             for worker in workers:
                 if not _under_hour_cap(worker, day, duration):
@@ -224,16 +256,23 @@ def available_slots(club, course_id, day: date, section_id=None, step_minutes=No
                     _busy_ranges(worker, day),
                 )
                 if any(s <= start_min and end_min <= e for s, e in free):
-                    available = True
-                    break
-        slots.append({
+                    free_for_slot.append(worker)
+        available = bool(free_for_slot)
+        row = {
             "time": _from_min(start_min).strftime("%H:%M"),
             "available": available,
-        })
+        }
+        if include_workers:
+            row["workers"] = [
+                {"id": worker.id, "full_name": worker.full_name}
+                for worker in free_for_slot
+            ]
+        slots.append(row)
     return {
         "slots": slots,
         "step_minutes": step,
         "available_count": sum(1 for row in slots if row["available"]),
+        "allow_choose_worker": include_workers,
     }, None
 
 
@@ -245,26 +284,24 @@ def pick_worker(
     end: time,
     *,
     exclude_reservation_id=None,
+    preferred_worker=None,
 ):
-    """Randomly choose one qualified free worker for the slot."""
-    duration = _tmin(end) - _tmin(start)
-    free_workers = []
-    for worker in _qualified_workers(club, course):
-        if not _under_hour_cap(worker, day, duration):
-            continue
-        free = _free_ranges(
-            _availability_ranges(worker, day),
-            _busy_ranges(
-                worker,
-                day,
-                exclude_reservation_id=exclude_reservation_id,
-            ),
-        )
-        start_min = _tmin(start)
-        end_min = _tmin(end)
-        if any(s <= start_min and end_min <= e for s, e in free):
-            free_workers.append(worker)
+    """Choose a free worker: preferred if still free, otherwise random."""
+    free_workers = free_workers_for_slot(
+        club,
+        course,
+        day,
+        start,
+        end,
+        exclude_reservation_id=exclude_reservation_id,
+    )
     if not free_workers:
+        return None
+    if preferred_worker is not None:
+        preferred_id = getattr(preferred_worker, "id", preferred_worker)
+        for worker in free_workers:
+            if worker.id == preferred_id:
+                return worker
         return None
     return random.choice(free_workers)
 
@@ -298,6 +335,7 @@ def reservation_payload(reservation):
         "duration_minutes": reservation.course.duration_minutes if reservation.course_id else None,
         "worker_id": reservation.worker_id,
         "worker_name": worker.full_name if worker else None,
+        "preferred_worker_id": reservation.preferred_worker_id,
         "section_id": reservation.section_id,
         "reservation_date": reservation.reservation_date.isoformat(),
         "start_time": reservation.start_time.strftime("%H:%M"),

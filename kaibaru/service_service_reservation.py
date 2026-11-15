@@ -224,8 +224,26 @@ def create_service_reservation(club, payload):
     except ValueError as exc:
         return None, str(exc)
 
-    # Soft availability check only — slot is not held until email confirm.
-    if pick_worker(club, course, day, start, end) is None:
+    allow_choose = bool(getattr(club, "service_allow_choose_worker", False))
+    preferred_worker = None
+    raw_worker = payload.get("worker_id")
+    if allow_choose and raw_worker not in (None, "", "random"):
+        try:
+            preferred_id = int(raw_worker)
+        except (TypeError, ValueError):
+            return None, "担当スタッフを正しく選んでください。"
+        preferred_worker = pick_worker(
+            club,
+            course,
+            day,
+            start,
+            end,
+            preferred_worker=preferred_id,
+        )
+        if preferred_worker is None:
+            return None, "選んだスタッフはこの時間に予約できません。"
+    elif pick_worker(club, course, day, start, end) is None:
+        # Soft availability check only — slot is not held until email confirm.
         return None, "この時間に空いているワーカーがいません。"
 
     reservation_key = _reservation_key(
@@ -252,6 +270,7 @@ def create_service_reservation(club, payload):
                 phone_number=(payload.get("phone_number") or "")[:30],
                 amount=amount,
                 payment_method=payment_method or "",
+                preferred_worker=preferred_worker,
                 reservation_key=reservation_key,
                 token=token,
                 now=now,
@@ -286,6 +305,7 @@ def _save_not_started(
     phone_number,
     amount,
     payment_method,
+    preferred_worker,
     reservation_key,
     token,
     now,
@@ -322,6 +342,7 @@ def _save_not_started(
             existing.amount = amount
             existing.price_name = course.name
             existing.section_id = section_id
+            existing.preferred_worker = preferred_worker
             existing.requested_at = now
             existing.confirmation_email_sent = False
             existing.is_deleted = False
@@ -334,6 +355,7 @@ def _save_not_started(
                     "amount",
                     "price_name",
                     "section_id",
+                    "preferred_worker",
                     "requested_at",
                     "confirmation_email_sent",
                     "is_deleted",
@@ -344,6 +366,7 @@ def _save_not_started(
 
         existing.course = course
         existing.worker = None
+        existing.preferred_worker = preferred_worker
         existing.section_id = section_id
         existing.reservation_type = ServiceReservation.ReservationType.VISITOR
         existing.status = ServiceReservation.Status.NOT_STARTED
@@ -372,6 +395,7 @@ def _save_not_started(
         club=club,
         course=course,
         worker=None,
+        preferred_worker=preferred_worker,
         section_id=section_id,
         reservation_type=ServiceReservation.ReservationType.VISITOR,
         status=ServiceReservation.Status.NOT_STARTED,
@@ -520,7 +544,7 @@ def _prepare_start(token, force_new=False):
         reservation = (
             ServiceReservation.objects
             .select_for_update()
-            .select_related("course", "club")
+            .select_related("course", "club", "preferred_worker")
             .get(start_token=token)
         )
         club = reservation.club
@@ -541,6 +565,7 @@ def _prepare_start(token, force_new=False):
         now = timezone.now()
         hold_cutoff = hold_cutoff_at(now)
 
+        preferred = reservation.preferred_worker
         worker = pick_worker(
             club,
             course,
@@ -548,8 +573,15 @@ def _prepare_start(token, force_new=False):
             reservation.start_time,
             reservation.end_time,
             exclude_reservation_id=reservation.id,
+            preferred_worker=preferred,
         )
         if worker is None:
+            if preferred is not None:
+                raise ServiceStartError(
+                    "ご希望のスタッフはこの時間に予約できなくなりました。"
+                    "もう一度お申し込みください。",
+                    retryable=True,
+                )
             raise ServiceStartError(
                 "この時間に空いているワーカーがいません。",
                 retryable=True,

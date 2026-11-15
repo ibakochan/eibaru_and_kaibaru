@@ -5011,6 +5011,21 @@ class ClubViewSet(viewsets.ModelViewSet):
     def service_courses(self, request, subdomain=None):
         from .models import ServiceCourse
 
+        def course_payload(course):
+            return {
+                "id": course.id,
+                "name": course.name,
+                "tagline": course.tagline,
+                "badge": course.badge,
+                "duration_minutes": course.duration_minutes,
+                "amount": course.amount,
+                "description": course.description,
+                "includes": course.includes,
+                "picture": course.picture.url if course.picture else None,
+                "position": course.position,
+                "active": course.active,
+            }
+
         club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
         if not club:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -5022,15 +5037,7 @@ class ClubViewSet(viewsets.ModelViewSet):
             if active_only:
                 qs = qs.filter(active=True)
             return Response([
-                {
-                    "id": c.id,
-                    "name": c.name,
-                    "duration_minutes": c.duration_minutes,
-                    "amount": c.amount,
-                    "description": c.description,
-                    "position": c.position,
-                    "active": c.active,
-                }
+                course_payload(c)
                 for c in qs.order_by("position", "id")
             ])
         club, error = _staff_club(request, subdomain, "lessons")
@@ -5049,27 +5056,23 @@ class ClubViewSet(viewsets.ModelViewSet):
             return Response({"detail": "コース名を入力してください。"}, status=400)
         if duration < 1:
             return Response({"detail": "所要時間は1分以上にしてください。"}, status=400)
-        course = ServiceCourse.objects.create(
+        course = ServiceCourse(
             club=club,
             name=name[:80],
+            tagline=(request.data.get("tagline") or "")[:120],
+            badge=(request.data.get("badge") or "")[:40],
             duration_minutes=duration,
             amount=max(0, amount),
             description=(request.data.get("description") or "")[:2000],
+            includes=(request.data.get("includes") or "")[:2000],
             position=int(request.data.get("position") or 0),
             active=str(request.data.get("active", "true")).lower() in ("true", "1", "yes"),
         )
-        return Response(
-            {
-                "id": course.id,
-                "name": course.name,
-                "duration_minutes": course.duration_minutes,
-                "amount": course.amount,
-                "description": course.description,
-                "position": course.position,
-                "active": course.active,
-            },
-            status=status.HTTP_201_CREATED,
-        )
+        picture = request.FILES.get("picture")
+        if picture:
+            course.picture = picture
+        course.save()
+        return Response(course_payload(course), status=status.HTTP_201_CREATED)
 
     @action(
         detail=False,
@@ -5078,6 +5081,21 @@ class ClubViewSet(viewsets.ModelViewSet):
     )
     def service_course_record(self, request, subdomain=None, course_id=None):
         from .models import ServiceCourse
+
+        def course_payload(course):
+            return {
+                "id": course.id,
+                "name": course.name,
+                "tagline": course.tagline,
+                "badge": course.badge,
+                "duration_minutes": course.duration_minutes,
+                "amount": course.amount,
+                "description": course.description,
+                "includes": course.includes,
+                "picture": course.picture.url if course.picture else None,
+                "position": course.position,
+                "active": course.active,
+            }
 
         club, error = _staff_club(request, subdomain, "lessons")
         if error:
@@ -5093,6 +5111,10 @@ class ClubViewSet(viewsets.ModelViewSet):
             if not name:
                 return Response({"detail": "コース名を入力してください。"}, status=400)
             course.name = name[:80]
+        if "tagline" in request.data:
+            course.tagline = (request.data.get("tagline") or "")[:120]
+        if "badge" in request.data:
+            course.badge = (request.data.get("badge") or "")[:40]
         if "duration_minutes" in request.data:
             try:
                 duration = int(request.data.get("duration_minutes"))
@@ -5108,6 +5130,8 @@ class ClubViewSet(viewsets.ModelViewSet):
                 return Response({"detail": "料金を正しく入力してください。"}, status=400)
         if "description" in request.data:
             course.description = (request.data.get("description") or "")[:2000]
+        if "includes" in request.data:
+            course.includes = (request.data.get("includes") or "")[:2000]
         if "position" in request.data:
             try:
                 course.position = int(request.data.get("position") or 0)
@@ -5115,16 +5139,21 @@ class ClubViewSet(viewsets.ModelViewSet):
                 pass
         if "active" in request.data:
             course.active = str(request.data.get("active")).lower() in ("true", "1", "yes")
+        clear_picture = str(request.data.get("clear_picture") or "").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        picture = request.FILES.get("picture")
+        if clear_picture and course.picture:
+            course.picture.delete(save=False)
+            course.picture = None
+        elif picture:
+            if course.picture:
+                course.picture.delete(save=False)
+            course.picture = picture
         course.save()
-        return Response({
-            "id": course.id,
-            "name": course.name,
-            "duration_minutes": course.duration_minutes,
-            "amount": course.amount,
-            "description": course.description,
-            "position": course.position,
-            "active": course.active,
-        })
+        return Response(course_payload(course))
 
     @action(
         detail=False,
@@ -5281,6 +5310,9 @@ class ClubViewSet(viewsets.ModelViewSet):
                     club, "service_slot_step_minutes", 15
                 ) or 15,
                 "service_reservation_payment_options": payment_options,
+                "service_allow_choose_worker": bool(
+                    getattr(club, "service_allow_choose_worker", False)
+                ),
             })
         club, error = _staff_club(request, subdomain, "lessons")
         if error:
@@ -5321,6 +5353,19 @@ class ClubViewSet(viewsets.ModelViewSet):
             club.service_reservation_payment_options = option
             update_fields.append("service_reservation_payment_options")
 
+        if "service_allow_choose_worker" in request.data:
+            raw = request.data.get("service_allow_choose_worker")
+            if isinstance(raw, str):
+                club.service_allow_choose_worker = raw.strip().lower() in {
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                }
+            else:
+                club.service_allow_choose_worker = bool(raw)
+            update_fields.append("service_allow_choose_worker")
+
         if not update_fields:
             return Response(
                 {"detail": "保存する設定がありません。"},
@@ -5335,6 +5380,9 @@ class ClubViewSet(viewsets.ModelViewSet):
         return Response({
             "service_slot_step_minutes": club.service_slot_step_minutes,
             "service_reservation_payment_options": saved_option,
+            "service_allow_choose_worker": bool(
+                club.service_allow_choose_worker
+            ),
         })
 
     @action(
