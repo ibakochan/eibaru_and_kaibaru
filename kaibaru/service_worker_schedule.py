@@ -187,9 +187,18 @@ def available_slots(club, course_id, day: date, section_id=None, step_minutes=No
     if not windows:
         return None, "この曜日の予約可能な時間帯が設定されていません。"
 
+    today = timezone.localdate()
+    if day < today:
+        return {
+            "slots": [],
+            "step_minutes": resolve_slot_step(club, step_minutes),
+            "available_count": 0,
+        }, None
+
     step = resolve_slot_step(club, step_minutes)
     workers = _qualified_workers(club, course)
     duration = int(course.duration_minutes)
+    now_min = _tmin(timezone.localtime().time()) if day == today else None
     candidates = set()
     for window in windows:
         start = _tmin(window.earliest_start)
@@ -206,16 +215,19 @@ def available_slots(club, course_id, day: date, section_id=None, step_minutes=No
     for start_min in sorted(candidates):
         end_min = start_min + duration
         available = False
-        for worker in workers:
-            if not _under_hour_cap(worker, day, duration):
-                continue
-            free = _free_ranges(
-                _availability_ranges(worker, day),
-                _busy_ranges(worker, day),
-            )
-            if any(s <= start_min and end_min <= e for s, e in free):
-                available = True
-                break
+        if now_min is not None and start_min <= now_min:
+            available = False
+        else:
+            for worker in workers:
+                if not _under_hour_cap(worker, day, duration):
+                    continue
+                free = _free_ranges(
+                    _availability_ranges(worker, day),
+                    _busy_ranges(worker, day),
+                )
+                if any(s <= start_min and end_min <= e for s, e in free):
+                    available = True
+                    break
         slots.append({
             "time": _from_min(start_min).strftime("%H:%M"),
             "available": available,
@@ -284,6 +296,14 @@ def create_service_reservation(club, payload):
     if end_min > 24 * 60:
         return None, "このコースはこの開始時刻では終わりません。"
     end = _from_min(end_min)
+
+    today = timezone.localdate()
+    if day < today:
+        return None, "過去の日付には予約できません。"
+    if day == today:
+        now_min = _tmin(timezone.localtime().time())
+        if _tmin(start) <= now_min:
+            return None, "過去の時刻には予約できません。"
 
     section_id = payload.get("section_id")
     try:
