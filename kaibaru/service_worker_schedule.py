@@ -22,11 +22,6 @@ from .models import (
 )
 
 SLOT_STEP_MINUTES = 15
-ACTIVE_STATUSES = (
-    ServiceReservation.Status.UNPAID,
-    ServiceReservation.Status.PAID,
-    ServiceReservation.Status.NOT_STARTED,
-)
 
 
 def _tmin(value: time) -> int:
@@ -62,6 +57,8 @@ def courses_for(club, *, active_only=True):
 
 
 def _worker_month_minutes(worker, year, month) -> int:
+    from .service_service_reservation import holding_reservations_q
+
     start = date(year, month, 1)
     if month == 12:
         end = date(year + 1, 1, 1)
@@ -69,10 +66,8 @@ def _worker_month_minutes(worker, year, month) -> int:
         end = date(year, month + 1, 1)
     rows = (
         ServiceReservation.objects.filter(
+            holding_reservations_q(),
             worker=worker,
-            canceled=False,
-            is_deleted=False,
-            status__in=ACTIVE_STATUSES,
             reservation_date__gte=start,
             reservation_date__lt=end,
         )
@@ -119,14 +114,17 @@ def _availability_ranges(worker, day: date):
     return ranges
 
 
-def _busy_ranges(worker, day: date):
-    rows = ServiceReservation.objects.filter(
+def _busy_ranges(worker, day: date, *, exclude_reservation_id=None):
+    from .service_service_reservation import holding_reservations_q
+
+    qs = ServiceReservation.objects.filter(
+        holding_reservations_q(),
         worker=worker,
         reservation_date=day,
-        canceled=False,
-        is_deleted=False,
-        status__in=ACTIVE_STATUSES,
-    ).values_list("start_time", "end_time")
+    )
+    if exclude_reservation_id is not None:
+        qs = qs.exclude(id=exclude_reservation_id)
+    rows = qs.values_list("start_time", "end_time")
     return [(_tmin(s), _tmin(e)) for s, e in rows]
 
 
@@ -239,7 +237,15 @@ def available_slots(club, course_id, day: date, section_id=None, step_minutes=No
     }, None
 
 
-def pick_worker(club, course, day: date, start: time, end: time):
+def pick_worker(
+    club,
+    course,
+    day: date,
+    start: time,
+    end: time,
+    *,
+    exclude_reservation_id=None,
+):
     """Randomly choose one qualified free worker for the slot."""
     duration = _tmin(end) - _tmin(start)
     free_workers = []
@@ -248,7 +254,11 @@ def pick_worker(club, course, day: date, start: time, end: time):
             continue
         free = _free_ranges(
             _availability_ranges(worker, day),
-            _busy_ranges(worker, day),
+            _busy_ranges(
+                worker,
+                day,
+                exclude_reservation_id=exclude_reservation_id,
+            ),
         )
         start_min = _tmin(start)
         end_min = _tmin(end)
@@ -271,99 +281,12 @@ def _parse_hhmm(value):
 
 
 def create_service_reservation(club, payload):
-    """Create a visitor/member interval booking and assign a random worker."""
-    try:
-        course_id = int(payload.get("course_id"))
-    except (TypeError, ValueError):
-        return None, "コースを選択してください。"
-    course = ServiceCourse.objects.filter(club=club, id=course_id, active=True).first()
-    if not course:
-        return None, "コースが見つかりません。"
+    """Email-gated service booking (same pattern as visitor/event)."""
+    from .service_service_reservation import (
+        create_service_reservation as _create,
+    )
 
-    day_raw = payload.get("reservation_date") or payload.get("date")
-    try:
-        if isinstance(day_raw, date):
-            day = day_raw
-        else:
-            day = date.fromisoformat(str(day_raw)[:10])
-    except (TypeError, ValueError):
-        return None, "日付を選択してください。"
-
-    start = _parse_hhmm(payload.get("start_time"))
-    if not start:
-        return None, "開始時刻を選択してください。"
-    end_min = _tmin(start) + int(course.duration_minutes)
-    if end_min > 24 * 60:
-        return None, "このコースはこの開始時刻では終わりません。"
-    end = _from_min(end_min)
-
-    today = timezone.localdate()
-    if day < today:
-        return None, "過去の日付には予約できません。"
-    if day == today:
-        now_min = _tmin(timezone.localtime().time())
-        if _tmin(start) <= now_min:
-            return None, "過去の時刻には予約できません。"
-
-    section_id = payload.get("section_id")
-    try:
-        section_id = int(section_id) if section_id not in (None, "") else None
-    except (TypeError, ValueError):
-        section_id = None
-
-    windows = windows_for(club, section_id, day=day)
-    if not _window_allows(windows, _tmin(start), end_min):
-        return None, "この時間帯は予約できません。"
-
-    full_name = (payload.get("full_name") or "").strip()
-    email = (payload.get("email") or "").strip()
-    if not full_name:
-        return None, "お名前を入力してください。"
-    if not email:
-        return None, "メールアドレスを入力してください。"
-
-    payment_method = payload.get("payment_method") or ServiceReservation.PaymentMethod.CASH
-    if payment_method not in dict(ServiceReservation.PaymentMethod.choices):
-        payment_method = ServiceReservation.PaymentMethod.CASH
-
-    reservation_type = payload.get("reservation_type") or ServiceReservation.ReservationType.VISITOR
-    if reservation_type not in dict(ServiceReservation.ReservationType.choices):
-        reservation_type = ServiceReservation.ReservationType.VISITOR
-
-    with transaction.atomic():
-        worker = pick_worker(club, course, day, start, end)
-        if worker is None:
-            return None, "この時間に空いているワーカーがいません。"
-
-        status = ServiceReservation.Status.PAID
-        paid_at = None
-        if payment_method == ServiceReservation.PaymentMethod.STRIPE:
-            status = ServiceReservation.Status.UNPAID
-        elif payment_method == ServiceReservation.PaymentMethod.CASH:
-            status = ServiceReservation.Status.PAID
-            paid_at = None
-
-        key = f"svc-{club.id}-{uuid.uuid4().hex}"
-        reservation = ServiceReservation.objects.create(
-            club=club,
-            course=course,
-            worker=worker,
-            section_id=section_id,
-            reservation_type=reservation_type,
-            status=status,
-            payment_method=payment_method,
-            full_name=full_name,
-            email=email,
-            phone_number=(payload.get("phone_number") or "")[:30],
-            amount=int(course.amount or 0),
-            price_name=course.name,
-            reservation_date=day,
-            start_time=start,
-            end_time=end,
-            reservation_key=key,
-            paid_at=paid_at,
-        )
-    return reservation_payload(reservation), None
+    return _create(club, payload)
 
 
 def reservation_payload(reservation):
@@ -846,7 +769,7 @@ def work_month_stats(worker, year, month):
             worker=worker,
             canceled=False,
             is_deleted=False,
-            status__in=ACTIVE_STATUSES,
+            status=ServiceReservation.Status.PAID,
             reservation_date__gte=start,
             reservation_date__lt=end,
         )

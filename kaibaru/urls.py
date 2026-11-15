@@ -1,5 +1,5 @@
 from django.urls import re_path, path, include
-from . import views, stripe_views, stripe_webhooks, views_reservation_start, views_event_start, views_reservation_cancel, views_member_transfer
+from . import views, stripe_views, stripe_webhooks, views_reservation_start, views_event_start, views_service_start, views_reservation_cancel, views_member_transfer
 from . import viewsets
 from rest_framework.routers import DefaultRouter
 from django.contrib.sitemaps.views import sitemap, index
@@ -102,6 +102,11 @@ urlpatterns = [
         'start_event_reservation/<str:token>/',
         views_event_start.start_event_reservation,
         name='start_event_reservation',
+    ),
+    path(
+        'start_service_reservation/<str:token>/',
+        views_service_start.start_service_reservation,
+        name='start_service_reservation',
     ),
     path(
         'cancel_reservation/<str:token>/',

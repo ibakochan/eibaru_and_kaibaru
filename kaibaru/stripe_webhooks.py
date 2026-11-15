@@ -9,6 +9,7 @@ from .models import TicketPurchase, TicketGrant, Reservation, Club, Member, Subs
 from .tasks_emails import send_stripe_payment_failure_warning_email, send_subscription_activated_emails, send_invoice_paid_email
 from .service_reservation_start import complete_paid_checkout
 from .service_event import complete_paid_event_checkout
+from .service_service_reservation import complete_paid_service_checkout
 from django.db import transaction
 
 from datetime import datetime, timezone as dt_timezone
@@ -188,6 +189,41 @@ def stripe_connected_webhook(request):
             # when the reconciler soft-deleted it before this payment.
             complete_paid_event_checkout(
                 reservation_id=event_reservation_id,
+                session_id=session["id"],
+                payment_intent_id=session.get("payment_intent"),
+                account_id=account_id,
+            )
+            return webhook_ok(event_record)
+
+        # =========================================================
+        # SERVICE (HAIR/NAIL) RESERVATION CHECKOUT
+        # =========================================================
+
+        service_reservation_id = metadata.get("service_reservation_id")
+
+        if service_reservation_id:
+            if session.get("payment_status") != "paid":
+                logger.warning(
+                    "[SERVICE CHECKOUT] Checkout completed but payment "
+                    "is not paid yet. reservation=%s payment_status=%s",
+                    service_reservation_id,
+                    session.get("payment_status"),
+                )
+                return webhook_ok(event_record)
+
+            try:
+                service_reservation_id = int(service_reservation_id)
+            except (TypeError, ValueError):
+                logger.error(
+                    "[SERVICE CHECKOUT] Invalid service reservation id "
+                    "raw=%s session=%s",
+                    metadata.get("service_reservation_id"),
+                    session["id"],
+                )
+                return webhook_ok(event_record)
+
+            complete_paid_service_checkout(
+                reservation_id=service_reservation_id,
                 session_id=session["id"],
                 payment_intent_id=session.get("payment_intent"),
                 account_id=account_id,

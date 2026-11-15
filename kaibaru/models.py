@@ -175,6 +175,18 @@ class Club(models.Model):
         default=15,
         help_text="Booking start interval for service_schedule (15 / 30 / 60).",
     )
+    # How a priced service_schedule booking may be paid. Clubs without
+    # a connected Stripe account can only take payment at the venue.
+    service_reservation_payment_options = models.CharField(
+        max_length=10,
+        choices=[
+            ("stripe", "Card (Stripe)"),
+            ("cash", "Pay at the venue"),
+            ("both", "Card or pay at the venue"),
+        ],
+        default="stripe",
+        help_text="stripe, cash (pay at the venue), or both for service_schedule.",
+    )
 
     JOIN_PICTURE_MODE_CHOICES = [
         ("off", "Optional"),
@@ -3773,6 +3785,16 @@ class ServiceReservation(models.Model):
     reservation_key = models.CharField(max_length=255, unique=True)
     stripe_checkout_session_id = models.CharField(max_length=255, null=True, blank=True)
     stripe_payment_intent_id = models.CharField(max_length=255, null=True, blank=True)
+    # Shared by the start-email link. Clicking it confirms cash/free
+    # or opens Stripe Checkout. not_started rows do not hold a slot.
+    start_token = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        db_index=True,
+    )
+    requested_at = models.DateTimeField(null=True, blank=True)
+    checkout_started_at = models.DateTimeField(null=True, blank=True)
     confirmation_email_sent = models.BooleanField(default=False)
     canceled = models.BooleanField(default=False)
     is_deleted = models.BooleanField(default=False)

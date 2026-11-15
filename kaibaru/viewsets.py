@@ -5264,27 +5264,78 @@ class ClubViewSet(viewsets.ModelViewSet):
         club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
         if not club:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        from .cash_reservations import (
+            OPTION_CASH,
+            clean_payment_option,
+        )
+
+        payment_options = clean_payment_option(
+            getattr(club, "service_reservation_payment_options", None),
+        )
+        if not club.stripe_account_id:
+            payment_options = OPTION_CASH
+
         if request.method == "GET":
             return Response({
                 "service_slot_step_minutes": getattr(
                     club, "service_slot_step_minutes", 15
                 ) or 15,
+                "service_reservation_payment_options": payment_options,
             })
         club, error = _staff_club(request, subdomain, "lessons")
         if error:
             return error
-        try:
-            step = int(request.data.get("service_slot_step_minutes"))
-        except (TypeError, ValueError):
-            return Response({"detail": "予約間隔を選んでください。"}, status=400)
-        if step not in (15, 30, 60):
+
+        update_fields = []
+        if "service_slot_step_minutes" in request.data:
+            try:
+                step = int(request.data.get("service_slot_step_minutes"))
+            except (TypeError, ValueError):
+                return Response({"detail": "予約間隔を選んでください。"}, status=400)
+            if step not in (15, 30, 60):
+                return Response(
+                    {"detail": "予約間隔は15分・30分・60分から選んでください。"},
+                    status=400,
+                )
+            club.service_slot_step_minutes = step
+            update_fields.append("service_slot_step_minutes")
+
+        if "service_reservation_payment_options" in request.data:
+            try:
+                option = clean_payment_option(
+                    request.data.get("service_reservation_payment_options"),
+                )
+            except ValueError as exc:
+                return Response({"detail": str(exc)}, status=400)
+            if not club.stripe_account_id and option != OPTION_CASH:
+                return Response(
+                    {
+                        "detail": (
+                            "Stripe未連携のため、現地払いのみ設定できます。"
+                        )
+                    },
+                    status=400,
+                )
+            if not club.stripe_account_id:
+                option = OPTION_CASH
+            club.service_reservation_payment_options = option
+            update_fields.append("service_reservation_payment_options")
+
+        if not update_fields:
             return Response(
-                {"detail": "予約間隔は15分・30分・60分から選んでください。"},
+                {"detail": "保存する設定がありません。"},
                 status=400,
             )
-        club.service_slot_step_minutes = step
-        club.save(update_fields=["service_slot_step_minutes"])
-        return Response({"service_slot_step_minutes": club.service_slot_step_minutes})
+        club.save(update_fields=update_fields)
+        saved_option = clean_payment_option(
+            club.service_reservation_payment_options,
+        )
+        if not club.stripe_account_id:
+            saved_option = OPTION_CASH
+        return Response({
+            "service_slot_step_minutes": club.service_slot_step_minutes,
+            "service_reservation_payment_options": saved_option,
+        })
 
     @action(
         detail=False,

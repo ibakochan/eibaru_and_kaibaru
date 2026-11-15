@@ -3262,6 +3262,7 @@ class ClubSerializer(serializers.ModelSerializer):
             "joining_fee",
             "default_instructor_lesson_fee",
             "service_slot_step_minutes",
+            "service_reservation_payment_options",
             "join_picture_mode",
             "join_picture_min_age",
             "join_terms",

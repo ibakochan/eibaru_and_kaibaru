@@ -2079,3 +2079,172 @@ def send_inquiry_email(self, club_id, name, furigana, phone_number, email, heade
     mail.send()
     logger.info("[EMAIL] Inquiry sent club=%s", club_id)
 
+
+@shared_task(
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=30,
+    retry_kwargs={"max_retries": 5},
+)
+def send_service_reservation_start_email(self, start_token):
+    from .models import ServiceReservation
+    from .service_service_reservation import START_LINK_HOURS, WEEKDAY_NAMES
+
+    reservation = (
+        ServiceReservation.objects
+        .select_related("club", "club__owner", "course")
+        .filter(start_token=start_token)
+        .exclude(status=ServiceReservation.Status.PAID)
+        .first()
+    )
+    if not reservation:
+        logger.warning("[EMAIL] No pending service reservation for start token.")
+        return
+
+    club = reservation.club
+    course = reservation.course
+    club_name = club.title or club.subdomain or "サロン"
+    course_name = course.name if course else (reservation.price_name or "コース")
+    weekday = WEEKDAY_NAMES[reservation.reservation_date.weekday()]
+    date_text = reservation.reservation_date.strftime("%Y年%m月%d日")
+    start_text = reservation.start_time.strftime("%H:%M")
+    end_text = reservation.end_time.strftime("%H:%M")
+    price_text = "無料" if reservation.amount == 0 else f"¥{reservation.amount:,}"
+    if reservation.payment_method == "cash" and reservation.amount > 0:
+        price_text = f"{price_text}（現地払い）"
+    link = (
+        f"https://{club.subdomain}.kaibaru.jp/"
+        f"start_service_reservation/{start_token}/"
+    )
+    subject = f"【{club_name}】ご予約手続きのご案内"
+    message = (
+        f"{reservation.full_name} 様\n\n"
+        f"{club_name}へのご予約をお申し込みいただきありがとうございます。\n"
+        f"まだ予約は確定していません。\n"
+        f"以下のリンクを開き、手続きを完了してください。\n\n"
+        f"■ お申し込み内容\n"
+        f"コース：{course_name}\n"
+        f"日時：{date_text}（{weekday}）\n"
+        f"時間：{start_text}〜{end_text}\n"
+        f"料金：{price_text}\n\n"
+        f"手続きを続ける：\n"
+        f"{link}\n\n"
+        f"このリンクの有効期限は{START_LINK_HOURS}時間です。\n"
+        f"リンクを開いて手続きを始めるまで、枠は確保されません。\n\n"
+        f"{club_name}"
+    )
+    _send_event_email(
+        club=club,
+        recipient=reservation.email,
+        subject=subject,
+        message=message,
+    )
+    logger.info(
+        "[EMAIL] Service start email sent reservation=%s recipient=%s",
+        reservation.id,
+        reservation.email,
+    )
+
+
+@shared_task(
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=30,
+    retry_kwargs={"max_retries": 5},
+)
+def send_service_reservation_confirmation_email(self, reservation_id):
+    from .models import ServiceReservation
+    from .service_service_reservation import WEEKDAY_NAMES
+
+    reservation = (
+        ServiceReservation.objects
+        .select_related("club", "club__owner", "course", "worker")
+        .filter(id=reservation_id)
+        .first()
+    )
+    if not reservation or reservation.status != ServiceReservation.Status.PAID:
+        return
+    if not reservation.email:
+        return
+
+    with transaction.atomic():
+        locked = (
+            ServiceReservation.objects
+            .select_for_update()
+            .get(id=reservation.id)
+        )
+        if locked.confirmation_email_sent:
+            return
+        locked.confirmation_email_sent = True
+        locked.save(update_fields=["confirmation_email_sent"])
+
+    club = reservation.club
+    course = reservation.course
+    club_name = club.title or club.subdomain or "サロン"
+    course_name = course.name if course else (reservation.price_name or "コース")
+    weekday = WEEKDAY_NAMES[reservation.reservation_date.weekday()]
+    date_text = reservation.reservation_date.strftime("%Y年%m月%d日")
+    start_text = reservation.start_time.strftime("%H:%M")
+    end_text = reservation.end_time.strftime("%H:%M")
+    worker_name = (
+        reservation.worker.full_name if reservation.worker_id else "スタッフ"
+    )
+    is_free = reservation.amount == 0
+    is_cash = reservation.payment_method == "cash" and not is_free
+
+    if is_free:
+        subject = f"【{club_name}】ご予約確定のお知らせ"
+        intro = (
+            f"{club_name}へのご予約ありがとうございます。\n"
+            f"ご予約が確定しました。\n\n"
+        )
+        payment_section = "■ 料金\n無料\n\n"
+    elif is_cash:
+        subject = f"【{club_name}】ご予約確定のお知らせ"
+        intro = (
+            f"{club_name}へのご予約ありがとうございます。\n"
+            f"ご予約が確定しました。料金は当日、店舗でお支払いください。\n\n"
+        )
+        payment_section = (
+            f"■ お支払い\n"
+            f"料金：¥{reservation.amount:,}\n"
+            f"お支払い方法：現地払い\n\n"
+        )
+    else:
+        subject = f"【{club_name}】ご予約・お支払い完了のお知らせ"
+        intro = (
+            f"{club_name}へのご予約ありがとうございます。\n"
+            f"お支払いが完了し、ご予約が確定しました。\n\n"
+        )
+        payment_section = (
+            f"■ お支払い\n"
+            f"料金：¥{reservation.amount:,}\n"
+            f"お支払い方法：クレジットカード\n\n"
+        )
+
+    message = (
+        f"{reservation.full_name} 様\n\n"
+        f"{intro}"
+        f"■ ご予約内容\n"
+        f"コース：{course_name}\n"
+        f"日時：{date_text}（{weekday}）\n"
+        f"時間：{start_text}〜{end_text}\n"
+        f"担当：{worker_name}\n\n"
+        f"{payment_section}"
+        f"■ ご予約番号\n"
+        f"{reservation.id}\n\n"
+        f"当日はお気をつけてお越しください。\n"
+        f"{club_name}"
+    )
+    _send_event_email(
+        club=club,
+        recipient=reservation.email,
+        subject=subject,
+        message=message,
+    )
+    logger.info(
+        "[EMAIL] Service confirmation sent reservation=%s recipient=%s",
+        reservation.id,
+        reservation.email,
+    )
+
