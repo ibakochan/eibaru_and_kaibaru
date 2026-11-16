@@ -1,4 +1,8 @@
-"""One-off: delete duplicate 'Kaibaru Club Subscription' products on platform Stripe.
+"""One-off: delete leftover junk products on platform Stripe.
+
+Targets:
+  - "Kaibaru Club Subscription" duplicates
+  - "Prorated payment until end of month" leftovers
 
 Keeps any product referenced by settings price IDs / worker product id.
 """
@@ -36,6 +40,13 @@ KEEP_PRODUCT_IDS = {"prod_VckyHlwEN01QJC"}  # STRIPE_WORKER_PRODUCT_ID
 
 APPLY = os.environ.get("APPLY", "").lower() in ("1", "true", "yes")
 
+# Match either leftover product name family.
+NAME_PATTERN = re.compile(
+    r"(kaibaru\s*club\s*subscription)"
+    r"|(prorated\s+payment\s+until\s+end\s+of\s+month)",
+    re.I,
+)
+
 
 def list_all_products(*, active: bool):
     starting_after = None
@@ -66,13 +77,12 @@ def main():
 
     print("KEEP_PRODUCT_IDS:", sorted(KEEP_PRODUCT_IDS))
 
-    pattern = re.compile(r"kaibaru\s*club\s*subscription", re.I)
     matches = []
     seen = set()
     for active in (True, False):
         for product in list_all_products(active=active):
             name = product.get("name") or ""
-            if not pattern.search(name):
+            if not NAME_PATTERN.search(name):
                 continue
             if product.id in seen:
                 continue
