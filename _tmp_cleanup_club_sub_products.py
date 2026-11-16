@@ -1,8 +1,11 @@
 """One-off: delete leftover junk products on platform Stripe.
 
-Targets:
-  - "Kaibaru Club Subscription" duplicates
-  - "Prorated payment until end of month" leftovers
+Targets (name families; many duplicates):
+  - "Kaibaru Club Subscription"
+  - "Kaibaru subscription for club <id>"
+  - "Prorated payment until end of month"
+  - "Prorated Payment after N-day Trial" (+ concurrent variants)
+  - "First Month Prorated Payment"
 
 Keeps any product referenced by settings price IDs / worker product id.
 """
@@ -40,10 +43,13 @@ KEEP_PRODUCT_IDS = {"prod_VckyHlwEN01QJC"}  # STRIPE_WORKER_PRODUCT_ID
 
 APPLY = os.environ.get("APPLY", "").lower() in ("1", "true", "yes")
 
-# Match either leftover product name family.
+# Leftover product name families from old checkout / trial experiments.
 NAME_PATTERN = re.compile(
     r"(kaibaru\s*club\s*subscription)"
-    r"|(prorated\s+payment\s+until\s+end\s+of\s+month)",
+    r"|(kaibaru\s+subscription\s+for\s+club\s+\d+)"
+    r"|(prorated\s+payment\s+until\s+end\s+of\s+month)"
+    r"|(prorated\s+payment\s+after\s+\d+-day\s+trial)"
+    r"|(first\s+month\s+prorated\s+payment)",
     re.I,
 )
 
