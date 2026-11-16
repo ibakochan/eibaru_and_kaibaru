@@ -5429,6 +5429,77 @@ class ClubViewSet(viewsets.ModelViewSet):
 
     @action(
         detail=False,
+        methods=["get"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/service-reservation-manage",
+    )
+    def service_reservation_manage(self, request, subdomain=None):
+        from .cash_reservations import CashReservationError
+        from .service_reservation_manage import (
+            list_manageable_reservations,
+            resolve_service_actor,
+        )
+
+        club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
+        if not club:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        actor = resolve_service_actor(request.user, club)
+        if not actor:
+            return Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            rows = list_manageable_reservations(
+                club, request.user, actor=actor
+            )
+        except CashReservationError as exc:
+            return Response(
+                {"detail": exc.message},
+                status=exc.status_code,
+            )
+        return Response({"role": actor["role"], "reservations": rows})
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path=(
+            r"by-subdomain/(?P<subdomain>[^/.]+)/service-reservations/"
+            r"(?P<reservation_id>\d+)/manage"
+        ),
+    )
+    def service_reservation_manage_action(
+        self, request, subdomain=None, reservation_id=None
+    ):
+        from .cash_reservations import CashReservationError
+        from .service_reservation_manage import (
+            apply_service_manage_action,
+            resolve_service_actor,
+        )
+
+        club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
+        if not club:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        if not resolve_service_actor(request.user, club):
+            return Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
+        action = str(request.data.get("action") or "").strip().lower()
+        try:
+            payload = apply_service_manage_action(
+                reservation_id=int(reservation_id),
+                action=action,
+                user=request.user,
+                club=club,
+            )
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "予約が見つかりません。"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except CashReservationError as exc:
+            return Response(
+                {"detail": exc.message},
+                status=exc.status_code,
+            )
+        return Response(payload)
+
+    @action(
+        detail=False,
         methods=["get", "post"],
         url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/workers",
     )
