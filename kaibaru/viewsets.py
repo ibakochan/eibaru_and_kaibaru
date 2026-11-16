@@ -5009,9 +5009,17 @@ class ClubViewSet(viewsets.ModelViewSet):
         url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/service-courses",
     )
     def service_courses(self, request, subdomain=None):
-        from .models import ServiceCourse
+        from django.db.models import Exists, OuterRef
 
-        def course_payload(course):
+        from .models import ServiceCourse, ServiceReservation
+        from .service_service_reservation import (
+            course_has_open_reservations,
+            open_course_reservations_q,
+        )
+
+        def course_payload(course, *, has_open=None):
+            if has_open is None:
+                has_open = course_has_open_reservations(course)
             return {
                 "id": course.id,
                 "name": course.name,
@@ -5024,20 +5032,31 @@ class ClubViewSet(viewsets.ModelViewSet):
                 "picture": course.picture.url if course.picture else None,
                 "position": course.position,
                 "active": course.active,
+                "has_open_reservations": bool(has_open),
+                "bookable": bool(course.active),
             }
 
         club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
         if not club:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
         if request.method == "GET":
-            active_only = str(request.query_params.get("all", "")).lower() not in (
+            include_all = str(request.query_params.get("all", "")).lower() in (
                 "1", "true", "yes",
             )
-            qs = ServiceCourse.objects.filter(club=club)
-            if active_only:
-                qs = qs.filter(active=True)
+            qs = ServiceCourse.objects.filter(club=club).annotate(
+                has_open_reservations=Exists(
+                    ServiceReservation.objects.filter(
+                        open_course_reservations_q(),
+                        course_id=OuterRef("pk"),
+                    )
+                )
+            )
+            if not include_all:
+                # Active courses, plus inactive ones that still have open
+                # (unsettled) reservations so customers can see them as closed.
+                qs = qs.filter(Q(active=True) | Q(has_open_reservations=True))
             return Response([
-                course_payload(c)
+                course_payload(c, has_open=c.has_open_reservations)
                 for c in qs.order_by("position", "id")
             ])
         club, error = _staff_club(request, subdomain, "lessons")
@@ -5081,8 +5100,11 @@ class ClubViewSet(viewsets.ModelViewSet):
     )
     def service_course_record(self, request, subdomain=None, course_id=None):
         from .models import ServiceCourse
+        from .service_service_reservation import course_has_open_reservations
 
-        def course_payload(course):
+        def course_payload(course, *, has_open=None):
+            if has_open is None:
+                has_open = course_has_open_reservations(course)
             return {
                 "id": course.id,
                 "name": course.name,
@@ -5095,6 +5117,8 @@ class ClubViewSet(viewsets.ModelViewSet):
                 "picture": course.picture.url if course.picture else None,
                 "position": course.position,
                 "active": course.active,
+                "has_open_reservations": bool(has_open),
+                "bookable": bool(course.active),
             }
 
         club, error = _staff_club(request, subdomain, "lessons")
@@ -5104,8 +5128,10 @@ class ClubViewSet(viewsets.ModelViewSet):
         if not course:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
         if request.method == "DELETE":
-            course.delete()
-            return Response(status=status.HTTP_204_NO_CONTENT)
+            # Soft-archive: keep history / PROTECT FKs, stop new bookings.
+            course.active = False
+            course.save(update_fields=["active"])
+            return Response(course_payload(course))
         if "name" in request.data:
             name = (request.data.get("name") or "").strip()
             if not name:

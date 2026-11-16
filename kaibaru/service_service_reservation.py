@@ -72,6 +72,27 @@ def unpaid_hold_q(hold_cutoff):
     ) & started_recently
 
 
+def open_course_reservations_q(today=None):
+    """Reservations that keep an inactive course visible on the public menu.
+
+    Open = still unsettled: not paid, not canceled, not no-show, not
+    soft-deleted, and on today or later. Once every reservation is paid /
+    canceled / no-show (or in the past), an inactive course can leave the
+    customer UI.
+    """
+    today = today or timezone.localdate()
+    return Q(
+        canceled=False,
+        is_deleted=False,
+        no_show=False,
+        reservation_date__gte=today,
+    ) & ~Q(status=ServiceReservation.Status.PAID)
+
+
+def course_has_open_reservations(course, today=None):
+    return course.reservations.filter(open_course_reservations_q(today)).exists()
+
+
 def holding_reservations_q(hold_cutoff=None):
     hold_cutoff = hold_cutoff or hold_cutoff_at()
     return Q(
