@@ -43,6 +43,18 @@ class VisitorReservationService:
         price_id=None,
         addon_ids=None,
     ):
+        from .visitor_booking import (
+            assert_visitor_booking_auth,
+            create_result_from_begin,
+            is_instant_confirm,
+        )
+        from .service_reservation_start import (
+            ReservationStartError,
+            ReservationStartService,
+        )
+
+        assert_visitor_booking_auth(club, user)
+
         prepared = _prepare_visitor_request(
             club=club,
             lesson=lesson,
@@ -57,13 +69,15 @@ class VisitorReservationService:
             price_id=price_id,
             addon_ids=addon_ids,
         )
+        instant = is_instant_confirm(club)
 
         try:
             with transaction.atomic():
                 token, reservation_ids = _save_visitor_reservation(
                     **prepared
                 )
-                queue_reservation_start_email(token)
+                if not instant:
+                    queue_reservation_start_email(token)
         except IntegrityError:
             existing = (
                 Reservation.objects
@@ -72,6 +86,19 @@ class VisitorReservationService:
             )
 
             if existing and existing.start_token:
+                if instant:
+                    try:
+                        begin_result = ReservationStartService.begin(
+                            existing.start_token
+                        )
+                    except ReservationStartError as exc:
+                        raise ValueError(exc.message) from exc
+                    return create_result_from_begin(
+                        begin_result=begin_result,
+                        reservation_id=existing.id,
+                        reservation_ids=[existing.id],
+                    )
+
                 from .tasks_emails import (
                     send_reservation_start_email,
                 )
@@ -84,6 +111,17 @@ class VisitorReservationService:
 
             raise ValueError(
                 "このレッスンの予約処理がすでに開始されています。"
+            )
+
+        if instant:
+            try:
+                begin_result = ReservationStartService.begin(token)
+            except ReservationStartError as exc:
+                raise ValueError(exc.message) from exc
+            return create_result_from_begin(
+                begin_result=begin_result,
+                reservation_id=reservation_ids[0],
+                reservation_ids=reservation_ids,
             )
 
         return _email_sent_result(reservation_ids)

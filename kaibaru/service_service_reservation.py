@@ -167,8 +167,8 @@ def _email_sent_result(reservation):
     }
 
 
-def create_service_reservation(club, payload):
-    """Create a not_started hold request and email the start link."""
+def create_service_reservation(club, payload, user=None):
+    """Create a visitor salon booking (email link or instant finish)."""
     from .service_worker_schedule import (
         _from_min,
         _tmin,
@@ -176,6 +176,16 @@ def create_service_reservation(club, payload):
         pick_worker,
         windows_for,
     )
+    from .visitor_booking import (
+        assert_visitor_booking_auth,
+        create_result_from_begin,
+        is_instant_confirm,
+    )
+
+    try:
+        assert_visitor_booking_auth(club, user)
+    except ValueError as exc:
+        return None, str(exc)
 
     try:
         course_id = int(payload.get("course_id"))
@@ -223,7 +233,10 @@ def create_service_reservation(club, payload):
         return None, "この時間帯は予約できません。"
 
     full_name = (payload.get("full_name") or "").strip()
-    email = (payload.get("email") or "").strip().lower()
+    if user is not None and getattr(user, "email", None):
+        email = (user.email or "").strip().lower()
+    else:
+        email = (payload.get("email") or "").strip().lower()
     if not full_name:
         return None, "お名前を入力してください。"
     if not email:
@@ -263,7 +276,7 @@ def create_service_reservation(club, payload):
         if preferred_worker is None:
             return None, "選んだスタッフはこの時間に予約できません。"
     elif pick_worker(club, course, day, start, end) is None:
-        # Soft availability check only — slot is not held until email confirm.
+        # Soft availability check — hold starts on email confirm or instant begin.
         return None, "この時間に空いているワーカーがいません。"
 
     reservation_key = _reservation_key(
@@ -275,6 +288,7 @@ def create_service_reservation(club, payload):
     )
     now = timezone.now()
     token = secrets.token_urlsafe(32)
+    instant = is_instant_confirm(club)
 
     try:
         with transaction.atomic():
@@ -294,8 +308,11 @@ def create_service_reservation(club, payload):
                 reservation_key=reservation_key,
                 token=token,
                 now=now,
+                user=user,
             )
-            queue_service_reservation_start_email(reservation.start_token)
+            start_token = reservation.start_token
+            if not instant:
+                queue_service_reservation_start_email(start_token)
     except IntegrityError:
         existing = (
             ServiceReservation.objects
@@ -303,13 +320,33 @@ def create_service_reservation(club, payload):
             .first()
         )
         if existing and existing.start_token:
+            if instant:
+                return _finish_service_instant(existing.start_token, existing.id)
             queue_service_reservation_start_email(existing.start_token)
             return _email_sent_result(existing), None
         return None, "この予約処理がすでに開始されています。"
     except ValueError as exc:
         return None, str(exc)
 
+    if instant:
+        return _finish_service_instant(start_token, reservation.id)
     return _email_sent_result(reservation), None
+
+
+def _finish_service_instant(start_token, reservation_id):
+    from .visitor_booking import create_result_from_begin
+
+    try:
+        begin_result = ServiceReservationStartService.begin(start_token)
+    except ServiceStartError as exc:
+        return None, exc.message
+    return (
+        create_result_from_begin(
+            begin_result=begin_result,
+            reservation_id=reservation_id,
+        ),
+        None,
+    )
 
 
 def _save_not_started(
@@ -329,6 +366,7 @@ def _save_not_started(
     reservation_key,
     token,
     now,
+    user=None,
 ):
     existing = (
         ServiceReservation.objects
@@ -349,7 +387,10 @@ def _save_not_started(
             and not existing.is_deleted
             and hold_is_active(existing, hold_cutoff_at(now))
         ):
-            raise ValueError("この予約の決済手続き中です。メールのリンクから続けてください。")
+            raise ValueError(
+                "この予約の決済手続き中です。"
+                "しばらくしてからもう一度お試しください。"
+            )
 
         if (
             existing.status == ServiceReservation.Status.NOT_STARTED
@@ -363,6 +404,7 @@ def _save_not_started(
             existing.price_name = course.name
             existing.section_id = section_id
             existing.preferred_worker = preferred_worker
+            existing.user = user
             existing.requested_at = now
             existing.confirmation_email_sent = False
             existing.is_deleted = False
@@ -376,6 +418,7 @@ def _save_not_started(
                     "price_name",
                     "section_id",
                     "preferred_worker",
+                    "user",
                     "requested_at",
                     "confirmation_email_sent",
                     "is_deleted",
@@ -388,6 +431,7 @@ def _save_not_started(
         existing.worker = None
         existing.preferred_worker = preferred_worker
         existing.section_id = section_id
+        existing.user = user
         existing.reservation_type = ServiceReservation.ReservationType.VISITOR
         existing.status = ServiceReservation.Status.NOT_STARTED
         existing.payment_method = payment_method
@@ -417,6 +461,7 @@ def _save_not_started(
         worker=None,
         preferred_worker=preferred_worker,
         section_id=section_id,
+        user=user,
         reservation_type=ServiceReservation.ReservationType.VISITOR,
         status=ServiceReservation.Status.NOT_STARTED,
         payment_method=payment_method or None,

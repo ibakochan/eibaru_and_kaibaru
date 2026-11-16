@@ -4,7 +4,7 @@ from django.shortcuts import render
 from django.views.decorators.http import require_http_methods
 
 from .cash_reservations import cancel_blocked_message
-from .models import EventReservation, Reservation
+from .models import EventReservation, Reservation, ServiceReservation
 from .reservation_cancel import (
     cancel_is_closed,
     read_cancel_token,
@@ -189,6 +189,8 @@ def _placement_block(request, kind, reservation):
 def _paid_status(kind):
     if kind == "lesson":
         return Reservation.Status.PAID
+    if kind == "service":
+        return ServiceReservation.Status.PAID
     return EventReservation.Status.PAID
 
 
@@ -198,6 +200,14 @@ def _lock(kind, reservation_id):
             Reservation.objects
             .select_for_update()
             .select_related("club", "lesson")
+            .filter(id=reservation_id)
+            .first()
+        )
+    if kind == "service":
+        return (
+            ServiceReservation.objects
+            .select_for_update()
+            .select_related("club", "course", "worker", "preferred_worker")
             .filter(id=reservation_id)
             .first()
         )
@@ -225,6 +235,23 @@ def _restore_block_reason(kind, reservation):
                 needed=1,
                 exclude_ids=[reservation.id],
             )
+        elif kind == "service":
+            from .service_worker_schedule import pick_worker
+
+            preferred = reservation.preferred_worker_id or reservation.worker_id
+            worker = pick_worker(
+                reservation.club,
+                reservation.course,
+                reservation.reservation_date,
+                reservation.start_time,
+                reservation.end_time,
+                exclude_reservation_id=reservation.id,
+                preferred_worker=preferred,
+            )
+            if worker is None:
+                raise ValueError(
+                    "この時間に空いているワーカーがいません。"
+                )
         else:
             from .service_event import assert_event_has_spots, hold_cutoff_at
 
@@ -245,6 +272,18 @@ def _page_context(kind, reservation):
     if kind == "lesson":
         title = reservation.lesson.title
         when_text = reservation.reservation_date.strftime("%Y年%m月%d日")
+    elif kind == "service":
+        from .service_service_reservation import WEEKDAY_NAMES
+
+        course = reservation.course
+        title = (
+            course.name if course is not None else (reservation.price_name or "コース")
+        )
+        weekday = WEEKDAY_NAMES[reservation.reservation_date.weekday()]
+        date_text = reservation.reservation_date.strftime("%Y年%m月%d日")
+        start_text = reservation.start_time.strftime("%H:%M")
+        end_text = reservation.end_time.strftime("%H:%M")
+        when_text = f"{date_text}（{weekday}） {start_text}〜{end_text}"
     else:
         from .service_event import format_event_when
 

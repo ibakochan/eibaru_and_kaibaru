@@ -3287,6 +3287,8 @@ class ClubSerializer(serializers.ModelSerializer):
             "invoices",
             "trials_disabled",
             "visitor_reservations_disabled",
+            "visitor_booking_confirm",
+            "visitor_booking_auth",
 
             "member_reservations_disabled",
             "member_reservation_max_count",

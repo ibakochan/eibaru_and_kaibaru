@@ -122,6 +122,34 @@ class Club(models.Model):
 
     visitor_reservations_disabled = models.BooleanField(default=False, help_text="If enabled, visitor reservations are unavailable for all lessons.")
 
+    VISITOR_BOOKING_CONFIRM_CHOICES = [
+        ("email_link", "Email link"),
+        ("instant", "Instant"),
+    ]
+    visitor_booking_confirm = models.CharField(
+        max_length=20,
+        choices=VISITOR_BOOKING_CONFIRM_CHOICES,
+        default="email_link",
+        help_text=(
+            "How visitors finish salon, lesson, trial, and event bookings: "
+            "email start link, or confirm/checkout immediately in the form."
+        ),
+    )
+
+    VISITOR_BOOKING_AUTH_CHOICES = [
+        ("guest", "Guest OK"),
+        ("login_required", "Login required"),
+    ]
+    visitor_booking_auth = models.CharField(
+        max_length=20,
+        choices=VISITOR_BOOKING_AUTH_CHOICES,
+        default="guest",
+        help_text=(
+            "Whether visitors may book as guests, or must log in to a "
+            "Kaibaru account first."
+        ),
+    )
+
     member_reservations_disabled = models.BooleanField(default=False, help_text="If enabled, member reservations are unavailable for all lessons.")
 
     member_reservation_max_count = models.PositiveIntegerField(

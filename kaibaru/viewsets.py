@@ -4434,6 +4434,8 @@ class ClubViewSet(viewsets.ModelViewSet):
                 "stripe_anchor_date",
                 "trials_disabled",
                 "visitor_reservations_disabled",
+                "visitor_booking_confirm",
+                "visitor_booking_auth",
                 "member_reservations_disabled",
             }
             for field in owner_only:
@@ -5326,6 +5328,18 @@ class ClubViewSet(viewsets.ModelViewSet):
         if not club.stripe_account_id:
             payment_options = OPTION_CASH
 
+        from .visitor_booking import (
+            AUTH_CHOICES,
+            AUTH_GUEST,
+            CONFIRM_CHOICES,
+            CONFIRM_EMAIL_LINK,
+            visitor_booking_auth,
+            visitor_booking_confirm,
+        )
+
+        confirm_values = {key for key, _ in CONFIRM_CHOICES}
+        auth_values = {key for key, _ in AUTH_CHOICES}
+
         if request.method == "GET":
             return Response({
                 "service_slot_step_minutes": getattr(
@@ -5335,6 +5349,8 @@ class ClubViewSet(viewsets.ModelViewSet):
                 "service_allow_choose_worker": bool(
                     getattr(club, "service_allow_choose_worker", False)
                 ),
+                "visitor_booking_confirm": visitor_booking_confirm(club),
+                "visitor_booking_auth": visitor_booking_auth(club),
             })
         club, error = _staff_club(request, subdomain, "lessons")
         if error:
@@ -5388,6 +5404,28 @@ class ClubViewSet(viewsets.ModelViewSet):
                 club.service_allow_choose_worker = bool(raw)
             update_fields.append("service_allow_choose_worker")
 
+        if "visitor_booking_confirm" in request.data:
+            confirm = str(
+                request.data.get("visitor_booking_confirm") or ""
+            ).strip()
+            if confirm not in confirm_values:
+                return Response(
+                    {"detail": "予約の完了方法を選んでください。"},
+                    status=400,
+                )
+            club.visitor_booking_confirm = confirm or CONFIRM_EMAIL_LINK
+            update_fields.append("visitor_booking_confirm")
+
+        if "visitor_booking_auth" in request.data:
+            auth = str(request.data.get("visitor_booking_auth") or "").strip()
+            if auth not in auth_values:
+                return Response(
+                    {"detail": "予約時のログイン要件を選んでください。"},
+                    status=400,
+                )
+            club.visitor_booking_auth = auth or AUTH_GUEST
+            update_fields.append("visitor_booking_auth")
+
         if not update_fields:
             return Response(
                 {"detail": "保存する設定がありません。"},
@@ -5405,6 +5443,8 @@ class ClubViewSet(viewsets.ModelViewSet):
             "service_allow_choose_worker": bool(
                 club.service_allow_choose_worker
             ),
+            "visitor_booking_confirm": visitor_booking_confirm(club),
+            "visitor_booking_auth": visitor_booking_auth(club),
         })
 
     @action(
@@ -5418,7 +5458,10 @@ class ClubViewSet(viewsets.ModelViewSet):
         club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
         if not club:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
-        payload, message = create_service_reservation(club, request.data)
+        user = request.user if request.user.is_authenticated else None
+        payload, message = create_service_reservation(
+            club, request.data, user=user
+        )
         if message:
             return Response({"detail": message}, status=status.HTTP_400_BAD_REQUEST)
         return Response(payload, status=status.HTTP_201_CREATED)

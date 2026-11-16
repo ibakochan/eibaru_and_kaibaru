@@ -317,13 +317,13 @@ def _parse_hhmm(value):
         return None
 
 
-def create_service_reservation(club, payload):
-    """Email-gated service booking (same pattern as visitor/event)."""
+def create_service_reservation(club, payload, user=None):
+    """Visitor service booking (email link or instant finish)."""
     from .service_service_reservation import (
         create_service_reservation as _create,
     )
 
-    return _create(club, payload)
+    return _create(club, payload, user=user)
 
 
 def reservation_payload(reservation):

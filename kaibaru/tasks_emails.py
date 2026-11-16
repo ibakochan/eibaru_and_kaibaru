@@ -1975,13 +1975,20 @@ def send_event_reservation_confirmation_email(self, reservation_id):
     retry_kwargs={"max_retries": 5},
 )
 def send_reservation_canceled_email(self, kind, reservation_id):
-    from .models import EventReservation, Reservation
+    from .models import EventReservation, Reservation, ServiceReservation
     from .service_event import format_event_when
 
     if kind == "lesson":
         reservation = (
             Reservation.objects
             .select_related("club", "club__owner", "lesson")
+            .filter(id=reservation_id, canceled=True)
+            .first()
+        )
+    elif kind == "service":
+        reservation = (
+            ServiceReservation.objects
+            .select_related("club", "club__owner", "course")
             .filter(id=reservation_id, canceled=True)
             .first()
         )
@@ -2002,6 +2009,19 @@ def send_reservation_canceled_email(self, kind, reservation_id):
         title = reservation.lesson.title
         when_text = reservation.reservation_date.strftime("%Y年%m月%d日")
         label = "レッスン"
+    elif kind == "service":
+        from .service_service_reservation import WEEKDAY_NAMES
+
+        course = reservation.course
+        title = (
+            course.name if course is not None else (reservation.price_name or "コース")
+        )
+        weekday = WEEKDAY_NAMES[reservation.reservation_date.weekday()]
+        date_text = reservation.reservation_date.strftime("%Y年%m月%d日")
+        start_text = reservation.start_time.strftime("%H:%M")
+        end_text = reservation.end_time.strftime("%H:%M")
+        when_text = f"{date_text}（{weekday}） {start_text}〜{end_text}"
+        label = "コース"
     else:
         title = reservation.event.title
         when_text = format_event_when(reservation.event)
@@ -2233,6 +2253,8 @@ def send_service_reservation_confirmation_email(self, reservation_id):
         f"{payment_section}"
         f"■ ご予約番号\n"
         f"{reservation.id}\n\n"
+        f"予約をキャンセルする場合は、次のリンクを開いてください。\n"
+        f"{_cancel_link(club, 'service', reservation.id)}\n\n"
         f"当日はお気をつけてお越しください。\n"
         f"{club_name}"
     )

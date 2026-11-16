@@ -618,6 +618,12 @@ class EventReservationService:
         terms_accepted=False,
         payment_method="",
     ):
+        from .visitor_booking import (
+            assert_visitor_booking_auth,
+            create_result_from_begin,
+            is_instant_confirm,
+        )
+
         club = event.club
 
         if club.is_deleted:
@@ -627,6 +633,8 @@ class EventReservationService:
             raise ValueError(
                 "オーナーご自身が、ご自身のクラブに申し込む必要はありません。"
             )
+
+        assert_visitor_booking_auth(club, user)
 
         if not audience_allows(event, "visitor"):
             raise ValueError("このイベントは一般予約を受け付けていません。")
@@ -659,6 +667,7 @@ class EventReservationService:
         price_name = price.name
         method = _event_payment_method(club, event, payment_method, amount)
         reservation_key = visitor_reservation_key(event, email)
+        instant = is_instant_confirm(club)
 
         try:
             with transaction.atomic():
@@ -674,7 +683,8 @@ class EventReservationService:
                     terms_accepted=terms_accepted,
                     payment_method=payment_method,
                 )
-                _queue_start_email(token)
+                if not instant:
+                    _queue_start_email(token)
         except IntegrityError:
             existing = (
                 EventReservation.objects
@@ -682,13 +692,33 @@ class EventReservationService:
                 .first()
             )
             if existing and existing.start_token:
+                if instant:
+                    return _finish_event_visitor_instant(
+                        existing.start_token,
+                        existing.id,
+                    )
                 _queue_start_email(existing.start_token)
                 return _email_sent_result(existing)
             raise ValueError(
                 "このイベントの予約処理がすでに開始されています。"
             )
 
+        if instant:
+            return _finish_event_visitor_instant(token, reservation.id)
         return _email_sent_result(reservation)
+
+
+def _finish_event_visitor_instant(start_token, reservation_id):
+    from .visitor_booking import create_result_from_begin
+
+    try:
+        begin_result = EventStartService.begin(start_token)
+    except EventStartError as exc:
+        raise ValueError(exc.message) from exc
+    return create_result_from_begin(
+        begin_result=begin_result,
+        reservation_id=reservation_id,
+    )
 
 
 def _save_visitor_reservation(

@@ -8,6 +8,7 @@ from .models import (
     EventReservation,
     Pairing,
     Reservation,
+    ServiceReservation,
     TournamentTeamMember,
 )
 
@@ -90,7 +91,7 @@ def read_cancel_token(token):
         return None
 
     kind, separator, reservation_id = raw.partition(":")
-    if separator != ":" or kind not in {"lesson", "event"}:
+    if separator != ":" or kind not in {"lesson", "event", "service"}:
         return None
 
     try:
@@ -105,10 +106,17 @@ def read_cancel_token(token):
             .filter(id=reservation_id)
             .first()
         )
-    else:
+    elif kind == "event":
         reservation = (
             EventReservation.objects
             .select_related("club", "event")
+            .filter(id=reservation_id)
+            .first()
+        )
+    else:
+        reservation = (
+            ServiceReservation.objects
+            .select_related("club", "course", "worker")
             .filter(id=reservation_id)
             .first()
         )
@@ -168,4 +176,11 @@ def cancel_is_closed(kind, reservation):
     now = timezone.now()
     if kind == "lesson":
         return reservation.reservation_date < timezone.localdate()
+    if kind == "service":
+        today = timezone.localdate()
+        if reservation.reservation_date < today:
+            return True
+        if reservation.reservation_date > today:
+            return False
+        return reservation.start_time <= timezone.localtime().time()
     return reservation.event.starts_at <= now
