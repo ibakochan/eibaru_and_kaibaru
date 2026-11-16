@@ -73,12 +73,11 @@ def unpaid_hold_q(hold_cutoff):
 
 
 def open_course_reservations_q(today=None):
-    """Reservations that keep an inactive course visible on the public menu.
+    """Upcoming reservations still on the books for a course.
 
-    Open = still unsettled: not paid, not canceled, not no-show, not
-    soft-deleted, and on today or later. Once every reservation is paid /
-    canceled / no-show (or in the past), an inactive course can leave the
-    customer UI.
+    Used for owner archive notes. Inactive courses stay on the public menu
+    as closed regardless; this flag only explains whether anything is still
+    scheduled (paid or unpaid, not canceled / no-show / deleted).
     """
     today = today or timezone.localdate()
     return Q(
@@ -86,7 +85,7 @@ def open_course_reservations_q(today=None):
         is_deleted=False,
         no_show=False,
         reservation_date__gte=today,
-    ) & ~Q(status=ServiceReservation.Status.PAID)
+    )
 
 
 def course_has_open_reservations(course, today=None):

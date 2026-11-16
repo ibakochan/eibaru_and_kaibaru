@@ -5040,9 +5040,9 @@ class ClubViewSet(viewsets.ModelViewSet):
         if not club:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
         if request.method == "GET":
-            include_all = str(request.query_params.get("all", "")).lower() in (
-                "1", "true", "yes",
-            )
+            # Active + stopped. Stopped stay visible as 受付していません;
+            # booking endpoints still require active=True. ?all=1 is accepted
+            # for owners but returns the same rows (archive filters client-side).
             qs = ServiceCourse.objects.filter(club=club).annotate(
                 has_open_reservations=Exists(
                     ServiceReservation.objects.filter(
@@ -5051,10 +5051,6 @@ class ClubViewSet(viewsets.ModelViewSet):
                     )
                 )
             )
-            if not include_all:
-                # Active courses, plus inactive ones that still have open
-                # (unsettled) reservations so customers can see them as closed.
-                qs = qs.filter(Q(active=True) | Q(has_open_reservations=True))
             return Response([
                 course_payload(c, has_open=c.has_open_reservations)
                 for c in qs.order_by("position", "id")
