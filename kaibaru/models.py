@@ -130,7 +130,7 @@ class Club(models.Model):
     visitor_booking_confirm = models.CharField(
         max_length=20,
         choices=VISITOR_BOOKING_CONFIRM_CHOICES,
-        default="email_link",
+        default="instant",
         help_text=(
             "How visitors finish salon, lesson, trial, and event bookings: "
             "email start link, or confirm/checkout immediately in the form."

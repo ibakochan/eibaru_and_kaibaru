@@ -21,10 +21,10 @@ LOGIN_REQUIRED_MESSAGE = (
 
 
 def visitor_booking_confirm(club):
-    value = getattr(club, "visitor_booking_confirm", None) or CONFIRM_EMAIL_LINK
+    value = getattr(club, "visitor_booking_confirm", None) or CONFIRM_INSTANT
     if value in (CONFIRM_EMAIL_LINK, CONFIRM_INSTANT):
         return value
-    return CONFIRM_EMAIL_LINK
+    return CONFIRM_INSTANT
 
 
 def visitor_booking_auth(club):

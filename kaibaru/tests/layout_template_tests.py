@@ -211,7 +211,7 @@ class LayoutTemplateFileTests(SimpleTestCase):
         self.assertTrue(load_page_content("default")["sections"])
 
     def test_club_format_is_json_string(self):
-        value = page_content_for_club("yoga")
+        value = page_content_for_club("yoga", "both")
         self.assertIsInstance(value, str)
         self.assertEqual(json.loads(value), load_page_content("yoga"))
 
@@ -225,8 +225,22 @@ class LayoutTemplateFileTests(SimpleTestCase):
                 page = load_page_content(key)
                 self.assertEqual(apply_hero(page, "both"), page)
                 self.assertEqual(
-                    json.loads(page_content_for_club(key)), page
+                    json.loads(page_content_for_club(key, "both")), page
                 )
+
+    def test_page_content_for_club_defaults_to_slideshow(self):
+        for key in TEMPLATE_KEYS:
+            with self.subTest(layout=key):
+                page = json.loads(page_content_for_club(key))
+                types = [
+                    section["type"]
+                    for section in sorted(
+                        page["sections"].values(),
+                        key=lambda section: section["order"],
+                    )
+                ]
+                self.assertEqual(types[:2], ["header", "slideshow"])
+                self.assertNotIn("video", types)
 
     def test_hero_slideshow_drops_the_video(self):
         for key in TEMPLATE_KEYS:

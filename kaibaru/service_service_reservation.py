@@ -194,6 +194,9 @@ def create_service_reservation(club, payload, user=None):
     ):
         return None, "ご自身のサロンでは、予約をする必要はありません。"
 
+    if club.visitor_reservations_disabled:
+        return None, "このサロンでは現在、一般予約を受け付けていません。"
+
     try:
         course_id = int(payload.get("course_id"))
     except (TypeError, ValueError):
@@ -229,6 +232,16 @@ def create_service_reservation(club, payload, user=None):
         if _tmin(start) <= now_min:
             return None, "過去の時刻には予約できません。"
 
+    from .rules_reservations import assert_reservation_horizon
+
+    try:
+        assert_reservation_horizon(
+            reservation_date=day,
+            max_days_ahead=club.visitor_reservation_max_days_ahead,
+        )
+    except ValueError as exc:
+        return None, str(exc)
+
     section_id = payload.get("section_id")
     try:
         section_id = int(section_id) if section_id not in (None, "") else None
@@ -248,6 +261,23 @@ def create_service_reservation(club, payload, user=None):
         return None, "お名前を入力してください。"
     if not email:
         return None, "メールアドレスを入力してください。"
+
+    max_count = club.visitor_reservation_max_count
+    if max_count is not None:
+        held = (
+            ServiceReservation.objects.filter(
+                club=club,
+                course=course,
+                email=email,
+            )
+            .filter(holding_reservations_q())
+            .count()
+        )
+        if held >= max_count:
+            return None, (
+                f"このコースの一般予約は{max_count}件までです。"
+                "上限に達しています。"
+            )
 
     amount = int(course.amount or 0)
     option = clean_payment_option(

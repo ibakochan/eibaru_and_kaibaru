@@ -214,7 +214,7 @@ def apply_hero(page_content, hero):
     return page
 
 
-def page_content_for_club(layout, hero=HERO_BOTH):
+def page_content_for_club(layout, hero=HERO_SLIDESHOW):
     """Return page_content in the format stored on Club.page_content.
 
     The site editor stores the document as a JSON *string* inside the

@@ -46,7 +46,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from .user_errors import format_validation_error
 from .layout_templates import (
-    HERO_BOTH,
+    HERO_SLIDESHOW,
     apply_hero,
     clean_sticky_nav,
     is_hero_choice,
@@ -5332,7 +5332,7 @@ class ClubViewSet(viewsets.ModelViewSet):
             AUTH_CHOICES,
             AUTH_GUEST,
             CONFIRM_CHOICES,
-            CONFIRM_EMAIL_LINK,
+            CONFIRM_INSTANT,
             visitor_booking_auth,
             visitor_booking_confirm,
         )
@@ -5413,7 +5413,7 @@ class ClubViewSet(viewsets.ModelViewSet):
                     {"detail": "予約の完了方法を選んでください。"},
                     status=400,
                 )
-            club.visitor_booking_confirm = confirm or CONFIRM_EMAIL_LINK
+            club.visitor_booking_confirm = confirm or CONFIRM_INSTANT
             update_fields.append("visitor_booking_confirm")
 
         if "visitor_booking_auth" in request.data:
@@ -5855,8 +5855,8 @@ class ClubViewSet(viewsets.ModelViewSet):
         # missing keeps the old behaviour (empty site, default layout).
         template = request.data.get("template") or ""
         # "hero" picks what opens the page: "slideshow" (pictures), "video",
-        # or "both" (the default, as every template ships).
-        hero = request.data.get("hero") or HERO_BOTH
+        # or "both". Default is picture slides only.
+        hero = request.data.get("hero") or HERO_SLIDESHOW
         extra = {}
         if template:
             if not is_template_key(template):
@@ -5899,7 +5899,7 @@ class ClubViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        hero = request.data.get("hero") or HERO_BOTH
+        hero = request.data.get("hero") or HERO_SLIDESHOW
         if not is_hero_choice(hero):
             return Response(
                 {"error": "ページの最初に置くものが正しくありません。"},
