@@ -3362,11 +3362,6 @@ class TeacherInvoice(models.Model):
         return f"{self.club_id} {self.instructor_id} {self.year}-{self.month}"
 
 
-def default_teacher_invoice_lesson_session_key():
-    """Unique placeholder for new / backfilled hand-written lines."""
-    return f"m-{uuid.uuid4().hex}"
-
-
 class TeacherInvoiceLesson(models.Model):
     """One class on a teacher statement, and how many times it was taught.
 
@@ -3405,7 +3400,6 @@ class TeacherInvoiceLesson(models.Model):
     )
     session_key = models.CharField(
         max_length=64,
-        default=default_teacher_invoice_lesson_session_key,
         help_text=(
             "Idempotency key within one invoice. "
             "Dated: lesson_id:YYYY-MM-DD. Hand-written: m-<uuid>."
