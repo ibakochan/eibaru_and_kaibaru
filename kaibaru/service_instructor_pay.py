@@ -219,6 +219,8 @@ def _replace_lines(invoice, parsed):
             lesson=lesson,
             lesson_title=title,
             times_taught=times,
+            # Hand-written / aggregate lines: unique per row on MySQL.
+            session_key=TeacherInvoiceLesson.make_session_key(None, None),
         )
         for lesson, times, title in parsed
     ])

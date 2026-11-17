@@ -4,6 +4,7 @@ from django.utils import timezone
 from .storage_backends import PrivateMediaStorage
 import datetime
 import hashlib
+import uuid
 
 from django.core.exceptions import ValidationError
 from django.db.models import Q
@@ -3361,12 +3362,21 @@ class TeacherInvoice(models.Model):
         return f"{self.club_id} {self.instructor_id} {self.year}-{self.month}"
 
 
+def default_teacher_invoice_lesson_session_key():
+    """Unique placeholder for new / backfilled hand-written lines."""
+    return f"m-{uuid.uuid4().hex}"
+
+
 class TeacherInvoiceLesson(models.Model):
     """One class on a teacher statement, and how many times it was taught.
 
     occurrence_date + fee_yen are set when a dated session is applied from
     the instructor lesson fee flow. Older hand-written lines may leave them
     empty and only use times_taught.
+
+    session_key makes dated lesson/day lines unique on MySQL (no partial
+    indexes). Dated rows use "{lesson_id}:{YYYY-MM-DD}". Hand-written rows
+    get a one-off "m-…" key so several NULL-date lines can coexist.
     """
 
     invoice = models.ForeignKey(
@@ -3393,15 +3403,33 @@ class TeacherInvoiceLesson(models.Model):
         blank=True,
         help_text="Yen for this dated session. Empty on hand-written aggregate lines.",
     )
+    session_key = models.CharField(
+        max_length=64,
+        default=default_teacher_invoice_lesson_session_key,
+        help_text=(
+            "Idempotency key within one invoice. "
+            "Dated: lesson_id:YYYY-MM-DD. Hand-written: m-<uuid>."
+        ),
+    )
 
     class Meta:
         constraints = [
+            # Plain unique works on MySQL. Partial condition= does not.
             models.UniqueConstraint(
-                fields=["invoice", "lesson", "occurrence_date"],
-                condition=Q(occurrence_date__isnull=False, lesson__isnull=False),
-                name="unique_invoice_lesson_occurrence",
+                fields=["invoice", "session_key"],
+                name="unique_teacher_invoice_session_key",
             ),
         ]
+
+    @staticmethod
+    def make_session_key(lesson_id, occurrence_date):
+        if lesson_id and occurrence_date:
+            if hasattr(occurrence_date, "isoformat"):
+                day = occurrence_date.isoformat()
+            else:
+                day = str(occurrence_date)[:10]
+            return f"{int(lesson_id)}:{day}"
+        return f"m-{uuid.uuid4().hex}"
 
     def clean(self):
         super().clean()
@@ -3413,6 +3441,12 @@ class TeacherInvoiceLesson(models.Model):
     def save(self, *args, **kwargs):
         if self.lesson_id and not self.lesson_title:
             self.lesson_title = self.lesson.title
+        if self.lesson_id and self.occurrence_date:
+            self.session_key = self.make_session_key(
+                self.lesson_id, self.occurrence_date
+            )
+        elif not self.session_key:
+            self.session_key = self.make_session_key(None, None)
         super().save(*args, **kwargs)
 
     def __str__(self):

@@ -247,12 +247,18 @@ def apply_sessions(club, instructor, payload, actor=None):
         for row in selected:
             day = date.fromisoformat(row["date"])
             lesson = Lesson.objects.filter(club=club, id=row["lesson_id"]).first()
+            session_key = TeacherInvoiceLesson.make_session_key(
+                row["lesson_id"], day
+            )
             TeacherInvoiceLesson.objects.update_or_create(
                 invoice=invoice,
-                lesson=lesson,
-                occurrence_date=day,
+                session_key=session_key,
                 defaults={
-                    "lesson_title": row["lesson_title"] or (lesson.title if lesson else ""),
+                    "lesson": lesson,
+                    "lesson_title": row["lesson_title"] or (
+                        lesson.title if lesson else ""
+                    ),
+                    "occurrence_date": day,
                     "times_taught": 1,
                     "fee_yen": int(row["fee_yen"]),
                 },
