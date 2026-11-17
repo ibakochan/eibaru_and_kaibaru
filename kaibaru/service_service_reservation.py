@@ -187,6 +187,13 @@ def create_service_reservation(club, payload, user=None):
     except ValueError as exc:
         return None, str(exc)
 
+    if (
+        user is not None
+        and getattr(user, "is_authenticated", False)
+        and club.owner_id == getattr(user, "id", None)
+    ):
+        return None, "ご自身のサロンでは、予約をする必要はありません。"
+
     try:
         course_id = int(payload.get("course_id"))
     except (TypeError, ValueError):
