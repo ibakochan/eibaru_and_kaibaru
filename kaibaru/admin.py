@@ -308,3 +308,13 @@ admin.site.register(WorkerTimeOff)
 admin.site.register(WorkerPay)
 admin.site.register(WorkerInvoice)
 admin.site.register(ServiceReservation)
+
+from .models import TodoChecklist
+
+
+@admin.register(TodoChecklist)
+class TodoChecklistAdmin(admin.ModelAdmin):
+    list_display = ("id", "user", "updated_at", "created_at")
+    search_fields = ("user__email", "user__username")
+    raw_id_fields = ("user",)
+    readonly_fields = ("created_at", "updated_at")

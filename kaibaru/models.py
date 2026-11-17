@@ -3888,3 +3888,23 @@ class ServiceReservation(models.Model):
             f"{self.full_name} - {self.course_id} - "
             f"{self.reservation_date} {self.start_time}"
         )
+
+
+class TodoChecklist(models.Model):
+    """Personal QA checklist progress for a logged-in user."""
+
+    user = models.OneToOneField(
+        CustomUser,
+        on_delete=models.CASCADE,
+        related_name="todo_checklist",
+    )
+    checked = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Todo checklist"
+        verbose_name_plural = "Todo checklists"
+
+    def __str__(self):
+        return f"TodoChecklist({self.user_id})"

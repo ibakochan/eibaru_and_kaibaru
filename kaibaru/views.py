@@ -333,3 +333,44 @@ def bulk_mark_cash_invoices_paid(request):
 
     return JsonResponse(result)
 
+
+@login_required
+@require_http_methods(["GET", "PUT", "PATCH"])
+def todo_checklist(request):
+    from .models import TodoChecklist
+
+    row, _ = TodoChecklist.objects.get_or_create(user=request.user)
+    if request.method == "GET":
+        return JsonResponse(
+            {
+                "checked": row.checked if isinstance(row.checked, dict) else {},
+                "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+            }
+        )
+
+    try:
+        data = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "無効なリクエストです。"}, status=400)
+
+    checked = data.get("checked")
+    if not isinstance(checked, dict):
+        return JsonResponse({"error": "checked must be an object."}, status=400)
+
+    cleaned = {}
+    for key, value in checked.items():
+        if not isinstance(key, str):
+            continue
+        if len(key) > 200:
+            continue
+        cleaned[key] = bool(value)
+
+    row.checked = cleaned
+    row.save(update_fields=["checked", "updated_at"])
+    return JsonResponse(
+        {
+            "checked": row.checked,
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        }
+    )
+

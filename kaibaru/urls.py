@@ -142,4 +142,9 @@ urlpatterns = [
         views.apply_cash_reservation_action,
         name='apply_cash_reservation_action',
     ),
+    path(
+        'todo_checklist/',
+        views.todo_checklist,
+        name='todo_checklist',
+    ),
 ]
