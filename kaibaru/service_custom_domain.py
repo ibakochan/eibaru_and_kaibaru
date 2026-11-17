@@ -7,8 +7,6 @@ import uuid
 import stripe
 from django.conf import settings
 from django.core.cache import cache
-from django.core.mail import EmailMessage
-
 from .models import Club, PlatformClub, PlatformSubscription
 from .service_platform_subscription import (
     PlatformBusy,
@@ -183,29 +181,25 @@ def issue_custom_certificate(domain):
         )
 
 
-def _notify_domain_ready(club):
-    owner = getattr(club, "owner", None)
-    email = (getattr(owner, "email", "") or "").strip()
-    if not email:
-        return
-    club_name = club.title or club.subdomain or "クラブ"
+def _notify_domain_ready(club, platform_sub=None):
+    """Tell the owner the domain is live, with any day-rate fee for 次回請求."""
+    from .service_platform_subscription import pending_platform_prorations
+    from .tasks_emails import send_platform_domain_added_email
+
     domain = club.custom_domain
-    try:
-        EmailMessage(
-            subject=f"【{club_name}】独自ドメインの準備ができました",
-            body=(
-                f"{domain} を{club_name}のアドレスとして公開しました。\n\n"
-                f"https://{domain}\n"
-            ),
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            to=[email],
-        ).send()
-    except Exception:
-        logger.exception(
-            "custom domain ready email failed club=%s domain=%s",
-            club.pk,
-            domain,
-        )
+    prorated_yen = 0
+    if platform_sub is not None:
+        try:
+            prorations = pending_platform_prorations(platform_sub)
+            prorated_yen = int(prorations.get("prorated_domains_yen") or 0)
+            if prorated_yen <= 0:
+                prorated_yen = int(prorations.get("prorated_yen") or 0)
+        except Exception:
+            logger.exception(
+                "custom domain proration preview failed club=%s",
+                club.pk,
+            )
+    send_platform_domain_added_email.delay(club.pk, domain, prorated_yen)
 
 
 def domain_fee_quantities(count):
@@ -380,5 +374,5 @@ def publish_domain(club):
     club.custom_domain_status = "active"
     club.scheduled_for_domain_cert = False
     club.save(update_fields=["custom_domain_status", "scheduled_for_domain_cert"])
-    _notify_domain_ready(club)
+    _notify_domain_ready(club, platform_sub=platform_sub)
     return domain

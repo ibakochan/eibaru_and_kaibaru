@@ -409,7 +409,13 @@ def send_platform_cycle_paid_email(self, platform_subscription_id, invoice_id):
 def send_subscription_activated_emails(self, club_id, invoice_id):
     club = Club.objects.select_related("owner").get(id=club_id)
     owner = club.owner
- 
+    if not owner or not owner.email:
+        logger.warning(
+            "[EMAIL] Subscription activated skipped, no owner email club=%s",
+            club_id,
+        )
+        return
+
     send_mail(
         subject=f"[Kaibaru] Subscription activated ({club.subdomain})",
         message=(
@@ -421,14 +427,116 @@ def send_subscription_activated_emails(self, club_id, invoice_id):
         from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=[settings.SERVER_EMAIL],
     )
- 
+
     send_mail(
         subject="【Kaibaru】ご利用プランの有効化が完了しました",
         message=(
-            f"{owner.get_full_name()} 様\n\n"
+            f"{owner.get_full_name() or owner.email} 様\n\n"
             f"Kaibaru をご利用いただきありがとうございます。\n"
             f"クラブ「{club.subdomain}」のご利用プランが有効になりました。\n\n"
+            f"次回以降の請求内容は、クラブページの「次回請求」から確認できます。\n\n"
             f"今後も Kaibaru をよろしくお願いいたします。\n\n"
+            f"Kaibaru 運営チーム"
+        ),
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[owner.email],
+    )
+
+
+@shared_task(
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=60,
+    retry_kwargs={"max_retries": 5},
+)
+def send_platform_club_added_email(self, club_id, prorated_yen=0):
+    club = Club.objects.select_related("owner").filter(id=club_id).first()
+    if not club or not club.owner_id:
+        return
+    owner = club.owner
+    if not owner.email:
+        logger.warning(
+            "[EMAIL] Platform club added skipped, no owner email club=%s",
+            club_id,
+        )
+        return
+
+    try:
+        prorated_yen = max(0, int(prorated_yen or 0))
+    except (TypeError, ValueError):
+        prorated_yen = 0
+
+    club_name = club.title or club.subdomain
+    owner_name = owner.get_full_name() or owner.email
+    if prorated_yen > 0:
+        fee_line = (
+            f"今回の追加に伴う日割り料金は ¥{prorated_yen:,} です。"
+            f"次回の請求に加算されます。\n"
+        )
+    else:
+        fee_line = (
+            "今回の追加について、いま請求に載る日割り料金はありません。\n"
+        )
+
+    send_mail(
+        subject=f"【Kaibaru】クラブ「{club.subdomain}」を契約に追加しました",
+        message=(
+            f"{owner_name} 様\n\n"
+            f"クラブ「{club_name}」（{club.subdomain}）を"
+            f"Kaibaru の契約に追加しました。\n\n"
+            f"{fee_line}"
+            f"更新後の次回請求額は、クラブページの「次回請求」から確認できます。\n\n"
+            f"Kaibaru 運営チーム"
+        ),
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[owner.email],
+    )
+
+
+@shared_task(
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=60,
+    retry_kwargs={"max_retries": 5},
+)
+def send_platform_domain_added_email(self, club_id, domain, prorated_yen=0):
+    club = Club.objects.select_related("owner").filter(id=club_id).first()
+    if not club or not club.owner_id:
+        return
+    owner = club.owner
+    if not owner.email:
+        logger.warning(
+            "[EMAIL] Platform domain added skipped, no owner email club=%s",
+            club_id,
+        )
+        return
+
+    try:
+        prorated_yen = max(0, int(prorated_yen or 0))
+    except (TypeError, ValueError):
+        prorated_yen = 0
+
+    domain = (domain or club.custom_domain or "").strip()
+    club_name = club.title or club.subdomain
+    owner_name = owner.get_full_name() or owner.email
+    if prorated_yen > 0:
+        fee_line = (
+            f"独自ドメイン追加に伴う日割り料金は ¥{prorated_yen:,} です。"
+            f"次回の請求に加算されます。\n"
+        )
+    else:
+        fee_line = (
+            "今回のドメイン追加について、いま請求に載る日割り料金はありません。\n"
+        )
+
+    send_mail(
+        subject=f"【{club_name}】独自ドメインの準備ができました",
+        message=(
+            f"{owner_name} 様\n\n"
+            f"{domain} を{club_name}のアドレスとして公開しました。\n\n"
+            f"https://{domain}\n\n"
+            f"{fee_line}"
+            f"更新後の次回請求額は、クラブページの「次回請求」から確認できます。\n\n"
             f"Kaibaru 運営チーム"
         ),
         from_email=settings.DEFAULT_FROM_EMAIL,

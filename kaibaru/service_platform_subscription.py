@@ -31,6 +31,7 @@ from .models import (
 from .service_connected_account import mirror_connected_account
 from .tasks_emails import (
     send_club_deleted_emails,
+    send_platform_club_added_email,
     send_platform_cycle_paid_email,
     send_subscription_activated_emails,
 )
@@ -1097,6 +1098,7 @@ def _apply_stripe(mutation):
             if stripe_sub.get("cancel_at_period_end"):
                 _set_cancel_flag(platform_sub, mutation, False)
             _apply_quantities(platform_sub, mutation)
+            _notify_extra_club_added(platform_sub, mutation.club_id)
         return
 
     if mutation.type == ClubSubscriptionMutation.MutationType.CANCEL_SUBSCRIPTION:
@@ -1612,6 +1614,7 @@ def _checkout_completed_locked(session):
             club=club,
             defaults={"platform_subscription": platform_sub},
         )
+        was_awaiting = bool(link.awaiting_checkout) or _created
         link.awaiting_checkout = False
         link.pending_removal = False
         link.removal_kind = ""
@@ -1626,6 +1629,10 @@ def _checkout_completed_locked(session):
         )
         _mirror_club(club, platform_sub, canceling=False)
         mirror_connected_account(platform_sub, clubs=[club])
+        # First Checkout only. Replays (already activated) skip the mail.
+        if was_awaiting:
+            invoice_id = session.get("invoice") or ""
+            send_subscription_activated_emails.delay(club.id, invoice_id)
 
     mutation_id = metadata.get("mutation_id")
     if mutation_id:
@@ -1638,6 +1645,18 @@ def _checkout_completed_locked(session):
             local_state_applied=True,
             processed_at=timezone.now(),
         )
+
+
+def _notify_extra_club_added(platform_sub, club_id):
+    """Email when an extra club is quantity-added (not first Checkout)."""
+    if not club_id:
+        return
+    platform_sub.refresh_from_db()
+    prorations = pending_platform_prorations(platform_sub)
+    prorated_yen = int(prorations.get("prorated_clubs_yen") or 0)
+    if prorated_yen <= 0:
+        prorated_yen = int(prorations.get("prorated_yen") or 0)
+    send_platform_club_added_email.delay(club_id, prorated_yen)
 
 
 def handle_invoice_paid(invoice):
@@ -1668,7 +1687,6 @@ def _invoice_paid_locked(platform_sub, invoice):
     if invoice.get("billing_reason") == "subscription_cycle":
         _delete_clubs_on_renewal(platform_sub)
 
-    remaining = None
     for link, club in _links(platform_sub):
         if link.awaiting_checkout or club.is_deleted:
             continue
@@ -1676,12 +1694,11 @@ def _invoice_paid_locked(platform_sub, invoice):
         _mirror_club(club, platform_sub, canceling=canceling)
         club.last_paid_invoice_id = invoice["id"]
         club.save(update_fields=["last_paid_invoice_id"])
-        if remaining is None and not link.pending_removal:
-            remaining = club
+    # Initial activate mail is sent from checkout.session.completed.
+    # Extra-club / domain mails are sent from those mutation paths.
+    # Renewals only use the cycle receipt here.
     if invoice.get("billing_reason") == "subscription_cycle":
         send_platform_cycle_paid_email.delay(platform_sub.id, invoice["id"])
-    elif remaining:
-        send_subscription_activated_emails.delay(remaining.id, invoice["id"])
 
 
 def _delete_clubs_on_renewal(platform_sub):
