@@ -543,16 +543,10 @@ def worker_deletion_summary(member):
     if member.picture:
         lost.append("プロフィール写真")
 
-    keep_member = bool(
-        member.user_id
-        and member.club_id
-        and member.user_id == member.club.owner_id
-    ) or bool(member.is_instructor or member.is_manager)
-
     return {
         "worker_id": member.id,
         "full_name": member.full_name,
-        "mode": "demote" if keep_member else "hard_delete",
+        "mode": "hard_delete",
         "lost": lost,
         "counts": {
             "availability": avail_count,
@@ -565,16 +559,12 @@ def worker_deletion_summary(member):
         "fee_note": (
             "このワーカー分として支払済みのプラットフォーム料金（月額¥500・日割り含む）は返金されません。"
         ),
-        "delete_note": (
-            "代表アカウントの会員情報は残し、ワーカー設定だけ外します。"
-            if keep_member
-            else "会員レコードを完全に削除します。元に戻せません。"
-        ),
+        "delete_note": "会員レコードを完全に削除します。元に戻せません。",
     }
 
 
 def remove_owner_worker(club, actor, member):
-    """Hard-delete a managed worker, or demote the owner's own member."""
+    """Hard-delete a managed worker Member (including owner-as-worker)."""
     if not actor or club.owner_id != actor.id:
         return None, "クラブのオーナーだけがワーカーを削除できます。"
     if member.club_id != club.id or not member.is_worker:
@@ -589,11 +579,7 @@ def remove_owner_worker(club, actor, member):
         WorkerTimeOff.objects.filter(worker=member).delete()
         WorkerPay.objects.filter(worker=member).delete()
         WorkerProfile.objects.filter(worker=member).delete()
-        if summary["mode"] == "demote":
-            member.is_worker = False
-            member.save(update_fields=["is_worker"])
-        else:
-            member.delete()
+        member.delete()
     sync_worker_quantity(club)
     return {"ok": True, "mode": summary["mode"], "summary": summary}, None
 
