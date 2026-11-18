@@ -270,58 +270,114 @@ def lesson_catalog_payload(lesson):
     }
 
 
+def _parse_apply_course_ids(raw):
+    """Return 'all', a list of course ids, or None when the field is omitted."""
+    if raw is None or raw == "":
+        return None
+    if raw == "all":
+        return "all"
+    if not isinstance(raw, (list, tuple)):
+        raise ValueError("付けるコースの指定が正しくありません。")
+    ids = []
+    seen = set()
+    for item in raw:
+        if item in (None, ""):
+            continue
+        try:
+            course_id = int(item)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("付けるコースの指定が正しくありません。") from exc
+        if course_id in seen:
+            continue
+        seen.add(course_id)
+        ids.append(course_id)
+    return ids
+
+
+def _apply_addon_to_courses(club, addon, apply):
+    from .models import ServiceCourse
+
+    if apply == "all":
+        courses = list(ServiceCourse.objects.filter(club=club))
+    else:
+        courses = list(
+            ServiceCourse.objects.filter(club=club, id__in=apply).order_by("id")
+        )
+        if len(courses) != len(set(apply)):
+            raise ValueError("選べないコースが含まれています。")
+    for course in courses:
+        course.addons.add(addon)
+
+
 def sync_club_catalog(club, payload):
+    from django.db import transaction
+
     addon_rows = _rows(payload, "addons")
     price_rows = _rows(payload, "prices")
-    existing_addons = {
-        addon.id: addon
-        for addon in ReservationAddon.objects.filter(club=club, lesson__isnull=True)
-    }
-    kept_addons = []
-    keys = {}
-    for index, row in enumerate(addon_rows):
-        if not isinstance(row, dict):
-            raise ValueError("料金の形式が正しくありません。")
-        if not str(row.get("name") or "").strip():
-            continue
-        addon = _take_existing(existing_addons, row.get("id"))
-        if addon is None:
-            addon = ReservationAddon(club=club)
-        addon.lesson = None
-        addon.name = _name(row.get("name"), "追加メニュー")
-        addon.amount = _yen(row.get("amount"))
-        addon.position = index
-        addon.save()
-        kept_addons.append(addon.id)
-        _remember_key(keys, row, addon.id)
-    ReservationAddon.objects.filter(club=club, lesson__isnull=True).exclude(
-        id__in=kept_addons
-    ).delete()
 
-    existing_prices = {
-        price.id: price
-        for price in ReservationPrice.objects.filter(club=club, lesson__isnull=True)
-    }
-    kept_prices = []
-    for index, row in enumerate(price_rows):
-        if not isinstance(row, dict):
-            raise ValueError("料金の形式が正しくありません。")
-        if not str(row.get("name") or "").strip():
-            continue
-        price = _take_existing(existing_prices, row.get("id"))
-        if price is None:
-            price = ReservationPrice(club=club)
-        price.lesson = None
-        price.name = _name(row.get("name"), "料金")
-        price.amount = _yen(row.get("amount"))
-        price.audience = _audience(row.get("audience"))
-        price.position = index
-        price.save()
-        price.addons.set(_keys_to_ids(row.get("addon_keys"), keys))
-        kept_prices.append(price.id)
-    ReservationPrice.objects.filter(club=club, lesson__isnull=True).exclude(
-        id__in=kept_prices
-    ).delete()
+    with transaction.atomic():
+        existing_addons = {
+            addon.id: addon
+            for addon in ReservationAddon.objects.filter(
+                club=club, lesson__isnull=True
+            )
+        }
+        kept_addons = []
+        keys = {}
+        pending_applies = []
+        for index, row in enumerate(addon_rows):
+            if not isinstance(row, dict):
+                raise ValueError("料金の形式が正しくありません。")
+            if not str(row.get("name") or "").strip():
+                continue
+            addon = _take_existing(existing_addons, row.get("id"))
+            is_new = addon is None
+            if is_new:
+                addon = ReservationAddon(club=club)
+            addon.lesson = None
+            addon.name = _name(row.get("name"), "追加メニュー")
+            addon.amount = _yen(row.get("amount"))
+            addon.position = index
+            addon.save()
+            kept_addons.append(addon.id)
+            _remember_key(keys, row, addon.id)
+            if is_new:
+                apply = _parse_apply_course_ids(row.get("apply_course_ids"))
+                if apply is not None:
+                    pending_applies.append((addon, apply))
+        ReservationAddon.objects.filter(club=club, lesson__isnull=True).exclude(
+            id__in=kept_addons
+        ).delete()
+
+        existing_prices = {
+            price.id: price
+            for price in ReservationPrice.objects.filter(
+                club=club, lesson__isnull=True
+            )
+        }
+        kept_prices = []
+        for index, row in enumerate(price_rows):
+            if not isinstance(row, dict):
+                raise ValueError("料金の形式が正しくありません。")
+            if not str(row.get("name") or "").strip():
+                continue
+            price = _take_existing(existing_prices, row.get("id"))
+            if price is None:
+                price = ReservationPrice(club=club)
+            price.lesson = None
+            price.name = _name(row.get("name"), "料金")
+            price.amount = _yen(row.get("amount"))
+            price.audience = _audience(row.get("audience"))
+            price.position = index
+            price.save()
+            price.addons.set(_keys_to_ids(row.get("addon_keys"), keys))
+            kept_prices.append(price.id)
+        ReservationPrice.objects.filter(club=club, lesson__isnull=True).exclude(
+            id__in=kept_prices
+        ).delete()
+
+        for addon, apply in pending_applies:
+            _apply_addon_to_courses(club, addon, apply)
 
 
 def sync_lesson_catalog(lesson, payload):
