@@ -5747,6 +5747,45 @@ class ClubViewSet(viewsets.ModelViewSet):
 
     @action(
         detail=False,
+        methods=["get"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/service-reservation-history",
+    )
+    def service_reservation_history(self, request, subdomain=None):
+        from .service_reservation_history import (
+            can_view_service_reservation_history,
+            service_reservation_history_index,
+            service_reservation_history_month,
+        )
+
+        club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
+        if not club:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        if not can_view_service_reservation_history(request.user, club):
+            return Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
+
+        year = request.query_params.get("year")
+        month = request.query_params.get("month")
+        if not year and not month:
+            return Response({"months": service_reservation_history_index(club)})
+        try:
+            year_n = int(year)
+            month_n = int(month)
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "year と month が必要です。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if month_n < 1 or month_n > 12:
+            return Response(
+                {"detail": "month が不正です。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(
+            service_reservation_history_month(club, year_n, month_n)
+        )
+
+    @action(
+        detail=False,
         methods=["get", "post"],
         url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/workers",
     )
