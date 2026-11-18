@@ -121,6 +121,7 @@ def reservation_payload(reservation, user, *, actor=None):
         "end_time": reservation.end_time.strftime("%H:%M"),
         "course_id": reservation.course_id,
         "course_name": course.name if course else reservation.price_name,
+        "price_name": reservation.price_name or "",
         "worker_id": reservation.worker_id,
         "worker_name": worker.full_name if worker else "",
         "amount": reservation.amount or 0,
