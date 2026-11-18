@@ -5111,17 +5111,21 @@ class ClubViewSet(viewsets.ModelViewSet):
         club, error = _staff_club(request, subdomain, "lessons")
         if error:
             return error
+        name = (request.data.get("name") or "").strip()
+        if not name:
+            return Response({"detail": "コース名を入力してください。"}, status=400)
+        if request.data.get("duration_minutes") in (None, ""):
+            return Response({"detail": "所要分を入力してください。"}, status=400)
+        if request.data.get("amount") in (None, ""):
+            return Response({"detail": "料金を入力してください。"}, status=400)
         try:
             duration = int(request.data.get("duration_minutes"))
-            amount = int(request.data.get("amount") or 0)
+            amount = int(request.data.get("amount"))
         except (TypeError, ValueError):
             return Response(
                 {"detail": "所要時間と料金を正しく入力してください。"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        name = (request.data.get("name") or "").strip()
-        if not name:
-            return Response({"detail": "コース名を入力してください。"}, status=400)
         if duration < 1:
             return Response({"detail": "所要時間は1分以上にしてください。"}, status=400)
         try:
@@ -5241,8 +5245,10 @@ class ClubViewSet(viewsets.ModelViewSet):
                 return Response({"detail": "所要時間は1分以上にしてください。"}, status=400)
             course.duration_minutes = duration
         if "amount" in request.data:
+            if request.data.get("amount") in (None, ""):
+                return Response({"detail": "料金を入力してください。"}, status=400)
             try:
-                course.amount = max(0, int(request.data.get("amount") or 0))
+                course.amount = max(0, int(request.data.get("amount")))
             except (TypeError, ValueError):
                 return Response({"detail": "料金を正しく入力してください。"}, status=400)
         if "description" in request.data:

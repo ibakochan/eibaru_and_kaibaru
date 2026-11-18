@@ -328,15 +328,21 @@ def sync_club_catalog(club, payload):
         for index, row in enumerate(addon_rows):
             if not isinstance(row, dict):
                 raise ValueError("料金の形式が正しくありません。")
-            if not str(row.get("name") or "").strip():
+            name = str(row.get("name") or "").strip()
+            amount_raw = row.get("amount")
+            if not name and amount_raw in (None, ""):
                 continue
+            if not name:
+                raise ValueError("追加メニューの名前を入力してください。")
+            if amount_raw in (None, ""):
+                raise ValueError(f"「{name}」：料金を入力してください。")
             addon = _take_existing(existing_addons, row.get("id"))
             is_new = addon is None
             if is_new:
                 addon = ReservationAddon(club=club)
             addon.lesson = None
-            addon.name = _name(row.get("name"), "追加メニュー")
-            addon.amount = _yen(row.get("amount"))
+            addon.name = _name(name, "追加メニュー")
+            addon.amount = _yen(amount_raw)
             addon.position = index
             addon.save()
             kept_addons.append(addon.id)
