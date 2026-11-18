@@ -7,6 +7,8 @@ handled here — cancel only frees the slot.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -324,3 +326,52 @@ def _run_service_cash_action(reservation, action):
         return
 
     raise CashReservationError("この操作は利用できません。", 404)
+
+
+def mark_stale_open_service_reservations_paid(now=None):
+    """Mark confirmed salon bookings paid once their start was a full day ago.
+
+    Open means confirmed, not canceled, not a no-show, and not yet paid.
+    Ticket and free bookings already count as paid, so they are left alone.
+    paid_at is set the same way as 受領済み. The platform fee is not applied here.
+    """
+    now = now or timezone.now()
+    if timezone.is_naive(now):
+        now = timezone.make_aware(now, timezone.get_current_timezone())
+    cutoff = now - timedelta(days=1)
+    cutoff_local = timezone.localtime(cutoff)
+    tz = timezone.get_current_timezone()
+
+    candidates = (
+        ServiceReservation.objects.filter(
+            is_deleted=False,
+            status=ServiceReservation.Status.PAID,
+            canceled=False,
+            no_show=False,
+            paid_at__isnull=True,
+            refunded_at__isnull=True,
+            amount__gt=0,
+            reservation_date__lte=cutoff_local.date(),
+        )
+        .exclude(payment_method=ServiceReservation.PaymentMethod.TICKET)
+        .only("id", "reservation_date", "start_time")
+    )
+
+    ids = []
+    for reservation in candidates.iterator():
+        start = timezone.make_aware(
+            datetime.combine(reservation.reservation_date, reservation.start_time),
+            tz,
+        )
+        if start <= cutoff:
+            ids.append(reservation.id)
+
+    updated = 0
+    for offset in range(0, len(ids), 500):
+        updated += ServiceReservation.objects.filter(
+            id__in=ids[offset:offset + 500],
+            paid_at__isnull=True,
+            canceled=False,
+            no_show=False,
+        ).update(paid_at=now)
+    return updated

@@ -16,6 +16,7 @@ from kaibaru.service_reservation_history import (
 from kaibaru.service_reservation_manage import (
     _reopen,
     list_manageable_reservations,
+    mark_stale_open_service_reservations_paid,
 )
 from kaibaru.signals import club_created_signal
 
@@ -360,6 +361,89 @@ class ServiceReservationHistoryTests(TestCase):
         body = month.json()
         self.assertEqual(body["earned_yen"], 5000)
         self.assertEqual(len(body["days"][0]["paid"]), 1)
+
+    def test_open_booking_is_marked_paid_a_full_day_after_it_starts(self):
+        now = timezone.now()
+        stale_local = timezone.localtime(
+            now - timedelta(days=1, minutes=1)
+        ).replace(microsecond=0)
+        fresh_local = timezone.localtime(
+            now - timedelta(hours=23)
+        ).replace(microsecond=0)
+
+        def at(local, key, **overrides):
+            end = time(23, 59) if local.time() < time(23, 59) else local.time()
+            return self.book(
+                when=local.date(),
+                key=key,
+                start_time=local.time(),
+                end_time=end,
+                **overrides,
+            )
+
+        stale = at(
+            stale_local,
+            "auto-stale",
+            payment_method="cash",
+            paid_at=None,
+            amount=3000,
+        )
+        fresh = at(
+            fresh_local,
+            "auto-fresh",
+            payment_method="cash",
+            paid_at=None,
+            amount=3000,
+        )
+        canceled = at(
+            stale_local,
+            "auto-canceled",
+            payment_method="cash",
+            paid_at=None,
+            canceled=True,
+            amount=3000,
+        )
+        missed = at(
+            stale_local,
+            "auto-noshow",
+            payment_method="cash",
+            paid_at=None,
+            no_show=True,
+            amount=3000,
+        )
+        already_paid_at = now - timedelta(days=3)
+        already = at(
+            stale_local,
+            "auto-paid",
+            payment_method="cash",
+            paid_at=already_paid_at,
+            amount=3000,
+        )
+        ticket = at(
+            stale_local,
+            "auto-ticket",
+            payment_method="ticket",
+            paid_at=None,
+            amount=3000,
+        )
+
+        marked = mark_stale_open_service_reservations_paid(now=now)
+
+        stale.refresh_from_db()
+        fresh.refresh_from_db()
+        canceled.refresh_from_db()
+        missed.refresh_from_db()
+        already.refresh_from_db()
+        ticket.refresh_from_db()
+        self.assertEqual(marked, 1)
+        self.assertIsNotNone(stale.paid_at)
+        self.assertIsNone(fresh.paid_at)
+        self.assertIsNone(canceled.paid_at)
+        self.assertIsNone(missed.paid_at)
+        self.assertIsNotNone(already.paid_at)
+        self.assertNotEqual(already.paid_at, stale.paid_at)
+        self.assertIsNone(ticket.paid_at)
+        self.assertFalse(stale.platform_fee_applied)
 
     def test_stranger_cannot_read_history(self):
         stranger = CustomUser.objects.create_user(

@@ -1084,3 +1084,19 @@ def issue_scheduled_custom_domain_certs():
         summary["issued"] += 1
     logger.info("[CUSTOM DOMAIN] scheduled pass %s", summary)
     return summary
+
+
+@shared_task(name="kaibaru.tasks.mark_stale_open_service_reservations_paid")
+def mark_stale_open_service_reservations_paid():
+    """Mark open salon bookings paid once their start time is a full day old.
+
+    Register this on Periodic tasks as
+    kaibaru.tasks.mark_stale_open_service_reservations_paid.
+    """
+    from .service_reservation_manage import (
+        mark_stale_open_service_reservations_paid as mark_paid,
+    )
+
+    count = mark_paid()
+    logger.info("[SERVICE RESERVATION] Marked %s open bookings paid", count)
+    return count
