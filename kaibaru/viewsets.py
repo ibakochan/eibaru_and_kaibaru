@@ -5487,6 +5487,64 @@ class ClubViewSet(viewsets.ModelViewSet):
     @action(
         detail=False,
         methods=["get"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/my-service-reservations",
+    )
+    def my_service_reservations(self, request, subdomain=None):
+        from .service_my_service_reservation import (
+            MyServiceReservationError,
+            list_my_service_reservations,
+        )
+
+        club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
+        if not club:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            rows = list_my_service_reservations(club, request.user)
+        except MyServiceReservationError as exc:
+            return Response(
+                {"detail": exc.message},
+                status=exc.status_code,
+            )
+        return Response({"reservations": rows})
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path=(
+            r"by-subdomain/(?P<subdomain>[^/.]+)/my-service-reservations/"
+            r"(?P<reservation_id>\d+)/cancel"
+        ),
+    )
+    def my_service_reservation_cancel(
+        self, request, subdomain=None, reservation_id=None
+    ):
+        from .service_my_service_reservation import (
+            MyServiceReservationError,
+            cancel_my_service_reservation,
+        )
+
+        club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
+        if not club:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            payload = cancel_my_service_reservation(
+                club, request.user, int(reservation_id)
+            )
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "予約が見つかりません。"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except MyServiceReservationError as exc:
+            return Response(
+                {"detail": exc.message},
+                status=exc.status_code,
+            )
+        return Response(payload)
+
+    @action(
+        detail=False,
+        methods=["get"],
         url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/service-reservation-manage",
     )
     def service_reservation_manage(self, request, subdomain=None):
