@@ -5128,6 +5128,11 @@ class ClubViewSet(viewsets.ModelViewSet):
             )
         if duration < 1:
             return Response({"detail": "所要時間は1分以上にしてください。"}, status=400)
+        from .charge_amounts import invalid_set_price
+
+        amount_message = invalid_set_price(amount, allow_free=False)
+        if amount_message:
+            return Response({"detail": amount_message}, status=400)
         try:
             addon_ids = parse_addon_ids(request.data)
         except ValueError as exc:
@@ -5138,7 +5143,7 @@ class ClubViewSet(viewsets.ModelViewSet):
             tagline=(request.data.get("tagline") or "")[:120],
             badge=(request.data.get("badge") or "")[:40],
             duration_minutes=duration,
-            amount=max(0, amount),
+            amount=amount,
             description=(request.data.get("description") or "")[:2000],
             includes=(request.data.get("includes") or "")[:2000],
             position=int(request.data.get("position") or 0),
@@ -5248,9 +5253,15 @@ class ClubViewSet(viewsets.ModelViewSet):
             if request.data.get("amount") in (None, ""):
                 return Response({"detail": "料金を入力してください。"}, status=400)
             try:
-                course.amount = max(0, int(request.data.get("amount")))
+                amount = int(request.data.get("amount"))
             except (TypeError, ValueError):
                 return Response({"detail": "料金を正しく入力してください。"}, status=400)
+            from .charge_amounts import invalid_set_price
+
+            amount_message = invalid_set_price(amount, allow_free=False)
+            if amount_message:
+                return Response({"detail": amount_message}, status=400)
+            course.amount = amount
         if "description" in request.data:
             course.description = (request.data.get("description") or "")[:2000]
         if "includes" in request.data:
