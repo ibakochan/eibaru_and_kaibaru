@@ -569,6 +569,7 @@ def platform_billing_detail_for_owner(user):
             "full_name": member.full_name,
             "club_id": member.club_id,
             "club_subdomain": member.club.subdomain,
+            "is_worker": bool(member.is_worker),
         }
         for member in members
     ]
