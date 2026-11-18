@@ -7,8 +7,6 @@ handled here — cancel only frees the slot.
 
 from __future__ import annotations
 
-from datetime import datetime
-
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -63,16 +61,6 @@ def can_manage_service_reservation(reservation, user, *, actor=None):
     return bool(member and reservation.worker_id == member.id)
 
 
-def service_has_started(reservation, *, now=None):
-    now = now or timezone.now()
-    start = datetime.combine(
-        reservation.reservation_date,
-        reservation.start_time,
-    )
-    start = timezone.make_aware(start, timezone.get_current_timezone())
-    return start <= now
-
-
 def _live_confirmed(reservation):
     return (
         reservation.status == ServiceReservation.Status.PAID
@@ -81,7 +69,7 @@ def _live_confirmed(reservation):
     )
 
 
-def manage_flags(reservation, user, *, actor=None, now=None):
+def manage_flags(reservation, user, *, actor=None):
     flags = {
         "can_mark_paid": False,
         "can_unmark_paid": False,
@@ -114,7 +102,7 @@ def manage_flags(reservation, user, *, actor=None, now=None):
         return flags
 
     flags["can_mark_paid"] = True
-    flags["can_mark_no_show"] = service_has_started(reservation, now=now)
+    flags["can_mark_no_show"] = True
     return flags
 
 
@@ -162,6 +150,7 @@ def list_manageable_reservations(club, user, *, actor=None):
             status=ServiceReservation.Status.PAID,
             reservation_date__gte=window_start,
             canceled=False,
+            no_show=False,
         )
         .exclude(
             Q(payment_method=ServiceReservation.PaymentMethod.CASH)
@@ -258,10 +247,10 @@ def reopen_still_allowed(reservation, today=None):
 
 
 def _reopen(reservation, today=None):
-    """Put a paid or canceled booking back on the manage board.
+    """Put a paid, canceled, or no-show booking back on the manage board.
 
-    Cash that was marked received is unmarked. A cancel is cleared.
-    Both can apply to the same row. Stripe charges are not undone.
+    Cash that was marked received is unmarked. Cancel and no-show are
+    cleared. Stripe charges are not undone.
     """
     if not reopen_still_allowed(reservation, today):
         raise CashReservationError(
@@ -271,7 +260,7 @@ def _reopen(reservation, today=None):
     cash_paid = (
         is_cash_reservation(reservation) and reservation.paid_at is not None
     )
-    if not reservation.canceled and not cash_paid:
+    if not reservation.canceled and not reservation.no_show and not cash_paid:
         raise CashReservationError("この予約は戻せません。")
     if cash_paid and reservation.platform_fee_applied:
         raise CashReservationError(
@@ -283,6 +272,9 @@ def _reopen(reservation, today=None):
     if reservation.canceled:
         reservation.canceled = False
         update_fields.append("canceled")
+    if reservation.no_show:
+        reservation.no_show = False
+        update_fields.append("no_show")
     if cash_paid:
         reservation.paid_at = None
         update_fields.append("paid_at")
@@ -290,7 +282,7 @@ def _reopen(reservation, today=None):
 
 
 def _run_service_cash_action(reservation, action):
-    """Same money/no-show rules as lessons, with salon start-time check."""
+    """Same money rules as lessons. A cash booking can be marked no-show before it starts."""
     if action == ACTION_PAID:
         if reservation.no_show:
             raise CashReservationError(
@@ -320,8 +312,6 @@ def _run_service_cash_action(reservation, action):
                 "お支払い済みの予約は欠席にできません。"
                 "先に支払いを取り消してください。"
             )
-        if not service_has_started(reservation):
-            raise CashReservationError("開始前の予約は欠席にできません。")
         if not reservation.no_show:
             reservation.no_show = True
             reservation.save(update_fields=["no_show"])

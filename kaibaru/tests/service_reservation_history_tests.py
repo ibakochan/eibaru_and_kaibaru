@@ -89,7 +89,7 @@ class ServiceReservationHistoryTests(TestCase):
                 {
                     "year": 2026,
                     "month": 11,
-                    "reservation_count": 2,
+                    "reservation_count": 1,
                     "is_current": True,
                 },
                 {
@@ -158,10 +158,7 @@ class ServiceReservationHistoryTests(TestCase):
             [row["full_name"] for row in day["paid"]],
             ["返金", "午後"],
         )
-        self.assertEqual(
-            [row["full_name"] for row in day["unpaid"]],
-            ["午前"],
-        )
+        self.assertNotIn("午前", [row["full_name"] for row in day["paid"]])
         self.assertTrue(day["paid"][0]["paid"])
         self.assertTrue(day["paid"][0]["refunded"])
 
@@ -207,7 +204,6 @@ class ServiceReservationHistoryTests(TestCase):
         self.assertEqual([row["full_name"] for row in day["paid"]], ["支払"])
         self.assertEqual([row["full_name"] for row in day["canceled"]], ["取消"])
         self.assertEqual([row["full_name"] for row in day["no_shows"]], ["欠席者"])
-        self.assertEqual(day["unpaid"], [])
         self.assertEqual(day["earned_yen"], 2000)
 
     def test_manage_board_drops_cash_paid_and_canceled(self):
@@ -242,14 +238,26 @@ class ServiceReservationHistoryTests(TestCase):
             start_time=time(16, 0),
             end_time=time(17, 0),
         )
+        self.book(
+            when=today + timedelta(days=4),
+            key="board-noshow",
+            payment_method="cash",
+            paid_at=None,
+            no_show=True,
+            amount=2500,
+            start_time=time(18, 0),
+            end_time=time(19, 0),
+        )
 
-        ids = [
-            row["id"]
-            for row in list_manageable_reservations(self.club, self.owner)
-        ]
+        rows = list_manageable_reservations(self.club, self.owner)
+        ids = [row["id"] for row in rows]
         self.assertIn(open_row.id, ids)
         self.assertIn(future_paid.id, ids)
         self.assertEqual(len(ids), 2)
+        open_payload = next(row for row in rows if row["id"] == open_row.id)
+        self.assertTrue(open_payload["can_mark_paid"])
+        self.assertTrue(open_payload["can_cancel"])
+        self.assertTrue(open_payload["can_mark_no_show"])
 
     def test_reopen_until_the_day_after_the_reservation(self):
         when = timezone.localdate() + timedelta(days=2)
@@ -267,6 +275,16 @@ class ServiceReservationHistoryTests(TestCase):
             start_time=time(12, 0),
             end_time=time(13, 0),
         )
+        missed = self.book(
+            when=when,
+            key="reopen-noshow",
+            payment_method="cash",
+            paid_at=None,
+            no_show=True,
+            amount=1500,
+            start_time=time(14, 0),
+            end_time=time(15, 0),
+        )
 
         open_day = service_reservation_history_month(
             self.club, when.year, when.month, today=when
@@ -274,11 +292,12 @@ class ServiceReservationHistoryTests(TestCase):
         flags = {
             row["id"]: row["can_reopen"]
             for day in open_day["days"]
-            for group in ("paid", "unpaid", "canceled", "no_shows")
+            for group in ("paid", "canceled", "no_shows")
             for row in day[group]
         }
         self.assertTrue(flags[paid.id])
         self.assertTrue(flags[canceled.id])
+        self.assertTrue(flags[missed.id])
 
         locked = service_reservation_history_month(
             self.club,
@@ -289,17 +308,29 @@ class ServiceReservationHistoryTests(TestCase):
         locked_flags = {
             row["id"]: row["can_reopen"]
             for day in locked["days"]
-            for group in ("paid", "unpaid", "canceled", "no_shows")
+            for group in ("paid", "canceled", "no_shows")
             for row in day[group]
         }
         self.assertFalse(locked_flags[paid.id])
         self.assertFalse(locked_flags[canceled.id])
+        self.assertFalse(locked_flags[missed.id])
 
         _reopen(paid, today=when)
         paid.refresh_from_db()
         self.assertIsNone(paid.paid_at)
         self.assertIn(
             paid.id,
+            [
+                row["id"]
+                for row in list_manageable_reservations(self.club, self.owner)
+            ],
+        )
+
+        _reopen(missed, today=when)
+        missed.refresh_from_db()
+        self.assertFalse(missed.no_show)
+        self.assertIn(
+            missed.id,
             [
                 row["id"]
                 for row in list_manageable_reservations(self.club, self.owner)
