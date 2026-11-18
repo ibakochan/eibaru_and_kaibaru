@@ -5,7 +5,7 @@ from __future__ import annotations
 import random
 import uuid
 from collections import defaultdict
-from datetime import date, time
+from datetime import date, time, timedelta
 from decimal import Decimal
 
 from django.db import transaction
@@ -102,46 +102,46 @@ def _month_bounds(day: date):
     return start, end
 
 
-def _prefetch_worker_day(workers, day: date, *, exclude_reservation_id=None):
-    """Load avail / offs / busy / month minutes once for all workers on day.
+def _prefetch_worker_days(workers, days, *, exclude_reservation_id=None):
+    """Load avail / offs / busy / month minutes once for workers across days.
 
-    Returns {worker_id: {"free": [(start,end), ...], "month_minutes": int|None,
-    "hour_cap": int|None}} so slot loops stay in memory.
+    Returns {day: {worker_id: {"free", "month_minutes", "hour_cap"}}}.
     """
-    if not workers:
+    if not workers or not days:
         return {}
 
     from .service_service_reservation import holding_reservations_q
 
     worker_ids = [worker.id for worker in workers]
-    weekday = _weekday(day)
+    unique_days = sorted(set(days))
+    weekdays = {_weekday(day) for day in unique_days}
 
-    avail_map = defaultdict(list)
-    for worker_id, start_t, end_t in WorkerAvailability.objects.filter(
+    avail_by_weekday = defaultdict(lambda: defaultdict(list))
+    for worker_id, weekday, start_t, end_t in WorkerAvailability.objects.filter(
         worker_id__in=worker_ids,
-        weekday=weekday,
-    ).values_list("worker_id", "start_time", "end_time"):
-        avail_map[worker_id].append((_tmin(start_t), _tmin(end_t)))
+        weekday__in=weekdays,
+    ).values_list("worker_id", "weekday", "start_time", "end_time"):
+        avail_by_weekday[weekday][worker_id].append((_tmin(start_t), _tmin(end_t)))
 
-    off_map = defaultdict(list)
-    for worker_id, start_t, end_t in WorkerTimeOff.objects.filter(
+    off_by_day = defaultdict(lambda: defaultdict(list))
+    for worker_id, off_day, start_t, end_t in WorkerTimeOff.objects.filter(
         worker_id__in=worker_ids,
-        date=day,
-    ).values_list("worker_id", "start_time", "end_time"):
-        off_map[worker_id].append((start_t, end_t))
+        date__in=unique_days,
+    ).values_list("worker_id", "date", "start_time", "end_time"):
+        off_by_day[off_day][worker_id].append((start_t, end_t))
 
     busy_qs = ServiceReservation.objects.filter(
         holding_reservations_q(),
         worker_id__in=worker_ids,
-        reservation_date=day,
+        reservation_date__in=unique_days,
     )
     if exclude_reservation_id is not None:
         busy_qs = busy_qs.exclude(id=exclude_reservation_id)
-    busy_map = defaultdict(list)
-    for worker_id, start_t, end_t in busy_qs.values_list(
-        "worker_id", "start_time", "end_time"
+    busy_by_day = defaultdict(lambda: defaultdict(list))
+    for worker_id, busy_day, start_t, end_t in busy_qs.values_list(
+        "worker_id", "reservation_date", "start_time", "end_time"
     ):
-        busy_map[worker_id].append((_tmin(start_t), _tmin(end_t)))
+        busy_by_day[busy_day][worker_id].append((_tmin(start_t), _tmin(end_t)))
 
     capped_ids = []
     hour_caps = {}
@@ -153,10 +153,12 @@ def _prefetch_worker_day(workers, day: date, *, exclude_reservation_id=None):
         hour_caps[worker.id] = int(profile.monthly_hour_cap)
         capped_ids.append(worker.id)
 
-    month_map = {worker_id: 0 for worker_id in capped_ids}
+    # One range covering every month touched by the requested days.
+    month_by_worker = {worker_id: defaultdict(int) for worker_id in capped_ids}
     if capped_ids:
-        month_start, month_end = _month_bounds(day)
-        for worker_id, start_t, end_t in (
+        month_start = min(_month_bounds(day)[0] for day in unique_days)
+        month_end = max(_month_bounds(day)[1] for day in unique_days)
+        for worker_id, res_day, start_t, end_t in (
             ServiceReservation.objects.filter(
                 holding_reservations_q(),
                 worker_id__in=capped_ids,
@@ -164,24 +166,46 @@ def _prefetch_worker_day(workers, day: date, *, exclude_reservation_id=None):
                 reservation_date__lt=month_end,
             )
             .exclude(no_show=True)
-            .values_list("worker_id", "start_time", "end_time")
+            .values_list("worker_id", "reservation_date", "start_time", "end_time")
         ):
-            month_map[worker_id] = month_map.get(worker_id, 0) + max(
+            month_key = (res_day.year, res_day.month)
+            month_by_worker[worker_id][month_key] += max(
                 0, _tmin(end_t) - _tmin(start_t)
             )
 
-    day_data = {}
-    for worker in workers:
-        available = _apply_time_offs(
-            list(avail_map.get(worker.id, [])),
-            off_map.get(worker.id, []),
-        )
-        day_data[worker.id] = {
-            "free": _free_ranges(available, busy_map.get(worker.id, [])),
-            "month_minutes": month_map.get(worker.id),
-            "hour_cap": hour_caps.get(worker.id),
-        }
-    return day_data
+    by_day = {}
+    for day in unique_days:
+        weekday = _weekday(day)
+        day_avail = avail_by_weekday.get(weekday, {})
+        day_offs = off_by_day.get(day, {})
+        day_busy = busy_by_day.get(day, {})
+        month_key = (day.year, day.month)
+        day_data = {}
+        for worker in workers:
+            available = _apply_time_offs(
+                list(day_avail.get(worker.id, [])),
+                day_offs.get(worker.id, []),
+            )
+            day_data[worker.id] = {
+                "free": _free_ranges(available, day_busy.get(worker.id, [])),
+                "month_minutes": (
+                    month_by_worker[worker.id].get(month_key, 0)
+                    if worker.id in month_by_worker
+                    else None
+                ),
+                "hour_cap": hour_caps.get(worker.id),
+            }
+        by_day[day] = day_data
+    return by_day
+
+
+def _prefetch_worker_day(workers, day: date, *, exclude_reservation_id=None):
+    """Load avail / offs / busy / month minutes once for all workers on day."""
+    return _prefetch_worker_days(
+        workers,
+        [day],
+        exclude_reservation_id=exclude_reservation_id,
+    ).get(day, {})
 
 
 def _under_hour_cap_cached(worker_id, day_data, add_minutes: int) -> bool:
@@ -259,29 +283,16 @@ def free_workers_for_slot(
     ]
 
 
-def available_slots(club, course_id, day: date, section_id=None, step_minutes=None):
-    """Return timed slots with availability for the day schedule UI."""
-    course = ServiceCourse.objects.filter(club=club, id=course_id, active=True).first()
-    if not course:
-        return None, "コースが見つかりません。"
-    windows = windows_for(club, section_id, day=day)
-    if not windows:
-        return None, "この曜日の予約可能な時間帯が設定されていません。"
+def _empty_day_payload(step, include_workers):
+    return {
+        "slots": [],
+        "step_minutes": step,
+        "available_count": 0,
+        "allow_choose_worker": include_workers,
+    }
 
-    include_workers = bool(getattr(club, "service_allow_choose_worker", False))
-    today = timezone.localdate()
-    if day < today:
-        return {
-            "slots": [],
-            "step_minutes": resolve_slot_step(club, step_minutes),
-            "available_count": 0,
-            "allow_choose_worker": include_workers,
-        }, None
 
-    step = resolve_slot_step(club, step_minutes)
-    workers = _qualified_workers(club, course)
-    duration = int(course.duration_minutes)
-    now_min = _tmin(timezone.localtime().time()) if day == today else None
+def _slot_candidates(windows, duration, step):
     candidates = set()
     for window in windows:
         start = _tmin(window.earliest_start)
@@ -293,10 +304,28 @@ def available_slots(club, course_id, day: date, section_id=None, step_minutes=No
             if end <= finish:
                 candidates.add(cursor)
             cursor += step
+    return candidates
 
-    # One DB pass for the day; every slot check is then in-memory.
-    day_data = _prefetch_worker_day(workers, day)
 
+def _build_day_slots(
+    *,
+    workers,
+    day_data,
+    windows,
+    duration,
+    step,
+    include_workers,
+    day: date,
+    today: date,
+    now_min,
+):
+    """Build slot rows for one day from already-prefetched worker data."""
+    if not windows:
+        return _empty_day_payload(step, include_workers)
+    if day < today:
+        return _empty_day_payload(step, include_workers)
+
+    candidates = _slot_candidates(windows, duration, step)
     slots = []
     for start_min in sorted(candidates):
         end_min = start_min + duration
@@ -323,6 +352,120 @@ def available_slots(club, course_id, day: date, section_id=None, step_minutes=No
         "slots": slots,
         "step_minutes": step,
         "available_count": sum(1 for row in slots if row["available"]),
+        "allow_choose_worker": include_workers,
+    }
+
+
+def available_slots(club, course_id, day: date, section_id=None, step_minutes=None):
+    """Return timed slots with availability for the day schedule UI.
+
+    Closed weekdays (no windows) return an empty day payload instead of an error,
+    so callers can safely probe any date without 400 spam.
+    """
+    course = ServiceCourse.objects.filter(club=club, id=course_id, active=True).first()
+    if not course:
+        return None, "コースが見つかりません。"
+
+    include_workers = bool(getattr(club, "service_allow_choose_worker", False))
+    step = resolve_slot_step(club, step_minutes)
+    today = timezone.localdate()
+    max_days_ahead = getattr(club, "visitor_reservation_max_days_ahead", None)
+    if max_days_ahead is not None and day > today + timedelta(days=int(max_days_ahead)):
+        return _empty_day_payload(step, include_workers), None
+
+    windows = windows_for(club, section_id, day=day)
+    if not windows or day < today:
+        return _empty_day_payload(step, include_workers), None
+
+    workers = _qualified_workers(club, course)
+    day_data = _prefetch_worker_day(workers, day)
+    now_min = _tmin(timezone.localtime().time()) if day == today else None
+    return (
+        _build_day_slots(
+            workers=workers,
+            day_data=day_data,
+            windows=windows,
+            duration=int(course.duration_minutes),
+            step=step,
+            include_workers=include_workers,
+            day=day,
+            today=today,
+            now_min=now_min,
+        ),
+        None,
+    )
+
+
+def available_week_slots(
+    club, course_id, week_start: date, section_id=None, step_minutes=None
+):
+    """Return slots for Mon–Sun starting at week_start in one DB-prefetch pass.
+
+    Closed / past / beyond-horizon days are included as empty payloads so the
+    UI can map the full week without per-day fetches or 400s.
+    """
+    course = ServiceCourse.objects.filter(club=club, id=course_id, active=True).first()
+    if not course:
+        return None, "コースが見つかりません。"
+
+    include_workers = bool(getattr(club, "service_allow_choose_worker", False))
+    step = resolve_slot_step(club, step_minutes)
+    today = timezone.localdate()
+    now_min = _tmin(timezone.localtime().time())
+    max_days_ahead = getattr(club, "visitor_reservation_max_days_ahead", None)
+    horizon = (
+        today + timedelta(days=int(max_days_ahead))
+        if max_days_ahead is not None
+        else None
+    )
+    duration = int(course.duration_minutes)
+
+    days = [week_start + timedelta(days=offset) for offset in range(7)]
+    all_windows = windows_for(club, section_id)
+    windows_by_weekday = defaultdict(list)
+    for window in all_windows:
+        windows_by_weekday[window.weekday].append(window)
+
+    # Only prefetch days that can actually produce slots.
+    active_days = []
+    for day in days:
+        if day < today:
+            continue
+        if horizon is not None and day > horizon:
+            continue
+        if not windows_by_weekday.get(_weekday(day)):
+            continue
+        active_days.append(day)
+
+    workers = _qualified_workers(club, course) if active_days else []
+    by_day = _prefetch_worker_days(workers, active_days) if active_days else {}
+
+    days_payload = {}
+    for day in days:
+        key = day.isoformat()
+        if day < today or (horizon is not None and day > horizon):
+            days_payload[key] = _empty_day_payload(step, include_workers)
+            continue
+        day_windows = windows_by_weekday.get(_weekday(day), [])
+        if not day_windows:
+            days_payload[key] = _empty_day_payload(step, include_workers)
+            continue
+        days_payload[key] = _build_day_slots(
+            workers=workers,
+            day_data=by_day.get(day, {}),
+            windows=day_windows,
+            duration=duration,
+            step=step,
+            include_workers=include_workers,
+            day=day,
+            today=today,
+            now_min=now_min if day == today else None,
+        )
+
+    return {
+        "week_start": week_start.isoformat(),
+        "days": days_payload,
+        "step_minutes": step,
         "allow_choose_worker": include_workers,
     }, None
 

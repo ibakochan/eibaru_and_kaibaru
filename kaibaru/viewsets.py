@@ -5288,21 +5288,39 @@ class ClubViewSet(viewsets.ModelViewSet):
     )
     def service_slots(self, request, subdomain=None):
         from datetime import date as date_cls
-        from .service_worker_schedule import available_slots
+        from .service_worker_schedule import available_slots, available_week_slots
 
         club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
         if not club:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
-        try:
-            course_id = int(request.query_params.get("course_id"))
-            day = date_cls.fromisoformat(str(request.query_params.get("date"))[:10])
-        except (TypeError, ValueError):
-            return Response({"detail": "コースと日付を指定してください。"}, status=400)
         section_id = request.query_params.get("section_id")
         try:
             section_id = int(section_id) if section_id not in (None, "") else None
         except (TypeError, ValueError):
             section_id = None
+
+        week_start_raw = request.query_params.get("week_start")
+        if week_start_raw not in (None, ""):
+            try:
+                course_id = int(request.query_params.get("course_id"))
+                week_start = date_cls.fromisoformat(str(week_start_raw)[:10])
+            except (TypeError, ValueError):
+                return Response(
+                    {"detail": "コースと週の開始日を指定してください。"},
+                    status=400,
+                )
+            payload, message = available_week_slots(
+                club, course_id, week_start, section_id
+            )
+            if message:
+                return Response({"detail": message, "days": {}}, status=400)
+            return Response(payload)
+
+        try:
+            course_id = int(request.query_params.get("course_id"))
+            day = date_cls.fromisoformat(str(request.query_params.get("date"))[:10])
+        except (TypeError, ValueError):
+            return Response({"detail": "コースと日付を指定してください。"}, status=400)
         payload, message = available_slots(club, course_id, day, section_id)
         if message:
             return Response({"detail": message, "slots": []}, status=400)
