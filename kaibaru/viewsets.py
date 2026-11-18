@@ -5013,7 +5013,7 @@ class ClubViewSet(viewsets.ModelViewSet):
     def service_courses(self, request, subdomain=None):
         from django.db.models import Exists, OuterRef
 
-        from .models import ServiceCourse, ServiceReservation
+        from .models import ReservationAddon, ServiceCourse, ServiceReservation
         from .service_service_reservation import (
             course_has_open_reservations,
             open_course_reservations_q,
@@ -5022,6 +5022,9 @@ class ClubViewSet(viewsets.ModelViewSet):
         def course_payload(course, *, has_open=None):
             if has_open is None:
                 has_open = course_has_open_reservations(course)
+            addon_ids = list(
+                course.addons.order_by("position", "id").values_list("id", flat=True)
+            )
             return {
                 "id": course.id,
                 "name": course.name,
@@ -5034,9 +5037,53 @@ class ClubViewSet(viewsets.ModelViewSet):
                 "picture": course.picture.url if course.picture else None,
                 "position": course.position,
                 "active": course.active,
+                "addon_ids": addon_ids,
                 "has_open_reservations": bool(has_open),
                 "bookable": bool(course.active),
             }
+
+        def parse_addon_ids(data):
+            if hasattr(data, "getlist"):
+                values = data.getlist("addon_ids")
+                if not values and "addon_ids" not in data:
+                    return None
+            else:
+                raw = data.get("addon_ids")
+                if raw is None:
+                    return None
+                values = raw if isinstance(raw, (list, tuple)) else [raw]
+            ids = []
+            seen = set()
+            for raw in values:
+                if raw in (None, ""):
+                    continue
+                try:
+                    addon_id = int(raw)
+                except (TypeError, ValueError):
+                    raise ValueError("追加メニューを正しく選んでください。")
+                if addon_id in seen:
+                    continue
+                seen.add(addon_id)
+                ids.append(addon_id)
+            return ids
+
+        def set_course_addons(course, club, addon_ids):
+            if addon_ids is None:
+                return
+            if not addon_ids:
+                course.addons.clear()
+                return
+            allowed = list(
+                ReservationAddon.objects.filter(
+                    club=club,
+                    lesson__isnull=True,
+                    id__in=addon_ids,
+                )
+            )
+            if len(allowed) != len(set(addon_ids)):
+                raise ValueError("選べない追加メニューが含まれています。")
+            by_id = {addon.id: addon for addon in allowed}
+            course.addons.set([by_id[addon_id] for addon_id in addon_ids])
 
         club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
         if not club:
@@ -5045,11 +5092,15 @@ class ClubViewSet(viewsets.ModelViewSet):
             # Active + stopped. Stopped stay visible as 受付していません;
             # booking endpoints still require active=True. ?all=1 is accepted
             # for owners but returns the same rows (archive filters client-side).
-            qs = ServiceCourse.objects.filter(club=club).annotate(
-                has_open_reservations=Exists(
-                    ServiceReservation.objects.filter(
-                        open_course_reservations_q(),
-                        course_id=OuterRef("pk"),
+            qs = (
+                ServiceCourse.objects.filter(club=club)
+                .prefetch_related("addons")
+                .annotate(
+                    has_open_reservations=Exists(
+                        ServiceReservation.objects.filter(
+                            open_course_reservations_q(),
+                            course_id=OuterRef("pk"),
+                        )
                     )
                 )
             )
@@ -5073,6 +5124,10 @@ class ClubViewSet(viewsets.ModelViewSet):
             return Response({"detail": "コース名を入力してください。"}, status=400)
         if duration < 1:
             return Response({"detail": "所要時間は1分以上にしてください。"}, status=400)
+        try:
+            addon_ids = parse_addon_ids(request.data)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
         course = ServiceCourse(
             club=club,
             name=name[:80],
@@ -5089,6 +5144,11 @@ class ClubViewSet(viewsets.ModelViewSet):
         if picture:
             course.picture = picture
         course.save()
+        try:
+            set_course_addons(course, club, addon_ids if addon_ids is not None else [])
+        except ValueError as exc:
+            course.delete()
+            return Response({"detail": str(exc)}, status=400)
         return Response(course_payload(course), status=status.HTTP_201_CREATED)
 
     @action(
@@ -5097,12 +5157,15 @@ class ClubViewSet(viewsets.ModelViewSet):
         url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/service-courses/(?P<course_id>\d+)",
     )
     def service_course_record(self, request, subdomain=None, course_id=None):
-        from .models import ServiceCourse
+        from .models import ReservationAddon, ServiceCourse
         from .service_service_reservation import course_has_open_reservations
 
         def course_payload(course, *, has_open=None):
             if has_open is None:
                 has_open = course_has_open_reservations(course)
+            addon_ids = list(
+                course.addons.order_by("position", "id").values_list("id", flat=True)
+            )
             return {
                 "id": course.id,
                 "name": course.name,
@@ -5115,14 +5178,44 @@ class ClubViewSet(viewsets.ModelViewSet):
                 "picture": course.picture.url if course.picture else None,
                 "position": course.position,
                 "active": course.active,
+                "addon_ids": addon_ids,
                 "has_open_reservations": bool(has_open),
                 "bookable": bool(course.active),
             }
 
+        def parse_addon_ids(data):
+            if hasattr(data, "getlist"):
+                values = data.getlist("addon_ids")
+                if not values and "addon_ids" not in data:
+                    return None
+            else:
+                raw = data.get("addon_ids")
+                if raw is None:
+                    return None
+                values = raw if isinstance(raw, (list, tuple)) else [raw]
+            ids = []
+            seen = set()
+            for raw in values:
+                if raw in (None, ""):
+                    continue
+                try:
+                    addon_id = int(raw)
+                except (TypeError, ValueError):
+                    raise ValueError("追加メニューを正しく選んでください。")
+                if addon_id in seen:
+                    continue
+                seen.add(addon_id)
+                ids.append(addon_id)
+            return ids
+
         club, error = _staff_club(request, subdomain, "lessons")
         if error:
             return error
-        course = ServiceCourse.objects.filter(club=club, id=course_id).first()
+        course = (
+            ServiceCourse.objects.filter(club=club, id=course_id)
+            .prefetch_related("addons")
+            .first()
+        )
         if not course:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
         if request.method == "DELETE":
@@ -5176,7 +5269,29 @@ class ClubViewSet(viewsets.ModelViewSet):
             if course.picture:
                 course.picture.delete(save=False)
             course.picture = picture
+        try:
+            addon_ids = parse_addon_ids(request.data)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
         course.save()
+        if addon_ids is not None:
+            if not addon_ids:
+                course.addons.clear()
+            else:
+                allowed = list(
+                    ReservationAddon.objects.filter(
+                        club=club,
+                        lesson__isnull=True,
+                        id__in=addon_ids,
+                    )
+                )
+                if len(allowed) != len(set(addon_ids)):
+                    return Response(
+                        {"detail": "選べない追加メニューが含まれています。"},
+                        status=400,
+                    )
+                by_id = {addon.id: addon for addon in allowed}
+                course.addons.set([by_id[addon_id] for addon_id in addon_ids])
         return Response(course_payload(course))
 
     @action(

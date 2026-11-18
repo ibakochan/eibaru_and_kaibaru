@@ -280,7 +280,7 @@ def create_service_reservation(club, payload, user=None):
             )
 
     try:
-        selected_addons = _resolve_club_addons(club, payload.get("addon_ids"))
+        selected_addons = _resolve_course_addons(course, payload.get("addon_ids"))
     except ValueError as exc:
         return None, str(exc)
     addon_extra = sum(int(addon.amount or 0) for addon in selected_addons)
@@ -397,16 +397,11 @@ def _finish_service_instant(start_token, reservation_id):
     )
 
 
-def _resolve_club_addons(club, addon_ids):
-    """Club-catalog extras (shampoo etc.) for salon course bookings."""
-    from .models import ReservationAddon
-
+def _resolve_course_addons(course, addon_ids):
+    """Extras linked to this course (must also be club catalog rows)."""
     allowed = {
         addon.id: addon
-        for addon in ReservationAddon.objects.filter(
-            club=club,
-            lesson__isnull=True,
-        )
+        for addon in course.addons.filter(lesson__isnull=True)
     }
     selected = []
     seen = set()
@@ -419,7 +414,7 @@ def _resolve_club_addons(club, addon_ids):
             continue
         addon = allowed.get(addon_id)
         if addon is None:
-            raise ValueError("選べない追加メニューが含まれています。")
+            raise ValueError("このコースでは選べない追加メニューです。")
         seen.add(addon_id)
         selected.append(addon)
     return selected

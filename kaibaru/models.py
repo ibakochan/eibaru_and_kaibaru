@@ -3472,6 +3472,12 @@ class ServiceCourse(models.Model):
         null=True,
         blank=True,
     )
+    # Club-catalog extras (shampoo etc.) offered with this course at booking.
+    addons = models.ManyToManyField(
+        "ReservationAddon",
+        blank=True,
+        related_name="service_courses",
+    )
     position = models.PositiveIntegerField(default=0)
     active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
