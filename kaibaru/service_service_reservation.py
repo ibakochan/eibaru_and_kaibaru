@@ -279,7 +279,17 @@ def create_service_reservation(club, payload, user=None):
                 "上限に達しています。"
             )
 
-    amount = int(course.amount or 0)
+    try:
+        selected_addons = _resolve_club_addons(club, payload.get("addon_ids"))
+    except ValueError as exc:
+        return None, str(exc)
+    addon_extra = sum(int(addon.amount or 0) for addon in selected_addons)
+    amount = int(course.amount or 0) + addon_extra
+    if selected_addons:
+        addon_names = "、".join(addon.name for addon in selected_addons)
+        price_name = f"{course.name}（{addon_names}）"
+    else:
+        price_name = course.name
     option = clean_payment_option(
         getattr(club, "service_reservation_payment_options", None),
     )
@@ -340,6 +350,7 @@ def create_service_reservation(club, payload, user=None):
                 email=email,
                 phone_number=(payload.get("phone_number") or "")[:30],
                 amount=amount,
+                price_name=price_name,
                 payment_method=payment_method or "",
                 preferred_worker=preferred_worker,
                 reservation_key=reservation_key,
@@ -386,6 +397,34 @@ def _finish_service_instant(start_token, reservation_id):
     )
 
 
+def _resolve_club_addons(club, addon_ids):
+    """Club-catalog extras (shampoo etc.) for salon course bookings."""
+    from .models import ReservationAddon
+
+    allowed = {
+        addon.id: addon
+        for addon in ReservationAddon.objects.filter(
+            club=club,
+            lesson__isnull=True,
+        )
+    }
+    selected = []
+    seen = set()
+    for raw in addon_ids or []:
+        try:
+            addon_id = int(raw)
+        except (TypeError, ValueError):
+            raise ValueError("追加メニューを正しく選んでください。") from None
+        if addon_id in seen:
+            continue
+        addon = allowed.get(addon_id)
+        if addon is None:
+            raise ValueError("選べない追加メニューが含まれています。")
+        seen.add(addon_id)
+        selected.append(addon)
+    return selected
+
+
 def _save_not_started(
     *,
     club,
@@ -404,6 +443,7 @@ def _save_not_started(
     token,
     now,
     user=None,
+    price_name=None,
 ):
     existing = (
         ServiceReservation.objects
@@ -434,11 +474,12 @@ def _save_not_started(
             and existing.start_token
             and request_is_fresh(existing, now)
         ):
+            resolved_price_name = price_name or course.name
             existing.full_name = full_name
             existing.phone_number = phone_number
             existing.payment_method = payment_method
             existing.amount = amount
-            existing.price_name = course.name
+            existing.price_name = resolved_price_name
             existing.section_id = section_id
             existing.preferred_worker = preferred_worker
             existing.user = user
@@ -464,6 +505,7 @@ def _save_not_started(
             )
             return existing
 
+        resolved_price_name = price_name or course.name
         existing.course = course
         existing.worker = None
         existing.preferred_worker = preferred_worker
@@ -476,7 +518,7 @@ def _save_not_started(
         existing.email = email
         existing.phone_number = phone_number
         existing.amount = amount
-        existing.price_name = course.name
+        existing.price_name = resolved_price_name
         existing.reservation_date = day
         existing.start_time = start
         existing.end_time = end
@@ -506,7 +548,7 @@ def _save_not_started(
         email=email,
         phone_number=phone_number,
         amount=amount,
-        price_name=course.name,
+        price_name=price_name or course.name,
         reservation_date=day,
         start_time=start,
         end_time=end,
