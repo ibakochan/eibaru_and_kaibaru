@@ -928,7 +928,7 @@ def update_worker_profile(member, payload):
     return worker_detail(member), None
 
 
-def worker_detail(member):
+def worker_detail(member, *, include_login=False):
     profile = ensure_worker_profile(member)
     avail = WorkerAvailability.objects.filter(worker=member).order_by(
         "weekday", "start_time", "id"
@@ -946,6 +946,11 @@ def worker_detail(member):
         "user_id": member.user_id,
         "owner_id": member.owner_id,
         "managed": member.user_id is None,
+        "user_email": (
+            member.user.email
+            if include_login and member.user_id and member.user
+            else ""
+        ),
         "is_self_owner": bool(
             member.user_id and member.club_id and member.user_id == member.club.owner_id
         ),
@@ -1015,4 +1020,265 @@ def work_month_stats(worker, year, month):
         "hours_worked": str(hours),
         "reservation_count": len(rows),
         "reservations": bookings,
+    }
+
+
+def link_worker_account(club, actor, member, email):
+    """Point a worker's login at an existing account. The salon stays the owner."""
+    if not actor or not getattr(actor, "is_authenticated", False):
+        return None, "ログインしてください。"
+    if club.owner_id != actor.id:
+        return None, "クラブのオーナーだけがログインを紐づけできます。"
+    if member.club_id != club.id or not member.is_worker:
+        return None, "ワーカーが見つかりません。"
+
+    from accounts.models import CustomUser
+    from django.db import IntegrityError
+
+    cleaned = str(email or "").strip()
+    if not cleaned:
+        member.user = None
+        member.save(update_fields=["user"])
+        return worker_detail(member, include_login=True), None
+
+    user = CustomUser.objects.filter(email__iexact=cleaned).first()
+    if user is None:
+        return None, "そのメールのアカウントはありません。"
+    if Member.objects.filter(club=club, user=user).exclude(pk=member.pk).exists():
+        return None, "このアカウントはすでにこのサロンの別の会員に紐づいています。"
+
+    member.user = user
+    try:
+        member.save(update_fields=["user"])
+    except IntegrityError:
+        return None, "このアカウントはすでにこのサロンの別の会員に紐づいています。"
+    member.user = user
+    return worker_detail(member, include_login=True), None
+
+
+def _monday(day: date) -> date:
+    return day - timedelta(days=day.weekday())
+
+
+def _cuts(intervals, start, end):
+    """Remove [start, end) from a list of minute ranges."""
+    next_ranges = []
+    for block_start, block_end in intervals:
+        if end <= block_start or start >= block_end:
+            next_ranges.append((block_start, block_end))
+            continue
+        if start > block_start:
+            next_ranges.append((block_start, start))
+        if end < block_end:
+            next_ranges.append((end, block_end))
+    return next_ranges
+
+
+def _range_minutes(ranges) -> int:
+    return sum(max(0, end - start) for start, end in ranges)
+
+
+def _hm(total: int) -> str:
+    return _from_min(total).strftime("%H:%M")
+
+
+def _active_reservations(worker, start: date, end: date):
+    return list(
+        ServiceReservation.objects.filter(
+            worker=worker,
+            is_deleted=False,
+            canceled=False,
+            no_show=False,
+            status=ServiceReservation.Status.PAID,
+            reservation_date__gte=start,
+            reservation_date__lt=end,
+        )
+        .select_related("course")
+        .order_by("reservation_date", "start_time", "id")
+    )
+
+
+def _day_blocks(worker, day, reservations, offs, availability):
+    weekday = day.weekday()
+    shift = [
+        (_tmin(row.start_time), _tmin(row.end_time))
+        for row in availability
+        if row.weekday == weekday and row.start_time < row.end_time
+    ]
+    for off in offs:
+        if off.date != day:
+            continue
+        if off.start_time is None or off.end_time is None:
+            shift = []
+            break
+        shift = _cuts(shift, _tmin(off.start_time), _tmin(off.end_time))
+    open_ranges = list(shift)
+    day_rows = [row for row in reservations if row.reservation_date == day]
+    for row in day_rows:
+        open_ranges = _cuts(open_ranges, _tmin(row.start_time), _tmin(row.end_time))
+    reservation_minutes = sum(
+        max(0, _tmin(row.end_time) - _tmin(row.start_time)) for row in day_rows
+    )
+    return shift, open_ranges, day_rows, reservation_minutes
+
+
+def _reservation_brief(row):
+    course = row.course
+    course_name = course.name if course else ""
+    price_name = row.price_name or course_name
+    return {
+        "id": row.id,
+        "full_name": row.full_name,
+        "start_time": row.start_time.strftime("%H:%M"),
+        "end_time": row.end_time.strftime("%H:%M"),
+        "course_name": course_name,
+        "price_name": price_name,
+    }
+
+
+WEEKDAY_LABELS = ("月", "火", "水", "木", "金", "土", "日")
+
+
+def worker_week_board(worker, week_start=None):
+    """One week: this worker's bookings and the gaps still open for booking."""
+    start = _monday(week_start or timezone.localdate())
+    end = start + timedelta(days=7)
+    reservations = _active_reservations(worker, start, end)
+    offs = list(
+        WorkerTimeOff.objects.filter(
+            worker=worker, date__gte=start, date__lt=end
+        )
+    )
+    availability = list(
+        WorkerAvailability.objects.filter(worker=worker).order_by(
+            "weekday", "start_time", "id"
+        )
+    )
+    days = []
+    for offset in range(7):
+        day = start + timedelta(days=offset)
+        shift, open_ranges, day_rows, reservation_minutes = _day_blocks(
+            worker, day, reservations, offs, availability
+        )
+        days.append({
+            "date": day.isoformat(),
+            "weekday": WEEKDAY_LABELS[day.weekday()],
+            "shift_minutes": _range_minutes(shift),
+            "reservation_count": len(day_rows),
+            "reservation_minutes": reservation_minutes,
+            "reservations": [_reservation_brief(row) for row in day_rows],
+            "open": [
+                {"start_time": _hm(begin), "end_time": _hm(stop)}
+                for begin, stop in open_ranges
+            ],
+        })
+    return {
+        "worker_id": worker.id,
+        "week_start": start.isoformat(),
+        "days": days,
+    }
+
+
+def worker_work_months(worker):
+    """Month labels only. Current month is included even with no bookings."""
+    from django.db.models import Count
+    from django.db.models.functions import ExtractMonth, ExtractYear
+
+    today = timezone.localdate()
+    profile = WorkerProfile.objects.filter(worker=worker).first()
+    enrolled = profile.enrolled_at if profile else today
+    rows = (
+        ServiceReservation.objects.filter(
+            worker=worker,
+            is_deleted=False,
+            status=ServiceReservation.Status.PAID,
+        )
+        .annotate(
+            year=ExtractYear("reservation_date"),
+            month=ExtractMonth("reservation_date"),
+        )
+        .values("year", "month")
+        .annotate(reservation_count=Count("id"))
+    )
+    found = {
+        (int(row["year"]), int(row["month"])): int(row["reservation_count"])
+        for row in rows
+    }
+    year, month = enrolled.year, enrolled.month
+    while (year, month) <= (today.year, today.month):
+        found.setdefault((year, month), 0)
+        if month == 12:
+            year, month = year + 1, 1
+        else:
+            month += 1
+    found.setdefault((today.year, today.month), 0)
+    current = (today.year, today.month)
+    months = [
+        {
+            "year": key[0],
+            "month": key[1],
+            "reservation_count": count,
+            "is_current": key == current,
+        }
+        for key, count in found.items()
+    ]
+    months.sort(key=lambda row: (row["year"], row["month"]), reverse=True)
+    return {"worker_id": worker.id, "months": months}
+
+
+def worker_work_month(worker, year, month):
+    """One month: shift hours, booking count, and booking time by day and week."""
+    start = date(year, month, 1)
+    end = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+    reservations = _active_reservations(worker, start, end)
+    offs = list(
+        WorkerTimeOff.objects.filter(worker=worker, date__gte=start, date__lt=end)
+    )
+    availability = list(WorkerAvailability.objects.filter(worker=worker))
+    days = []
+    day = start
+    while day < end:
+        shift, _open, day_rows, reservation_minutes = _day_blocks(
+            worker, day, reservations, offs, availability
+        )
+        if shift or day_rows:
+            days.append({
+                "date": day.isoformat(),
+                "weekday": WEEKDAY_LABELS[day.weekday()],
+                "shift_minutes": _range_minutes(shift),
+                "reservation_count": len(day_rows),
+                "reservation_minutes": reservation_minutes,
+                "reservations": [_reservation_brief(row) for row in day_rows],
+            })
+        day += timedelta(days=1)
+
+    weeks = []
+    for row in days:
+        row_day = date.fromisoformat(row["date"])
+        week_start = _monday(row_day)
+        week_end = week_start + timedelta(days=6)
+        if weeks and weeks[-1]["start"] == week_start.isoformat():
+            bucket = weeks[-1]
+        else:
+            bucket = {
+                "start": week_start.isoformat(),
+                "end": week_end.isoformat(),
+                "shift_minutes": 0,
+                "reservation_count": 0,
+                "reservation_minutes": 0,
+            }
+            weeks.append(bucket)
+        bucket["shift_minutes"] += row["shift_minutes"]
+        bucket["reservation_count"] += row["reservation_count"]
+        bucket["reservation_minutes"] += row["reservation_minutes"]
+
+    return {
+        "worker_id": worker.id,
+        "year": year,
+        "month": month,
+        "shift_minutes": sum(row["shift_minutes"] for row in days),
+        "reservation_count": sum(row["reservation_count"] for row in days),
+        "reservation_minutes": sum(row["reservation_minutes"] for row in days),
+        "weeks": weeks,
+        "days": days,
     }

@@ -5798,8 +5798,27 @@ class ClubViewSet(viewsets.ModelViewSet):
         if not club:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
         if request.method == "GET":
-            workers = club.members.filter(is_worker=True).order_by("full_name", "id")
-            return Response([worker_detail(member) for member in workers])
+            from .manager_permissions import has_permission
+
+            include_all = request.user.is_authenticated and (
+                club.owner_id == request.user.id
+                or has_permission(request.user, club, "lessons")
+            )
+            workers = (
+                club.members.filter(is_worker=True)
+                .select_related("user", "club")
+                .order_by("full_name", "id")
+            )
+            return Response([
+                worker_detail(
+                    member,
+                    include_login=include_all or (
+                        request.user.is_authenticated
+                        and member.user_id == request.user.id
+                    ),
+                )
+                for member in workers
+            ])
         if not request.user.is_authenticated or club.owner_id != request.user.id:
             return Response(
                 {"detail": "クラブのオーナーだけがワーカーを作成できます。"},
@@ -5878,6 +5897,94 @@ class ClubViewSet(viewsets.ModelViewSet):
                 return Response({"detail": message}, status=400)
             return Response(payload)
         return Response(worker_detail(member))
+
+    def _salon_worker(self, request, subdomain, worker_id):
+        club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
+        if not club:
+            return None, None, Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        member = (
+            club.members.filter(id=worker_id, is_worker=True)
+            .select_related("user", "club")
+            .first()
+        )
+        if not member:
+            return None, None, Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        if not request.user.is_authenticated:
+            return None, None, Response({"detail": "ログインしてください。"}, status=401)
+        if club.owner_id == request.user.id or member.user_id == request.user.id:
+            return club, member, None
+        _club, error = _staff_club(request, subdomain, "lessons")
+        if error:
+            return None, None, error
+        return club, member, None
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/workers/(?P<worker_id>\d+)/login",
+    )
+    def worker_login(self, request, subdomain=None, worker_id=None):
+        from .service_worker_schedule import link_worker_account
+
+        club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
+        if not club:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        member = club.members.filter(id=worker_id, is_worker=True).select_related("user").first()
+        if not member:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        payload, message = link_worker_account(
+            club, request.user, member, request.data.get("email")
+        )
+        if message:
+            status_code = 403 if message.startswith("クラブのオーナー") or message == "ログインしてください。" else 400
+            return Response({"detail": message}, status=status_code)
+        return Response(payload)
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/workers/(?P<worker_id>\d+)/board",
+    )
+    def worker_board(self, request, subdomain=None, worker_id=None):
+        from datetime import datetime
+
+        from .service_worker_schedule import worker_week_board
+
+        _club, member, error = self._salon_worker(request, subdomain, worker_id)
+        if error:
+            return error
+        raw = request.query_params.get("week_start")
+        week_start = None
+        if raw:
+            try:
+                week_start = datetime.strptime(raw, "%Y-%m-%d").date()
+            except ValueError:
+                return Response({"detail": "週の開始日が正しくありません。"}, status=400)
+        return Response(worker_week_board(member, week_start))
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/workers/(?P<worker_id>\d+)/work",
+    )
+    def worker_work(self, request, subdomain=None, worker_id=None):
+        from .service_worker_schedule import worker_work_month, worker_work_months
+
+        _club, member, error = self._salon_worker(request, subdomain, worker_id)
+        if error:
+            return error
+        year = request.query_params.get("year")
+        month = request.query_params.get("month")
+        if not year and not month:
+            return Response(worker_work_months(member))
+        try:
+            year_n = int(year)
+            month_n = int(month)
+        except (TypeError, ValueError):
+            return Response({"detail": "year と month が必要です。"}, status=400)
+        if month_n < 1 or month_n > 12:
+            return Response({"detail": "month が不正です。"}, status=400)
+        return Response(worker_work_month(member, year_n, month_n))
 
     @action(
         detail=False,
