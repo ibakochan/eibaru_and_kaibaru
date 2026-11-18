@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import random
 import uuid
+from collections import defaultdict
 from datetime import date, time
 from decimal import Decimal
 
@@ -56,76 +57,24 @@ def courses_for(club, *, active_only=True):
     return list(qs.order_by("position", "id"))
 
 
-def _worker_month_minutes(worker, year, month) -> int:
-    from .service_service_reservation import holding_reservations_q
-
-    start = date(year, month, 1)
-    if month == 12:
-        end = date(year + 1, 1, 1)
-    else:
-        end = date(year, month + 1, 1)
-    rows = (
-        ServiceReservation.objects.filter(
-            holding_reservations_q(),
-            worker=worker,
-            reservation_date__gte=start,
-            reservation_date__lt=end,
-        )
-        .exclude(no_show=True)
-        .values_list("start_time", "end_time")
-    )
-    total = 0
-    for start_t, end_t in rows:
-        total += max(0, _tmin(end_t) - _tmin(start_t))
-    return total
-
-
-def _under_hour_cap(worker, day: date, add_minutes: int) -> bool:
-    profile = getattr(worker, "worker_profile", None)
-    if profile is None or profile.monthly_hour_cap is None:
-        return True
-    used = _worker_month_minutes(worker, day.year, day.month)
-    cap_minutes = int(profile.monthly_hour_cap) * 60
-    return used + add_minutes <= cap_minutes
-
-
-def _availability_ranges(worker, day: date):
-    weekday = _weekday(day)
-    ranges = [
-        (_tmin(row.start_time), _tmin(row.end_time))
-        for row in WorkerAvailability.objects.filter(worker=worker, weekday=weekday)
-    ]
-    offs = WorkerTimeOff.objects.filter(worker=worker, date=day)
-    for off in offs:
-        if off.start_time is None and off.end_time is None:
+def _apply_time_offs(ranges, offs):
+    """Trim availability ranges by time-off rows. All-day off clears the day."""
+    for start, end in offs:
+        if start is None and end is None:
             return []
-        off_start = _tmin(off.start_time)
-        off_end = _tmin(off.end_time)
+        off_start = _tmin(start)
+        off_end = _tmin(end)
         trimmed = []
-        for start, end in ranges:
-            if not _overlaps(start, end, off_start, off_end):
-                trimmed.append((start, end))
+        for a_start, a_end in ranges:
+            if not _overlaps(a_start, a_end, off_start, off_end):
+                trimmed.append((a_start, a_end))
                 continue
-            if start < off_start:
-                trimmed.append((start, min(end, off_start)))
-            if end > off_end:
-                trimmed.append((max(start, off_end), end))
+            if a_start < off_start:
+                trimmed.append((a_start, min(a_end, off_start)))
+            if a_end > off_end:
+                trimmed.append((max(a_start, off_end), a_end))
         ranges = [(s, e) for s, e in trimmed if e > s]
     return ranges
-
-
-def _busy_ranges(worker, day: date, *, exclude_reservation_id=None):
-    from .service_service_reservation import holding_reservations_q
-
-    qs = ServiceReservation.objects.filter(
-        holding_reservations_q(),
-        worker=worker,
-        reservation_date=day,
-    )
-    if exclude_reservation_id is not None:
-        qs = qs.exclude(id=exclude_reservation_id)
-    rows = qs.values_list("start_time", "end_time")
-    return [(_tmin(s), _tmin(e)) for s, e in rows]
 
 
 def _free_ranges(available, busy):
@@ -144,17 +93,126 @@ def _free_ranges(available, busy):
     return free
 
 
-def _qualified_workers(club, course):
-    profiles = (
-        WorkerProfile.objects.filter(
-            worker__club=club,
-            worker__is_worker=True,
-            courses=course,
-        )
-        .select_related("worker")
-        .prefetch_related("courses")
+def _month_bounds(day: date):
+    start = date(day.year, day.month, 1)
+    if day.month == 12:
+        end = date(day.year + 1, 1, 1)
+    else:
+        end = date(day.year, day.month + 1, 1)
+    return start, end
+
+
+def _prefetch_worker_day(workers, day: date, *, exclude_reservation_id=None):
+    """Load avail / offs / busy / month minutes once for all workers on day.
+
+    Returns {worker_id: {"free": [(start,end), ...], "month_minutes": int|None,
+    "hour_cap": int|None}} so slot loops stay in memory.
+    """
+    if not workers:
+        return {}
+
+    from .service_service_reservation import holding_reservations_q
+
+    worker_ids = [worker.id for worker in workers]
+    weekday = _weekday(day)
+
+    avail_map = defaultdict(list)
+    for worker_id, start_t, end_t in WorkerAvailability.objects.filter(
+        worker_id__in=worker_ids,
+        weekday=weekday,
+    ).values_list("worker_id", "start_time", "end_time"):
+        avail_map[worker_id].append((_tmin(start_t), _tmin(end_t)))
+
+    off_map = defaultdict(list)
+    for worker_id, start_t, end_t in WorkerTimeOff.objects.filter(
+        worker_id__in=worker_ids,
+        date=day,
+    ).values_list("worker_id", "start_time", "end_time"):
+        off_map[worker_id].append((start_t, end_t))
+
+    busy_qs = ServiceReservation.objects.filter(
+        holding_reservations_q(),
+        worker_id__in=worker_ids,
+        reservation_date=day,
     )
-    return [p.worker for p in profiles]
+    if exclude_reservation_id is not None:
+        busy_qs = busy_qs.exclude(id=exclude_reservation_id)
+    busy_map = defaultdict(list)
+    for worker_id, start_t, end_t in busy_qs.values_list(
+        "worker_id", "start_time", "end_time"
+    ):
+        busy_map[worker_id].append((_tmin(start_t), _tmin(end_t)))
+
+    capped_ids = []
+    hour_caps = {}
+    for worker in workers:
+        profile = getattr(worker, "worker_profile", None)
+        if profile is None or profile.monthly_hour_cap is None:
+            hour_caps[worker.id] = None
+            continue
+        hour_caps[worker.id] = int(profile.monthly_hour_cap)
+        capped_ids.append(worker.id)
+
+    month_map = {worker_id: 0 for worker_id in capped_ids}
+    if capped_ids:
+        month_start, month_end = _month_bounds(day)
+        for worker_id, start_t, end_t in (
+            ServiceReservation.objects.filter(
+                holding_reservations_q(),
+                worker_id__in=capped_ids,
+                reservation_date__gte=month_start,
+                reservation_date__lt=month_end,
+            )
+            .exclude(no_show=True)
+            .values_list("worker_id", "start_time", "end_time")
+        ):
+            month_map[worker_id] = month_map.get(worker_id, 0) + max(
+                0, _tmin(end_t) - _tmin(start_t)
+            )
+
+    day_data = {}
+    for worker in workers:
+        available = _apply_time_offs(
+            list(avail_map.get(worker.id, [])),
+            off_map.get(worker.id, []),
+        )
+        day_data[worker.id] = {
+            "free": _free_ranges(available, busy_map.get(worker.id, [])),
+            "month_minutes": month_map.get(worker.id),
+            "hour_cap": hour_caps.get(worker.id),
+        }
+    return day_data
+
+
+def _under_hour_cap_cached(worker_id, day_data, add_minutes: int) -> bool:
+    row = day_data.get(worker_id) or {}
+    hour_cap = row.get("hour_cap")
+    if hour_cap is None:
+        return True
+    used = int(row.get("month_minutes") or 0)
+    return used + add_minutes <= hour_cap * 60
+
+
+def _worker_fits_slot(worker_id, day_data, start_min: int, end_min: int) -> bool:
+    if not _under_hour_cap_cached(worker_id, day_data, end_min - start_min):
+        return False
+    free = (day_data.get(worker_id) or {}).get("free") or []
+    return any(s <= start_min and end_min <= e for s, e in free)
+
+
+def _qualified_workers(club, course):
+    profiles = WorkerProfile.objects.filter(
+        worker__club=club,
+        worker__is_worker=True,
+        courses=course,
+    ).select_related("worker")
+    workers = []
+    for profile in profiles:
+        worker = profile.worker
+        # Avoid a reverse OneToOne lookup per worker in slot loops.
+        worker.worker_profile = profile
+        workers.append(worker)
+    return workers
 
 
 def _window_allows(windows, start_min: int, end_min: int) -> bool:
@@ -186,24 +244,19 @@ def free_workers_for_slot(
     exclude_reservation_id=None,
 ):
     """Qualified workers who are free for [start, end) on day."""
-    duration = _tmin(end) - _tmin(start)
-    free_workers = []
-    for worker in _qualified_workers(club, course):
-        if not _under_hour_cap(worker, day, duration):
-            continue
-        free = _free_ranges(
-            _availability_ranges(worker, day),
-            _busy_ranges(
-                worker,
-                day,
-                exclude_reservation_id=exclude_reservation_id,
-            ),
-        )
-        start_min = _tmin(start)
-        end_min = _tmin(end)
-        if any(s <= start_min and end_min <= e for s, e in free):
-            free_workers.append(worker)
-    return free_workers
+    workers = _qualified_workers(club, course)
+    day_data = _prefetch_worker_day(
+        workers,
+        day,
+        exclude_reservation_id=exclude_reservation_id,
+    )
+    start_min = _tmin(start)
+    end_min = _tmin(end)
+    return [
+        worker
+        for worker in workers
+        if _worker_fits_slot(worker.id, day_data, start_min, end_min)
+    ]
 
 
 def available_slots(club, course_id, day: date, section_id=None, step_minutes=None):
@@ -241,22 +294,20 @@ def available_slots(club, course_id, day: date, section_id=None, step_minutes=No
                 candidates.add(cursor)
             cursor += step
 
+    # One DB pass for the day; every slot check is then in-memory.
+    day_data = _prefetch_worker_day(workers, day)
+
     slots = []
     for start_min in sorted(candidates):
         end_min = start_min + duration
-        free_for_slot = []
         if now_min is not None and start_min <= now_min:
             free_for_slot = []
         else:
-            for worker in workers:
-                if not _under_hour_cap(worker, day, duration):
-                    continue
-                free = _free_ranges(
-                    _availability_ranges(worker, day),
-                    _busy_ranges(worker, day),
-                )
-                if any(s <= start_min and end_min <= e for s, e in free):
-                    free_for_slot.append(worker)
+            free_for_slot = [
+                worker
+                for worker in workers
+                if _worker_fits_slot(worker.id, day_data, start_min, end_min)
+            ]
         available = bool(free_for_slot)
         row = {
             "time": _from_min(start_min).strftime("%H:%M"),
