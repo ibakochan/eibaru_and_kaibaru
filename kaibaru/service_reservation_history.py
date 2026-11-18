@@ -7,9 +7,12 @@ course and worker joined in, then splits each day into paid and unpaid.
 
 from django.db.models import Count
 from django.db.models.functions import ExtractMonth, ExtractYear
+from django.utils import timezone
 
+from .cash_reservations import is_cash_reservation
 from .manager_permissions import has_permission
 from .models import Member, ServiceReservation
+from .service_reservation_manage import reopen_still_allowed
 
 WEEKDAYS = ("月", "火", "水", "木", "金", "土", "日")
 
@@ -40,6 +43,20 @@ def reservation_collected(reservation):
     return reservation.paid_at is not None
 
 
+def can_reopen_reservation(reservation, today=None):
+    """Canceled or cash-paid rows can return to 予約管理 through that date."""
+    if not reopen_still_allowed(reservation, today):
+        return False
+    if reservation.refunded_at:
+        return False
+    cash_paid = (
+        is_cash_reservation(reservation) and reservation.paid_at is not None
+    )
+    if cash_paid and reservation.platform_fee_applied:
+        return False
+    return bool(reservation.canceled or cash_paid)
+
+
 def reservation_earned_yen(reservation):
     if not reservation_collected(reservation):
         return 0
@@ -56,7 +73,8 @@ def _confirmed(club):
     )
 
 
-def service_reservation_history_index(club):
+def service_reservation_history_index(club, today=None):
+    today = today or timezone.localdate()
     rows = (
         _confirmed(club)
         .annotate(
@@ -67,7 +85,7 @@ def service_reservation_history_index(club):
         .annotate(reservation_count=Count("id"))
         .order_by("-year", "-month")
     )
-    return [
+    months = [
         {
             "year": int(row["year"]),
             "month": int(row["month"]),
@@ -75,9 +93,20 @@ def service_reservation_history_index(club):
         }
         for row in rows
     ]
+    current = (today.year, today.month)
+    if not any((row["year"], row["month"]) == current for row in months):
+        months.append({
+            "year": today.year,
+            "month": today.month,
+            "reservation_count": 0,
+        })
+    for row in months:
+        row["is_current"] = (row["year"], row["month"]) == current
+    months.sort(key=lambda row: (row["year"], row["month"]), reverse=True)
+    return months
 
 
-def _reservation_row(reservation):
+def _reservation_row(reservation, today=None):
     course = reservation.course
     worker = reservation.worker
     course_name = course.name if course else ""
@@ -98,10 +127,12 @@ def _reservation_row(reservation):
         "canceled": reservation.canceled,
         "no_show": reservation.no_show,
         "refunded": reservation.refunded_at is not None,
+        "can_reopen": can_reopen_reservation(reservation, today),
     }
 
 
-def service_reservation_history_month(club, year, month):
+def service_reservation_history_month(club, year, month, today=None):
+    today = today or timezone.localdate()
     start, end = _month_bounds(year, month)
     reservations = list(
         _confirmed(club)
@@ -116,7 +147,7 @@ def service_reservation_history_month(club, year, month):
             reservation.reservation_date,
             {"paid": [], "unpaid": [], "earned_yen": 0},
         )
-        row = _reservation_row(reservation)
+        row = _reservation_row(reservation, today)
         if row["paid"]:
             day["paid"].append(row)
         else:

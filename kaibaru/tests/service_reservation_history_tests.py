@@ -1,5 +1,5 @@
 """Reservation history lists months first, then one month of bookings."""
-from datetime import date, time
+from datetime import date, time, timedelta
 
 from django.db.models.signals import post_save
 from django.test import TestCase
@@ -7,10 +7,15 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from accounts.models import CustomUser
+from kaibaru.cash_reservations import CashReservationError
 from kaibaru.models import Club, ServiceCourse, ServiceReservation
 from kaibaru.service_reservation_history import (
     service_reservation_history_index,
     service_reservation_history_month,
+)
+from kaibaru.service_reservation_manage import (
+    _reopen,
+    list_manageable_reservations,
 )
 from kaibaru.signals import club_created_signal
 
@@ -74,15 +79,39 @@ class ServiceReservationHistoryTests(TestCase):
         self.book(when=date(2026, 11, 6), key="gone", is_deleted=True)
 
         with self.assertNumQueries(1):
-            months = service_reservation_history_index(self.club)
+            months = service_reservation_history_index(
+                self.club, today=date(2026, 11, 18)
+            )
 
         self.assertEqual(
             months,
             [
-                {"year": 2026, "month": 11, "reservation_count": 2},
-                {"year": 2026, "month": 10, "reservation_count": 1},
+                {
+                    "year": 2026,
+                    "month": 11,
+                    "reservation_count": 2,
+                    "is_current": True,
+                },
+                {
+                    "year": 2026,
+                    "month": 10,
+                    "reservation_count": 1,
+                    "is_current": False,
+                },
             ],
         )
+
+    def test_index_includes_the_current_month_when_it_has_no_bookings(self):
+        self.book(when=date(2026, 10, 4), key="only-oct")
+
+        months = service_reservation_history_index(
+            self.club, today=date(2026, 11, 18)
+        )
+
+        self.assertEqual(months[0]["year"], 2026)
+        self.assertEqual(months[0]["month"], 11)
+        self.assertEqual(months[0]["reservation_count"], 0)
+        self.assertTrue(months[0]["is_current"])
 
     def test_month_puts_paid_before_unpaid_and_sums_the_day(self):
         self.book(
@@ -135,6 +164,119 @@ class ServiceReservationHistoryTests(TestCase):
         )
         self.assertTrue(day["paid"][0]["paid"])
         self.assertTrue(day["paid"][0]["refunded"])
+
+    def test_current_month_includes_paid_bookings_on_a_later_date(self):
+        later = date(2026, 11, 28)
+        self.book(when=later, key="later-paid", amount=7000, full_name="来週")
+
+        detail = service_reservation_history_month(
+            self.club, 2026, 11, today=date(2026, 11, 18)
+        )
+
+        day = next(row for row in detail["days"] if row["date"] == "2026-11-28")
+        self.assertEqual(day["paid"][0]["full_name"], "来週")
+        self.assertEqual(day["earned_yen"], 7000)
+
+    def test_manage_board_drops_cash_paid_and_canceled(self):
+        today = timezone.localdate()
+        open_row = self.book(
+            when=today,
+            key="board-open",
+            payment_method="cash",
+            paid_at=None,
+            amount=3000,
+        )
+        self.book(
+            when=today + timedelta(days=1),
+            key="board-paid",
+            payment_method="cash",
+            paid_at=timezone.now(),
+            amount=3000,
+            start_time=time(12, 0),
+            end_time=time(13, 0),
+        )
+        self.book(
+            when=today + timedelta(days=2),
+            key="board-canceled",
+            canceled=True,
+            start_time=time(14, 0),
+            end_time=time(15, 0),
+        )
+        future_paid = self.book(
+            when=today + timedelta(days=3),
+            key="board-future-card",
+            amount=4000,
+            start_time=time(16, 0),
+            end_time=time(17, 0),
+        )
+
+        ids = [
+            row["id"]
+            for row in list_manageable_reservations(self.club, self.owner)
+        ]
+        self.assertIn(open_row.id, ids)
+        self.assertIn(future_paid.id, ids)
+        self.assertEqual(len(ids), 2)
+
+    def test_reopen_until_the_day_after_the_reservation(self):
+        when = timezone.localdate() + timedelta(days=2)
+        paid = self.book(
+            when=when,
+            key="reopen-paid",
+            payment_method="cash",
+            paid_at=timezone.now(),
+            amount=3000,
+        )
+        canceled = self.book(
+            when=when,
+            key="reopen-canceled",
+            canceled=True,
+            start_time=time(12, 0),
+            end_time=time(13, 0),
+        )
+
+        open_day = service_reservation_history_month(
+            self.club, when.year, when.month, today=when
+        )
+        flags = {
+            row["id"]: row["can_reopen"]
+            for day in open_day["days"]
+            for group in ("paid", "unpaid")
+            for row in day[group]
+        }
+        self.assertTrue(flags[paid.id])
+        self.assertTrue(flags[canceled.id])
+
+        locked = service_reservation_history_month(
+            self.club,
+            when.year,
+            when.month,
+            today=when + timedelta(days=1),
+        )
+        locked_flags = {
+            row["id"]: row["can_reopen"]
+            for day in locked["days"]
+            for group in ("paid", "unpaid")
+            for row in day[group]
+        }
+        self.assertFalse(locked_flags[paid.id])
+        self.assertFalse(locked_flags[canceled.id])
+
+        _reopen(paid, today=when)
+        paid.refresh_from_db()
+        self.assertIsNone(paid.paid_at)
+        self.assertIn(
+            paid.id,
+            [
+                row["id"]
+                for row in list_manageable_reservations(self.club, self.owner)
+            ],
+        )
+
+        with self.assertRaises(CashReservationError):
+            _reopen(canceled, today=when + timedelta(days=1))
+        canceled.refresh_from_db()
+        self.assertTrue(canceled.canceled)
 
     def test_owner_loads_months_then_one_month(self):
         self.book(when=date(2026, 11, 18), key="api-paid", amount=5000)

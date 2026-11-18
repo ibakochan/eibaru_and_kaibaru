@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from .cash_reservations import (
@@ -27,7 +28,7 @@ from .manager_permissions import has_permission
 from .models import Member, ServiceReservation
 
 
-MANAGE_ACTIONS = ACTIONS + ("cancel", "restore")
+MANAGE_ACTIONS = ACTIONS + ("cancel", "restore", "reopen")
 
 
 def resolve_service_actor(user, club):
@@ -160,6 +161,12 @@ def list_manageable_reservations(club, user, *, actor=None):
             is_deleted=False,
             status=ServiceReservation.Status.PAID,
             reservation_date__gte=window_start,
+            canceled=False,
+        )
+        .exclude(
+            Q(payment_method=ServiceReservation.PaymentMethod.CASH)
+            & Q(paid_at__isnull=False)
+            & Q(amount__gt=0)
         )
         .select_related("course", "worker")
         .order_by("reservation_date", "start_time", "id")
@@ -201,6 +208,8 @@ def apply_service_manage_action(*, reservation_id, action, user, club):
             _cancel(reservation)
         elif action == "restore":
             _restore(reservation)
+        elif action == "reopen":
+            _reopen(reservation)
         else:
             if not is_cash_reservation(reservation):
                 raise CashReservationError("現地払いの予約ではありません。")
@@ -240,6 +249,44 @@ def _restore(reservation):
     # Keep it simple: allow restore; slot checks happen on new bookings.
     reservation.canceled = False
     reservation.save(update_fields=["canceled"])
+
+
+def reopen_still_allowed(reservation, today=None):
+    """True through the reservation date. The next day is too late."""
+    today = today or timezone.localdate()
+    return today <= reservation.reservation_date
+
+
+def _reopen(reservation, today=None):
+    """Put a paid or canceled booking back on the manage board.
+
+    Cash that was marked received is unmarked. A cancel is cleared.
+    Both can apply to the same row. Stripe charges are not undone.
+    """
+    if not reopen_still_allowed(reservation, today):
+        raise CashReservationError(
+            "予約日の翌日以降は、予約管理に戻せません。"
+        )
+
+    cash_paid = (
+        is_cash_reservation(reservation) and reservation.paid_at is not None
+    )
+    if not reservation.canceled and not cash_paid:
+        raise CashReservationError("この予約は戻せません。")
+    if cash_paid and reservation.platform_fee_applied:
+        raise CashReservationError(
+            "この支払いはすでにKaibaruの手数料に含まれているため、"
+            "取り消せません。"
+        )
+
+    update_fields = []
+    if reservation.canceled:
+        reservation.canceled = False
+        update_fields.append("canceled")
+    if cash_paid:
+        reservation.paid_at = None
+        update_fields.append("paid_at")
+    reservation.save(update_fields=update_fields)
 
 
 def _run_service_cash_action(reservation, action):
