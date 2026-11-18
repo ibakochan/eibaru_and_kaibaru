@@ -5781,7 +5781,9 @@ class ClubViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return Response(
-            service_reservation_history_month(club, year_n, month_n)
+            service_reservation_history_month(
+                club, year_n, month_n, user=request.user
+            )
         )
 
     @action(

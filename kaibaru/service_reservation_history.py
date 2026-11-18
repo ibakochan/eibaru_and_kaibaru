@@ -12,7 +12,7 @@ from django.utils import timezone
 from .cash_reservations import is_cash_reservation
 from .manager_permissions import has_permission
 from .models import Member, ServiceReservation
-from .service_reservation_manage import reopen_still_allowed
+from .service_reservation_manage import manage_flags, reopen_still_allowed, resolve_service_actor
 
 WEEKDAYS = ("月", "火", "水", "木", "金", "土", "日")
 
@@ -106,7 +106,18 @@ def service_reservation_history_index(club, today=None):
     return months
 
 
-def _reservation_row(reservation, today=None):
+def _history_group(reservation):
+    """Paid first, then canceled, then no-shows. Open unpaid stays separate."""
+    if reservation.no_show:
+        return "no_shows"
+    if reservation.canceled:
+        return "canceled"
+    if reservation_collected(reservation):
+        return "paid"
+    return "unpaid"
+
+
+def _reservation_row(reservation, today=None, user=None, actor=None):
     course = reservation.course
     worker = reservation.worker
     course_name = course.name if course else ""
@@ -128,16 +139,20 @@ def _reservation_row(reservation, today=None):
         "no_show": reservation.no_show,
         "refunded": reservation.refunded_at is not None,
         "can_reopen": can_reopen_reservation(reservation, today),
+        "can_mark_no_show": manage_flags(
+            reservation, user, actor=actor
+        )["can_mark_no_show"],
     }
 
 
-def service_reservation_history_month(club, year, month, today=None):
+def service_reservation_history_month(club, year, month, today=None, user=None):
     today = today or timezone.localdate()
     start, end = _month_bounds(year, month)
+    actor = resolve_service_actor(user, club) if user else None
     reservations = list(
         _confirmed(club)
         .filter(reservation_date__gte=start, reservation_date__lt=end)
-        .select_related("course", "worker")
+        .select_related("course", "worker", "club")
         .order_by("reservation_date", "start_time", "id")
     )
 
@@ -145,13 +160,16 @@ def service_reservation_history_month(club, year, month, today=None):
     for reservation in reservations:
         day = by_date.setdefault(
             reservation.reservation_date,
-            {"paid": [], "unpaid": [], "earned_yen": 0},
+            {
+                "paid": [],
+                "canceled": [],
+                "no_shows": [],
+                "unpaid": [],
+                "earned_yen": 0,
+            },
         )
-        row = _reservation_row(reservation, today)
-        if row["paid"]:
-            day["paid"].append(row)
-        else:
-            day["unpaid"].append(row)
+        row = _reservation_row(reservation, today, user, actor)
+        day[_history_group(reservation)].append(row)
         day["earned_yen"] += reservation_earned_yen(reservation)
 
     days = []
@@ -161,6 +179,8 @@ def service_reservation_history_month(club, year, month, today=None):
             "weekday": WEEKDAYS[day.weekday()],
             "earned_yen": bucket["earned_yen"],
             "paid": bucket["paid"],
+            "canceled": bucket["canceled"],
+            "no_shows": bucket["no_shows"],
             "unpaid": bucket["unpaid"],
         })
     return {

@@ -177,6 +177,39 @@ class ServiceReservationHistoryTests(TestCase):
         self.assertEqual(day["paid"][0]["full_name"], "来週")
         self.assertEqual(day["earned_yen"], 7000)
 
+    def test_day_lists_paid_then_canceled_then_no_shows(self):
+        when = date(2026, 11, 10)
+        self.book(when=when, key="group-paid", amount=2000, full_name="支払")
+        self.book(
+            when=when,
+            key="group-cancel",
+            canceled=True,
+            start_time=time(11, 0),
+            end_time=time(12, 0),
+            full_name="取消",
+        )
+        self.book(
+            when=when,
+            key="group-noshow",
+            payment_method="cash",
+            paid_at=None,
+            no_show=True,
+            amount=1500,
+            start_time=time(13, 0),
+            end_time=time(14, 0),
+            full_name="欠席者",
+        )
+
+        detail = service_reservation_history_month(
+            self.club, 2026, 11, today=when
+        )
+        day = detail["days"][0]
+        self.assertEqual([row["full_name"] for row in day["paid"]], ["支払"])
+        self.assertEqual([row["full_name"] for row in day["canceled"]], ["取消"])
+        self.assertEqual([row["full_name"] for row in day["no_shows"]], ["欠席者"])
+        self.assertEqual(day["unpaid"], [])
+        self.assertEqual(day["earned_yen"], 2000)
+
     def test_manage_board_drops_cash_paid_and_canceled(self):
         today = timezone.localdate()
         open_row = self.book(
@@ -241,7 +274,7 @@ class ServiceReservationHistoryTests(TestCase):
         flags = {
             row["id"]: row["can_reopen"]
             for day in open_day["days"]
-            for group in ("paid", "unpaid")
+            for group in ("paid", "unpaid", "canceled", "no_shows")
             for row in day[group]
         }
         self.assertTrue(flags[paid.id])
@@ -256,7 +289,7 @@ class ServiceReservationHistoryTests(TestCase):
         locked_flags = {
             row["id"]: row["can_reopen"]
             for day in locked["days"]
-            for group in ("paid", "unpaid")
+            for group in ("paid", "unpaid", "canceled", "no_shows")
             for row in day[group]
         }
         self.assertFalse(locked_flags[paid.id])
