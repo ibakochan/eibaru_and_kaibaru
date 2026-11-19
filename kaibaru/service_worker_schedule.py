@@ -600,6 +600,7 @@ def create_owner_worker(club, actor, payload, files=None):
         gender = "female"
     phone = str(_payload_get(payload, "phone_number") or "")[:20] or None
     introduction = str(_payload_get(payload, "introduction") or "")[:2000]
+    login_email = str(_payload_get(payload, "login_email") or "").strip()
 
     if as_self:
         if not full_name:
@@ -698,10 +699,16 @@ def create_owner_worker(club, actor, payload, files=None):
             )
             _apply_worker_picture(member, files)
             ensure_worker_profile(member)
+            if login_email:
+                _, message = link_worker_account(club, actor, member, login_email)
+                if message:
+                    raise ValueError(message)
+    except ValueError as exc:
+        return None, str(exc)
     except IntegrityError:
         return None, "同じ名前・生年月日の会員がすでにあります。"
     sync_worker_quantity(club)
-    return worker_detail(member), None
+    return worker_detail(member, include_login=True), None
 
 
 def worker_deletion_summary(member):
