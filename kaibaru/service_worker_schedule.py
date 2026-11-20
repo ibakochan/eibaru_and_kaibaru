@@ -1186,14 +1186,37 @@ def _save_schedule_version(member, profile, parsed, booking, breaks):
         _write_version_rows(member, current, planned)
 
 
+def _time_off_payload(off):
+    return {
+        "id": off.id,
+        "date": off.date.isoformat(),
+        "start_time": off.start_time.strftime("%H:%M") if off.start_time else None,
+        "end_time": off.end_time.strftime("%H:%M") if off.end_time else None,
+        "note": off.note,
+    }
+
+
 def add_worker_time_off(member, payload):
     profile = ensure_worker_profile(member)
     if profile is None:
         return None, "ワーカーではありません。"
-    try:
-        day = date.fromisoformat(str(payload.get("date"))[:10])
-    except (TypeError, ValueError):
-        return None, "休みの日付を入力してください。"
+    raw_dates = payload.get("dates")
+    if not isinstance(raw_dates, list) or not raw_dates:
+        single = payload.get("date")
+        raw_dates = [single] if single else []
+    days = []
+    seen = set()
+    for raw in raw_dates:
+        try:
+            day = date.fromisoformat(str(raw)[:10])
+        except (TypeError, ValueError):
+            return None, "休みの日付を入力してください。"
+        if day in seen:
+            continue
+        seen.add(day)
+        days.append(day)
+    if not days:
+        return None, "休みの日を選択してください。"
     start_raw = payload.get("start_time")
     end_raw = payload.get("end_time")
     if start_raw in (None, "") and end_raw in (None, ""):
@@ -1206,20 +1229,20 @@ def add_worker_time_off(member, payload):
     note = payload.get("note") or ""
     if not isinstance(note, str):
         note = ""
-    off = WorkerTimeOff.objects.create(
-        worker=member,
-        date=day,
-        start_time=start,
-        end_time=end,
-        note=note[:200],
-    )
-    return {
-        "id": off.id,
-        "date": off.date.isoformat(),
-        "start_time": off.start_time.strftime("%H:%M") if off.start_time else None,
-        "end_time": off.end_time.strftime("%H:%M") if off.end_time else None,
-        "note": off.note,
-    }, None
+    created = []
+    with transaction.atomic():
+        for day in days:
+            off = WorkerTimeOff.objects.create(
+                worker=member,
+                date=day,
+                start_time=start,
+                end_time=end,
+                note=note[:200],
+            )
+            created.append(_time_off_payload(off))
+    if len(created) == 1:
+        return created[0], None
+    return created, None
 
 
 def delete_worker_time_off(member, time_off_id):
