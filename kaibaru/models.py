@@ -3610,7 +3610,19 @@ class WorkerCourse(models.Model):
 
 
 class WorkerAvailability(models.Model):
-    """Default weekly hours a worker is available for booking."""
+    """Weekly hours for one worker.
+
+    kind=work is 出勤時間. A day can have several of these.
+    break_minutes is a rest that must fit somewhere inside that span.
+    The exact clock time of the break is not stored.
+
+    kind=booking is 予約受付時間. When a weekday has none, booking
+    uses that day's 出勤時間.
+    """
+
+    class Kind(models.TextChoices):
+        WORK = "work", "Work"
+        BOOKING = "booking", "Open for reservations"
 
     worker = models.ForeignKey(
         Member,
@@ -3629,8 +3641,14 @@ class WorkerAvailability(models.Model):
             (6, "日曜日"),
         ]
     )
+    kind = models.CharField(
+        max_length=16,
+        choices=Kind.choices,
+        default=Kind.WORK,
+    )
     start_time = models.TimeField()
     end_time = models.TimeField()
+    break_minutes = models.PositiveIntegerField(default=0)
 
     class Meta:
         ordering = ["weekday", "start_time", "id"]
@@ -3639,6 +3657,15 @@ class WorkerAvailability(models.Model):
         super().clean()
         if self.start_time and self.end_time and self.start_time >= self.end_time:
             raise ValidationError({"end_time": "終了時刻は開始時刻より後にしてください。"})
+        if self.start_time and self.end_time and self.break_minutes:
+            span = (
+                self.end_time.hour * 60
+                + self.end_time.minute
+                - self.start_time.hour * 60
+                - self.start_time.minute
+            )
+            if self.break_minutes >= span:
+                raise ValidationError({"break_minutes": "休憩は出勤時間より短くしてください。"})
         if self.worker_id and not self.worker.is_worker:
             raise ValidationError({"worker": "会員をワーカーにしてから設定してください。"})
 

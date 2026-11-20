@@ -5885,8 +5885,12 @@ class ClubViewSet(viewsets.ModelViewSet):
             _, message = set_worker_courses(member, data.get("course_ids"))
             if message:
                 return Response({"detail": message}, status=400)
-        if "availability" in data:
-            _, message = replace_worker_availability(member, data.get("availability"))
+        if "availability" in data or "booking_hours" in data:
+            _, message = replace_worker_availability(
+                member,
+                data.get("availability"),
+                data.get("booking_hours") or [],
+            )
             if message:
                 return Response({"detail": message}, status=400)
         if "monthly_hour_cap" in data or "hourly_rate" in data:
