@@ -254,6 +254,20 @@ def _bookable_ranges(work_spans, book_spans, offs):
     return _apply_time_offs(chosen, offs)
 
 
+def _range_covered(start, end, spans) -> bool:
+    """True when [start, end) sits inside the union of spans."""
+    cursor = start
+    for span_start, span_end in sorted(spans):
+        if span_end <= cursor:
+            continue
+        if span_start > cursor:
+            return False
+        cursor = span_end
+        if cursor >= end:
+            return True
+    return cursor >= end
+
+
 def _intersect_ranges(left, right):
     out = []
     for a0, a1 in left:
@@ -963,10 +977,7 @@ def replace_worker_availability(member, rows, booking_rows=None):
         if not work_by_day.get(weekday):
             return None, "予約受付時間を入れる日は、先に出勤時間を入れてください。"
         start_min, end_min = _tmin(start), _tmin(end)
-        if not any(
-            _overlaps(start_min, end_min, work_start, work_end)
-            for work_start, work_end in work_by_day[weekday]
-        ):
+        if not _range_covered(start_min, end_min, work_by_day[weekday]):
             return None, "予約受付時間は出勤時間の中にしてください。"
     for weekday, start, end, break_minutes in parsed:
         if break_minutes <= 0:
