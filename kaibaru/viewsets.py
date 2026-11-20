@@ -5886,6 +5886,8 @@ class ClubViewSet(viewsets.ModelViewSet):
             if message:
                 return Response({"detail": message}, status=400)
         if "availability" in data or "booking_hours" in data or "breaks" in data:
+            if error and not is_member_owner:
+                return error
             _, message = replace_worker_availability(
                 member,
                 data.get("availability"),
@@ -5997,6 +5999,44 @@ class ClubViewSet(viewsets.ModelViewSet):
 
     @action(
         detail=False,
+        methods=["get"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/workers/(?P<worker_id>\d+)/schedule",
+    )
+    def worker_schedule_month(self, request, subdomain=None, worker_id=None):
+        from .manager_permissions import has_permission, manager_role
+        from .service_worker_schedule import worker_month_schedule
+
+        club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
+        if not club:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        member = (
+            club.members.filter(id=worker_id, is_worker=True)
+            .select_related("user", "club")
+            .first()
+        )
+        if not member:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        if not request.user.is_authenticated:
+            return Response({"detail": "ログインしてください。"}, status=401)
+        can_read = (
+            club.owner_id == request.user.id
+            or member.user_id == request.user.id
+            or has_permission(request.user, club, "lessons")
+            or manager_role(request.user, club) is not None
+        )
+        if not can_read:
+            return Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            year_n = int(request.query_params.get("year"))
+            month_n = int(request.query_params.get("month"))
+        except (TypeError, ValueError):
+            return Response({"detail": "year と month が必要です。"}, status=400)
+        if month_n < 1 or month_n > 12:
+            return Response({"detail": "month が不正です。"}, status=400)
+        return Response(worker_month_schedule(member, year_n, month_n))
+
+    @action(
+        detail=False,
         methods=["post"],
         url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/workers/(?P<worker_id>\d+)/pay-extras",
     )
@@ -6049,18 +6089,19 @@ class ClubViewSet(viewsets.ModelViewSet):
         member = club.members.filter(id=worker_id, is_worker=True).first()
         if not member:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
-        is_self = request.user.is_authenticated and member.user_id == request.user.id
         is_member_owner = (
             request.user.is_authenticated and member.owner_id == request.user.id
         )
         _, error = _staff_club(request, subdomain, "lessons")
-        if error and not is_self and not is_member_owner:
+        if error and not is_member_owner:
             return error
         if request.method == "DELETE":
             if not time_off_id:
                 return Response({"detail": "休みを指定してください。"}, status=400)
-            if not delete_worker_time_off(member, time_off_id):
-                return Response({"detail": "Not found"}, status=404)
+            deleted, message = delete_worker_time_off(member, time_off_id)
+            if not deleted:
+                code = 404 if message == "休みが見つかりません。" else 400
+                return Response({"detail": message}, status=code)
             return Response(status=status.HTTP_204_NO_CONTENT)
         payload, message = add_worker_time_off(member, request.data)
         if message:

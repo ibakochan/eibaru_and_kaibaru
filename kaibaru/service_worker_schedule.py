@@ -1196,6 +1196,25 @@ def _time_off_payload(off):
     }
 
 
+def _yasumi_blocked_by_reservation(member, day, start, end):
+    """A taken reservation on a past day blocks yasumi that overlaps it."""
+    rows = ServiceReservation.objects.filter(
+        worker=member,
+        reservation_date=day,
+        canceled=False,
+        is_deleted=False,
+        status=ServiceReservation.Status.PAID,
+    ).only("start_time", "end_time")
+    if start is None:
+        return rows.exists()
+    off_start = _tmin(start)
+    off_end = _tmin(end)
+    for row in rows:
+        if _overlaps(off_start, off_end, _tmin(row.start_time), _tmin(row.end_time)):
+            return True
+    return False
+
+
 def add_worker_time_off(member, payload):
     profile = ensure_worker_profile(member)
     if profile is None:
@@ -1226,6 +1245,14 @@ def add_worker_time_off(member, payload):
         end = _parse_hhmm(end_raw)
         if not start or not end or start >= end:
             return None, "休みの時間を正しく入力してください。"
+    today = timezone.localdate()
+    month_start = today.replace(day=1)
+    for day in days:
+        label = f"{day.month}/{day.day}"
+        if day < month_start:
+            return None, f"{label}は過去の月なので、休みにできません。"
+        if day < today and _yasumi_blocked_by_reservation(member, day, start, end):
+            return None, f"{label}には予約があるので、休みにできません。"
     note = payload.get("note") or ""
     if not isinstance(note, str):
         note = ""
@@ -1246,8 +1273,14 @@ def add_worker_time_off(member, payload):
 
 
 def delete_worker_time_off(member, time_off_id):
-    deleted, _ = WorkerTimeOff.objects.filter(worker=member, id=time_off_id).delete()
-    return deleted > 0
+    off = WorkerTimeOff.objects.filter(worker=member, id=time_off_id).first()
+    if off is None:
+        return False, "休みが見つかりません。"
+    today = timezone.localdate()
+    if off.date < today.replace(day=1):
+        return False, "過去の月の休みは削除できません。"
+    off.delete()
+    return True, None
 
 
 def update_worker_profile(member, payload):
@@ -1379,6 +1412,67 @@ def worker_detail(member, *, include_login=False):
             }
             for row in offs
         ],
+    }
+
+
+def _span_payload(rows, kind):
+    return [
+        {
+            "weekday": row.weekday,
+            "start_time": row.start_time.strftime("%H:%M"),
+            "end_time": row.end_time.strftime("%H:%M"),
+        }
+        for row in rows
+        if row.kind == kind
+    ]
+
+
+def worker_month_schedule(member, year, month):
+    """Yasumi and the weekly schedule that applied during one calendar month.
+
+    Includes the version already in effect on the 1st, plus any version that
+    starts during the month. Days before the first version stay empty.
+    """
+    start = date(year, month, 1)
+    end = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+    versions, grouped = _schedule_bundle(member)
+    chosen = []
+    if versions:
+        prior = None
+        for version in versions:
+            if version.effective_on < start:
+                prior = version
+            elif version.effective_on < end:
+                chosen.append(version)
+        if prior is not None:
+            chosen.insert(0, prior)
+        snapshots = []
+        for version in chosen:
+            rows = grouped.get(version.id, [])
+            snapshots.append({
+                "effective_on": version.effective_on.isoformat(),
+                "availability": _span_payload(rows, WorkerAvailability.Kind.WORK),
+                "breaks": _span_payload(rows, WorkerAvailability.Kind.BREAK),
+                "booking_hours": _span_payload(rows, WorkerAvailability.Kind.BOOKING),
+            })
+    else:
+        legacy = grouped.get(None, [])
+        profile = WorkerProfile.objects.filter(worker=member).first()
+        enrolled = profile.enrolled_at if profile and profile.enrolled_at else date(2000, 1, 1)
+        snapshots = [{
+            "effective_on": enrolled.isoformat(),
+            "availability": _span_payload(legacy, WorkerAvailability.Kind.WORK),
+            "breaks": _span_payload(legacy, WorkerAvailability.Kind.BREAK),
+            "booking_hours": _span_payload(legacy, WorkerAvailability.Kind.BOOKING),
+        }] if legacy else []
+    offs = WorkerTimeOff.objects.filter(
+        worker=member, date__gte=start, date__lt=end
+    ).order_by("date", "start_time", "id")
+    return {
+        "year": year,
+        "month": month,
+        "time_offs": [_time_off_payload(row) for row in offs],
+        "versions": snapshots,
     }
 
 
