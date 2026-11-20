@@ -8,7 +8,7 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from .manager_permissions import SELF_PAYMENT_MESSAGE, manages_own_money
-from .models import Member, WorkerInvoice, WorkerPay, WorkerProfile
+from .models import Member, WorkerInvoice, WorkerPay, WorkerPayExtra, WorkerProfile
 from .service_instructor_pay import previous_month
 from .service_worker_schedule import work_month_stats
 
@@ -91,6 +91,56 @@ def _pay_payload(pay):
     }
 
 
+def _money(hours, rate):
+    if rate is None:
+        return 0
+    return int(
+        (hours * Decimal(rate)).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    )
+
+
+def salary_breakdown(worker, year, month, shift_minutes):
+    """Reservation pay, shift pay, monthly pay, and manual extras. Empty parts are 0."""
+    from .service_worker_schedule import work_month_stats
+
+    stats = work_month_stats(worker, year, month)
+    profile = WorkerProfile.objects.filter(worker=worker).first()
+    pay = WorkerPay.objects.filter(worker=worker).first()
+    reservation_hours = Decimal(stats["hours_worked"])
+    shift_hours = (Decimal(shift_minutes) / Decimal(60)).quantize(Decimal("0.01"))
+    reservation_rate = profile.hourly_rate if profile else None
+    shift_rate = profile.shift_hourly_rate if profile else None
+    monthly_amount = pay.monthly_amount if pay and pay.monthly_amount else 0
+    reservation_amount = _money(reservation_hours, reservation_rate)
+    shift_amount = _money(shift_hours, shift_rate)
+    extras = [
+        {
+            "id": row.id,
+            "label": row.label,
+            "note": row.note,
+            "amount": row.amount,
+        }
+        for row in WorkerPayExtra.objects.filter(
+            worker=worker, year=year, month=month
+        )
+    ]
+    extra_amount = sum(row["amount"] for row in extras)
+    total = reservation_amount + shift_amount + monthly_amount + extra_amount
+    return {
+        "shift_hours": str(shift_hours),
+        "shift_rate": shift_rate,
+        "shift_amount": shift_amount,
+        "reservation_hours": str(reservation_hours),
+        "reservation_rate": reservation_rate,
+        "reservation_amount": reservation_amount,
+        "reservation_count": stats["reservation_count"],
+        "monthly_amount": monthly_amount or None,
+        "extras": extras,
+        "extra_amount": extra_amount,
+        "total_amount": total,
+    }
+
+
 def _hourly_amount(worker, year, month):
     profile = WorkerProfile.objects.filter(worker=worker).first()
     if profile is None or profile.hourly_rate is None:
@@ -109,7 +159,9 @@ def _hourly_amount(worker, year, month):
 def create_monthly_worker_invoices(year=None, month=None):
     """One statement per active worker pay for that calendar month.
 
-    Fixed monthly_amount wins. Otherwise hourly_rate * hours worked.
+    The amount is reservation pay plus shift pay plus monthly pay plus extras.
+    Empty rates are left out. Later schedule edits do not rewrite an existing statement
+    unless an extra line is added or removed.
     """
     if year is None or month is None:
         year, month = previous_month(timezone.localdate())
@@ -120,19 +172,16 @@ def create_monthly_worker_invoices(year=None, month=None):
         .select_related("club", "worker")
     )
     created = 0
+    from .service_worker_schedule import worker_work_month
+
     for pay in pays:
-        amount = pay.monthly_amount
-        hours = Decimal("0")
-        reservation_count = 0
-        if amount is None or amount == 0:
-            hourly, hours, reservation_count = _hourly_amount(pay.worker, year, month)
-            if hourly is None or hourly <= 0:
-                continue
-            amount = hourly
-        else:
-            stats = work_month_stats(pay.worker, year, month)
-            hours = Decimal(stats["hours_worked"])
-            reservation_count = stats["reservation_count"]
+        month_detail = worker_work_month(pay.worker, year, month)
+        breakdown = month_detail["pay"]
+        amount = breakdown["total_amount"]
+        hours = Decimal(breakdown["reservation_hours"])
+        reservation_count = breakdown["reservation_count"]
+        if amount <= 0:
+            continue
         try:
             with transaction.atomic():
                 _, was_created = WorkerInvoice.objects.get_or_create(
@@ -334,9 +383,72 @@ def worker_history_months(member):
     }
 
 
+def add_worker_pay_extra(club, member, payload, actor=None):
+    blocked = _self_pay_block(actor, member)
+    if blocked:
+        return None, blocked
+    year, month, error = _year_month(payload)
+    if error:
+        return None, error
+    amount, error = _yen(payload.get("amount"), required=True)
+    if error:
+        return None, error
+    if amount < 1:
+        return None, "金額は1円以上にしてください。"
+    label = payload.get("label") or "残業"
+    if not isinstance(label, str) or not label.strip():
+        label = "残業"
+    note = payload.get("note") or ""
+    if not isinstance(note, str):
+        return None, "メモの指定が正しくありません。"
+    extra = WorkerPayExtra.objects.create(
+        club=club,
+        worker=member,
+        year=year,
+        month=month,
+        label=label.strip()[:40],
+        note=note.strip()[:500],
+        amount=amount,
+    )
+    _refresh_invoice_total(member, year, month)
+    return {
+        "id": extra.id,
+        "label": extra.label,
+        "note": extra.note,
+        "amount": extra.amount,
+    }, None
+
+
+def delete_worker_pay_extra(club, member, extra_id, actor=None):
+    blocked = _self_pay_block(actor, member)
+    if blocked:
+        return False, blocked
+    extra = WorkerPayExtra.objects.filter(club=club, worker=member, id=extra_id).first()
+    if extra is None:
+        return False, None
+    year, month = extra.year, extra.month
+    extra.delete()
+    _refresh_invoice_total(member, year, month)
+    return True, None
+
+
+def _refresh_invoice_total(member, year, month):
+    from .service_worker_schedule import worker_work_month
+
+    invoice = WorkerInvoice.objects.filter(worker=member, year=year, month=month).first()
+    if invoice is None:
+        return
+    total = worker_work_month(member, year, month)["pay"]["total_amount"]
+    invoice.amount = total
+    invoice.save(update_fields=["amount"])
+
+
 def worker_history_month(member, year, month):
     """Lazy detail for one month: hours, bookings, invoice/pay for that month."""
+    from .service_worker_schedule import worker_work_month
+
     stats = work_month_stats(member, year, month)
+    breakdown = worker_work_month(member, year, month)["pay"]
     invoice = WorkerInvoice.objects.filter(
         worker=member,
         year=year,
@@ -344,20 +456,12 @@ def worker_history_month(member, year, month):
     ).first()
     pay = WorkerPay.objects.filter(club=member.club, worker=member).first()
     profile = WorkerProfile.objects.filter(worker=member).first()
-    suggested = None
-    if pay and pay.monthly_amount:
-        suggested = pay.monthly_amount
-    elif profile and profile.hourly_rate is not None:
-        suggested = int(
-            (Decimal(stats["hours_worked"]) * Decimal(profile.hourly_rate)).quantize(
-                Decimal("1"),
-                rounding=ROUND_HALF_UP,
-            )
-        )
     return {
         **stats,
         "pay": _pay_payload(pay),
         "hourly_rate": profile.hourly_rate if profile else None,
-        "suggested_amount": suggested,
+        "shift_hourly_rate": profile.shift_hourly_rate if profile else None,
+        "salary": breakdown,
+        "suggested_amount": breakdown["total_amount"],
         "invoice": _invoice_payload(invoice) if invoice else None,
     }

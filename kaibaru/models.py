@@ -3553,7 +3553,12 @@ class WorkerProfile(models.Model):
     hourly_rate = models.PositiveIntegerField(
         null=True,
         blank=True,
-        help_text="Yen per hour. Used when no fixed monthly salary is set.",
+        help_text="Yen per hour of confirmed reservations. Empty means this part is off.",
+    )
+    shift_hourly_rate = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Yen per hour of scheduled shift time, after breaks and time off. Empty means this part is off.",
     )
     enrolled_at = models.DateField(default=timezone.localdate)
     courses = models.ManyToManyField(
@@ -3613,15 +3618,15 @@ class WorkerAvailability(models.Model):
     """Weekly hours for one worker.
 
     kind=work is 出勤時間. A day can have several of these.
-    break_minutes is a rest that must fit somewhere inside that span.
-    The exact clock time of the break is not stored.
-
+    kind=break is a fixed rest inside 出勤時間. It is not bookable,
+    a service cannot run into it, and it is unpaid.
     kind=booking is 予約受付時間. When a weekday has none, booking
     uses that day's 出勤時間.
     """
 
     class Kind(models.TextChoices):
         WORK = "work", "Work"
+        BREAK = "break", "Break"
         BOOKING = "booking", "Open for reservations"
 
     worker = models.ForeignKey(
@@ -3629,6 +3634,13 @@ class WorkerAvailability(models.Model):
         on_delete=models.CASCADE,
         related_name="worker_availabilities",
         limit_choices_to={"is_worker": True},
+    )
+    version = models.ForeignKey(
+        "WorkerScheduleVersion",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="rows",
     )
     weekday = models.IntegerField(
         choices=[
@@ -3657,20 +3669,40 @@ class WorkerAvailability(models.Model):
         super().clean()
         if self.start_time and self.end_time and self.start_time >= self.end_time:
             raise ValidationError({"end_time": "終了時刻は開始時刻より後にしてください。"})
-        if self.start_time and self.end_time and self.break_minutes:
-            span = (
-                self.end_time.hour * 60
-                + self.end_time.minute
-                - self.start_time.hour * 60
-                - self.start_time.minute
-            )
-            if self.break_minutes >= span:
-                raise ValidationError({"break_minutes": "休憩は出勤時間より短くしてください。"})
         if self.worker_id and not self.worker.is_worker:
             raise ValidationError({"worker": "会員をワーカーにしてから設定してください。"})
 
     def __str__(self):
         return f"{self.worker_id} wd{self.weekday} {self.start_time}-{self.end_time}"
+
+
+class WorkerScheduleVersion(models.Model):
+    """One saved weekly schedule, used from effective_on until the next one.
+
+    Saving again on the same date replaces that version.
+    A later date keeps the older version for the days before it.
+    """
+
+    worker = models.ForeignKey(
+        Member,
+        on_delete=models.CASCADE,
+        related_name="schedule_versions",
+        limit_choices_to={"is_worker": True},
+    )
+    effective_on = models.DateField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["effective_on", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["worker", "effective_on"],
+                name="unique_worker_schedule_version_day",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.worker_id} from {self.effective_on}"
 
 
 class WorkerTimeOff(models.Model):
@@ -3824,6 +3856,34 @@ class WorkerInvoice(models.Model):
 
     def __str__(self):
         return f"{self.club_id} {self.worker_id} {self.year}-{self.month}"
+
+
+class WorkerPayExtra(models.Model):
+    """A manual line added to one month's salary, such as overtime."""
+
+    club = models.ForeignKey(
+        Club,
+        on_delete=models.CASCADE,
+        related_name="worker_pay_extras",
+    )
+    worker = models.ForeignKey(
+        Member,
+        on_delete=models.CASCADE,
+        related_name="pay_extras",
+        limit_choices_to={"is_worker": True},
+    )
+    year = models.PositiveIntegerField()
+    month = models.PositiveIntegerField()
+    label = models.CharField(max_length=40, default="残業")
+    note = models.TextField(blank=True, default="")
+    amount = models.PositiveIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["id"]
+
+    def __str__(self):
+        return f"{self.worker_id} {self.year}-{self.month} {self.label}"
 
 
 class ServiceReservation(models.Model):

@@ -19,6 +19,7 @@ from .models import (
     ServiceWindow,
     WorkerAvailability,
     WorkerProfile,
+    WorkerScheduleVersion,
     WorkerTimeOff,
 )
 
@@ -102,6 +103,69 @@ def _month_bounds(day: date):
     return start, end
 
 
+_LEGACY_SCHEDULE = "legacy"
+
+
+def _load_schedule_index(worker_ids):
+    """Versions and spans for workers.
+
+    Workers with no versions use the legacy key for unversioned rows.
+    """
+    versions = defaultdict(list)
+    for row in WorkerScheduleVersion.objects.filter(worker_id__in=worker_ids).order_by(
+        "effective_on", "id"
+    ):
+        versions[row.worker_id].append(row)
+    spans = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(list))))
+    for worker_id, version_id, weekday, kind, start_t, end_t in (
+        WorkerAvailability.objects.filter(worker_id__in=worker_ids).values_list(
+            "worker_id", "version_id", "weekday", "kind", "start_time", "end_time"
+        )
+    ):
+        key = version_id if version_id is not None else _LEGACY_SCHEDULE
+        spans[worker_id][key][kind][weekday].append((_tmin(start_t), _tmin(end_t)))
+    return versions, spans
+
+
+def _version_key_for_day(version_list, day):
+    if not version_list:
+        return _LEGACY_SCHEDULE
+    chosen = None
+    for version in version_list:
+        if version.effective_on <= day:
+            chosen = version.id
+        else:
+            break
+    return chosen
+
+
+def _kind_spans(spans, worker_id, version_key, kind, weekday):
+    if version_key is None:
+        return []
+    return list(spans[worker_id][version_key][kind][weekday])
+
+
+def _availability_for_day(worker, day, versions, rows_by_version):
+    key = _version_key_for_day(versions, day)
+    if key is None:
+        return []
+    if key == _LEGACY_SCHEDULE:
+        return rows_by_version.get(None, [])
+    return rows_by_version.get(key, [])
+
+
+def _schedule_bundle(worker):
+    versions = list(
+        WorkerScheduleVersion.objects.filter(worker=worker).order_by("effective_on", "id")
+    )
+    grouped = defaultdict(list)
+    for row in WorkerAvailability.objects.filter(worker=worker).order_by(
+        "weekday", "start_time", "id"
+    ):
+        grouped[row.version_id].append(row)
+    return versions, grouped
+
+
 def _prefetch_worker_days(workers, days, *, exclude_reservation_id=None):
     """Load avail / offs / busy / month minutes once for workers across days.
 
@@ -114,28 +178,7 @@ def _prefetch_worker_days(workers, days, *, exclude_reservation_id=None):
 
     worker_ids = [worker.id for worker in workers]
     unique_days = sorted(set(days))
-    weekdays = {_weekday(day) for day in unique_days}
-
-    work_by_weekday = defaultdict(lambda: defaultdict(list))
-    book_by_weekday = defaultdict(lambda: defaultdict(list))
-    for worker_id, weekday, kind, start_t, end_t, break_minutes in (
-        WorkerAvailability.objects.filter(
-            worker_id__in=worker_ids,
-            weekday__in=weekdays,
-        ).values_list(
-            "worker_id",
-            "weekday",
-            "kind",
-            "start_time",
-            "end_time",
-            "break_minutes",
-        )
-    ):
-        span = (_tmin(start_t), _tmin(end_t), int(break_minutes or 0))
-        if kind == WorkerAvailability.Kind.BOOKING:
-            book_by_weekday[weekday][worker_id].append(span)
-        else:
-            work_by_weekday[weekday][worker_id].append(span)
+    versions_by_worker, spans_by_worker = _load_schedule_index(worker_ids)
 
     off_by_day = defaultdict(lambda: defaultdict(list))
     for worker_id, off_day, start_t, end_t in WorkerTimeOff.objects.filter(
@@ -190,25 +233,22 @@ def _prefetch_worker_days(workers, days, *, exclude_reservation_id=None):
     by_day = {}
     for day in unique_days:
         weekday = _weekday(day)
-        day_work = work_by_weekday.get(weekday, {})
-        day_book = book_by_weekday.get(weekday, {})
         day_offs = off_by_day.get(day, {})
         day_busy = busy_by_day.get(day, {})
         month_key = (day.year, day.month)
         day_data = {}
         for worker in workers:
-            work_spans = list(day_work.get(worker.id, []))
-            book_spans = list(day_book.get(worker.id, []))
+            version_key = _version_key_for_day(versions_by_worker.get(worker.id) or [], day)
+            work_spans = _kind_spans(spans_by_worker, worker.id, version_key, WorkerAvailability.Kind.WORK, weekday)
+            book_spans = _kind_spans(spans_by_worker, worker.id, version_key, WorkerAvailability.Kind.BOOKING, weekday)
+            breaks = _kind_spans(spans_by_worker, worker.id, version_key, WorkerAvailability.Kind.BREAK, weekday)
             offs = day_offs.get(worker.id, [])
             busy = list(day_busy.get(worker.id, []))
-            bookable = _bookable_ranges(work_spans, book_spans, offs)
+            bookable = _bookable_ranges(work_spans, book_spans, offs, breaks)
             day_data[worker.id] = {
                 "free": _free_ranges(bookable, busy),
                 "busy": busy,
-                "work": [
-                    (start, end, break_minutes)
-                    for start, end, break_minutes in work_spans
-                ],
+                "work": work_spans,
                 "book": book_spans,
                 "offs": offs,
                 "month_minutes": (
@@ -240,18 +280,28 @@ def _under_hour_cap_cached(worker_id, day_data, add_minutes: int) -> bool:
     return used + add_minutes <= hour_cap * 60
 
 
-def _bookable_ranges(work_spans, book_spans, offs):
+def _subtract_ranges(ranges, blocks):
+    out = list(ranges)
+    for start, end in blocks:
+        if end > start:
+            out = _cuts(out, start, end)
+    return out
+
+
+def _bookable_ranges(work_spans, book_spans, offs, breaks=None):
     """Reservation windows, falling back to 出勤時間 when none are set.
 
-    A set window is clipped to 出勤時間, then time off is removed.
+    A set window is clipped to 出勤時間. Time off and fixed breaks are
+    removed, so a service cannot start in or run into a break.
     """
-    work = [(start, end) for start, end, _break in work_spans if end > start]
+    work = [(start, end) for start, end in work_spans if end > start]
     if book_spans:
-        raw = [(start, end) for start, end, _break in book_spans if end > start]
+        raw = [(start, end) for start, end in book_spans if end > start]
         chosen = _intersect_ranges(raw, work) if work else []
     else:
         chosen = work
-    return _apply_time_offs(chosen, offs)
+    chosen = _apply_time_offs(chosen, offs)
+    return _subtract_ranges(chosen, breaks or [])
 
 
 def _range_covered(start, end, spans) -> bool:
@@ -278,52 +328,11 @@ def _intersect_ranges(left, right):
     return out
 
 
-def _break_window(start, end, book_spans):
-    """Where the floating break has to fit.
-
-    Prep time (出勤 but not 予約受付) does not count as the break.
-    A span with no reservation window keeps the break inside the shift.
-    """
-    if not book_spans:
-        return [(start, end)]
-    overlap = _intersect_ranges(
-        [(start, end)],
-        [
-            (book_start, book_end)
-            for book_start, book_end, _break in book_spans
-            if book_end > book_start
-        ],
-    )
-    return overlap or [(start, end)]
-
-
-def _break_still_fits(work_spans, book_spans, offs, busy) -> bool:
-    """Each 出勤 span must keep one gap long enough for its break."""
-    for start, end, break_minutes in work_spans:
-        if break_minutes <= 0 or end <= start:
-            continue
-        free = _apply_time_offs(_break_window(start, end, book_spans), offs)
-        free = _free_ranges(free, busy)
-        if not any(gap_end - gap_start >= break_minutes for gap_start, gap_end in free):
-            return False
-    return True
-
-
 def _worker_fits_slot(worker_id, day_data, start_min: int, end_min: int) -> bool:
     if not _under_hour_cap_cached(worker_id, day_data, end_min - start_min):
         return False
-    row = day_data.get(worker_id) or {}
-    free = row.get("free") or []
-    if not any(start <= start_min and end_min <= end for start, end in free):
-        return False
-    busy = list(row.get("busy") or [])
-    busy.append((start_min, end_min))
-    return _break_still_fits(
-        row.get("work") or [],
-        row.get("book") or [],
-        row.get("offs") or [],
-        busy,
-    )
+    free = (day_data.get(worker_id) or {}).get("free") or []
+    return any(start <= start_min and end_min <= end for start, end in free)
 
 
 def _qualified_workers(club, course):
@@ -924,7 +933,12 @@ def set_worker_courses(member, course_ids):
 def _parse_hour_rows(rows, *, kind):
     parsed = []
     by_day = defaultdict(list)
-    label = "出勤時間" if kind == WorkerAvailability.Kind.WORK else "予約受付時間"
+    labels = {
+        WorkerAvailability.Kind.WORK: "出勤時間",
+        WorkerAvailability.Kind.BREAK: "休憩",
+        WorkerAvailability.Kind.BOOKING: "予約受付時間",
+    }
+    label = labels.get(kind, "時間")
     for row in rows or []:
         if not isinstance(row, dict):
             return None, f"{label}の指定が正しくありません。"
@@ -938,27 +952,24 @@ def _parse_hour_rows(rows, *, kind):
         end = _parse_hhmm(row.get("end_time"))
         if not start or not end or start >= end:
             return None, f"{label}を正しく入力してください。"
-        break_minutes = 0
-        if kind == WorkerAvailability.Kind.WORK:
-            raw_break = row.get("break_minutes") or 0
-            try:
-                break_minutes = int(raw_break)
-            except (TypeError, ValueError):
-                return None, "休憩は分の数字で入力してください。"
-            if break_minutes < 0:
-                return None, "休憩は0分以上にしてください。"
-            if break_minutes >= _tmin(end) - _tmin(start):
-                return None, "休憩は出勤時間より短くしてください。"
         start_min, end_min = _tmin(start), _tmin(end)
         for other_start, other_end in by_day[weekday]:
             if _overlaps(start_min, end_min, other_start, other_end):
                 return None, f"同じ曜日の{label}が重なっています。"
         by_day[weekday].append((start_min, end_min))
-        parsed.append((weekday, start, end, break_minutes))
+        parsed.append((weekday, start, end))
     return parsed, None
 
 
-def replace_worker_availability(member, rows, booking_rows=None):
+def _inside_work(weekday, start, end, work_by_day, empty_message, outside_message):
+    if not work_by_day.get(weekday):
+        return empty_message
+    if not _range_covered(_tmin(start), _tmin(end), work_by_day[weekday]):
+        return outside_message
+    return None
+
+
+def replace_worker_availability(member, rows, booking_rows=None, break_rows=None):
     profile = ensure_worker_profile(member)
     if profile is None:
         return None, "ワーカーではありません。"
@@ -970,50 +981,137 @@ def replace_worker_availability(member, rows, booking_rows=None):
     )
     if message:
         return None, message
+    breaks, message = _parse_hour_rows(break_rows, kind=WorkerAvailability.Kind.BREAK)
+    if message:
+        return None, message
     work_by_day = defaultdict(list)
-    for weekday, start, end, _break in parsed:
+    for weekday, start, end in parsed:
         work_by_day[weekday].append((_tmin(start), _tmin(end)))
-    for weekday, start, end, _break in booking:
-        if not work_by_day.get(weekday):
-            return None, "予約受付時間を入れる日は、先に出勤時間を入れてください。"
-        start_min, end_min = _tmin(start), _tmin(end)
-        if not _range_covered(start_min, end_min, work_by_day[weekday]):
-            return None, "予約受付時間は出勤時間の中にしてください。"
-    for weekday, start, end, break_minutes in parsed:
-        if break_minutes <= 0:
-            continue
-        books = [
-            (_tmin(book_start), _tmin(book_end), 0)
-            for book_day, book_start, book_end, _break in booking
-            if book_day == weekday
-        ]
-        window = _break_window(_tmin(start), _tmin(end), books)
-        if not any(gap_end - gap_start >= break_minutes for gap_start, gap_end in window):
-            return None, "休憩を置ける予約受付時間が足りません。"
-    with transaction.atomic():
-        WorkerAvailability.objects.filter(worker=member).delete()
-        WorkerAvailability.objects.bulk_create([
-            WorkerAvailability(
-                worker=member,
-                weekday=weekday,
-                kind=WorkerAvailability.Kind.WORK,
-                start_time=start,
-                end_time=end,
-                break_minutes=break_minutes,
-            )
-            for weekday, start, end, break_minutes in parsed
-        ] + [
-            WorkerAvailability(
-                worker=member,
-                weekday=weekday,
-                kind=WorkerAvailability.Kind.BOOKING,
-                start_time=start,
-                end_time=end,
-                break_minutes=0,
-            )
-            for weekday, start, end, _break in booking
-        ])
+    for weekday, start, end in booking:
+        message = _inside_work(
+            weekday,
+            start,
+            end,
+            work_by_day,
+            "予約受付時間を入れる日は、先に出勤時間を入れてください。",
+            "予約受付時間は出勤時間の中にしてください。",
+        )
+        if message:
+            return None, message
+    for weekday, start, end in breaks:
+        message = _inside_work(
+            weekday,
+            start,
+            end,
+            work_by_day,
+            "休憩を入れる日は、先に出勤時間を入れてください。",
+            "休憩は出勤時間の中にしてください。",
+        )
+        if message:
+            return None, message
+    _save_schedule_version(member, profile, parsed, booking, breaks)
     return worker_detail(member)["availability"], None
+
+
+def _row_signature(rows):
+    signed = []
+    for row in rows:
+        if hasattr(row, "kind"):
+            signed.append((
+                row.kind,
+                row.weekday,
+                row.start_time.strftime("%H:%M"),
+                row.end_time.strftime("%H:%M"),
+            ))
+        else:
+            kind, weekday, start, end = row
+            signed.append((kind, weekday, start.strftime("%H:%M"), end.strftime("%H:%M")))
+    return tuple(sorted(signed))
+
+
+def _planned_rows(parsed, booking, breaks):
+    planned = []
+    for kind, source in (
+        (WorkerAvailability.Kind.WORK, parsed),
+        (WorkerAvailability.Kind.BOOKING, booking),
+        (WorkerAvailability.Kind.BREAK, breaks),
+    ):
+        for weekday, start, end in source:
+            planned.append((kind, weekday, start, end))
+    return planned
+
+
+def _write_version_rows(member, version, planned):
+    WorkerAvailability.objects.filter(version=version).delete()
+    WorkerAvailability.objects.bulk_create([
+        WorkerAvailability(
+            worker=member,
+            version=version,
+            weekday=weekday,
+            kind=kind,
+            start_time=start,
+            end_time=end,
+            break_minutes=0,
+        )
+        for kind, weekday, start, end in planned
+    ])
+
+
+def _save_schedule_version(member, profile, parsed, booking, breaks):
+    """Keep the previous schedule when a later day gets a new one.
+
+    Saving again on the same date replaces that date's version.
+    """
+    today = timezone.localdate()
+    planned = _planned_rows(parsed, booking, breaks)
+    new_sig = _row_signature(planned)
+    enrolled = profile.enrolled_at or today
+    if enrolled > today:
+        enrolled = today
+    with transaction.atomic():
+        versions = list(
+            WorkerScheduleVersion.objects.filter(worker=member).order_by("effective_on", "id")
+        )
+        if not versions:
+            existing = list(
+                WorkerAvailability.objects.filter(worker=member, version__isnull=True)
+            )
+            old_sig = _row_signature(existing)
+            if old_sig == new_sig:
+                version = WorkerScheduleVersion.objects.create(
+                    worker=member, effective_on=enrolled
+                )
+                WorkerAvailability.objects.filter(
+                    worker=member, version__isnull=True
+                ).update(version=version)
+                return
+            if existing and enrolled < today:
+                past = WorkerScheduleVersion.objects.create(
+                    worker=member, effective_on=enrolled
+                )
+                WorkerAvailability.objects.filter(
+                    worker=member, version__isnull=True
+                ).update(version=past)
+                current = WorkerScheduleVersion.objects.create(
+                    worker=member, effective_on=today
+                )
+                _write_version_rows(member, current, planned)
+                return
+            WorkerAvailability.objects.filter(worker=member, version__isnull=True).delete()
+            current = WorkerScheduleVersion.objects.create(
+                worker=member, effective_on=today
+            )
+            _write_version_rows(member, current, planned)
+            return
+        latest = versions[-1]
+        latest_rows = list(WorkerAvailability.objects.filter(version=latest))
+        if _row_signature(latest_rows) == new_sig:
+            return
+        if latest.effective_on == today:
+            _write_version_rows(member, latest, planned)
+            return
+        current = WorkerScheduleVersion.objects.create(worker=member, effective_on=today)
+        _write_version_rows(member, current, planned)
 
 
 def add_worker_time_off(member, payload):
@@ -1081,19 +1179,45 @@ def update_worker_profile(member, payload):
             try:
                 rate = int(raw)
             except (TypeError, ValueError):
-                return None, "時給は整数で入力してください。"
+                return None, "施術時給は整数で入力してください。"
             if rate < 0:
-                return None, "時給は0以上にしてください。"
+                return None, "施術時給は0以上にしてください。"
             profile.hourly_rate = rate
+    if "shift_hourly_rate" in payload:
+        raw = payload.get("shift_hourly_rate")
+        if raw in (None, ""):
+            profile.shift_hourly_rate = None
+        else:
+            try:
+                rate = int(raw)
+            except (TypeError, ValueError):
+                return None, "出勤時給は整数で入力してください。"
+            if rate < 0:
+                return None, "出勤時給は0以上にしてください。"
+            profile.shift_hourly_rate = rate
     profile.save()
     return worker_detail(member), None
 
 
+def _current_availability(member, day=None):
+    day = day or timezone.localdate()
+    versions, grouped = _schedule_bundle(member)
+    if versions:
+        chosen = None
+        for version in versions:
+            if version.effective_on <= day:
+                chosen = version
+            else:
+                break
+        if chosen is None:
+            return []
+        return grouped.get(chosen.id, [])
+    return grouped.get(None, [])
+
+
 def worker_detail(member, *, include_login=False):
     profile = ensure_worker_profile(member)
-    avail = WorkerAvailability.objects.filter(worker=member).order_by(
-        "weekday", "start_time", "id"
-    )
+    avail = _current_availability(member)
     # Upcoming yasumi only in the summary; history months are loaded on demand.
     today = timezone.localdate()
     offs = WorkerTimeOff.objects.filter(worker=member, date__gte=today).order_by(
@@ -1118,6 +1242,7 @@ def worker_detail(member, *, include_login=False):
         "enrolled_at": profile.enrolled_at.isoformat() if profile else None,
         "monthly_hour_cap": profile.monthly_hour_cap if profile else None,
         "hourly_rate": profile.hourly_rate if profile else None,
+        "shift_hourly_rate": profile.shift_hourly_rate if profile else None,
         "course_ids": list(profile.courses.values_list("id", flat=True)) if profile else [],
         "availability": [
             {
@@ -1125,10 +1250,19 @@ def worker_detail(member, *, include_login=False):
                 "weekday": row.weekday,
                 "start_time": row.start_time.strftime("%H:%M"),
                 "end_time": row.end_time.strftime("%H:%M"),
-                "break_minutes": row.break_minutes or 0,
             }
             for row in avail
-            if row.kind != WorkerAvailability.Kind.BOOKING
+            if row.kind == WorkerAvailability.Kind.WORK
+        ],
+        "breaks": [
+            {
+                "id": row.id,
+                "weekday": row.weekday,
+                "start_time": row.start_time.strftime("%H:%M"),
+                "end_time": row.end_time.strftime("%H:%M"),
+            }
+            for row in avail
+            if row.kind == WorkerAvailability.Kind.BREAK
         ],
         "booking_hours": [
             {
@@ -1172,10 +1306,19 @@ def work_month_stats(worker, year, month):
         .exclude(no_show=True)
         .order_by("reservation_date", "start_time")
     )
+    versions, grouped = _schedule_bundle(worker)
     minutes = 0
     bookings = []
     for row in rows:
-        minutes += max(0, _tmin(row.end_time) - _tmin(row.start_time))
+        availability = _availability_for_day(worker, row.reservation_date, versions, grouped)
+        pieces = [(_tmin(row.start_time), _tmin(row.end_time))]
+        for span in availability:
+            if (
+                span.kind == WorkerAvailability.Kind.BREAK
+                and span.weekday == row.reservation_date.weekday()
+            ):
+                pieces = _cuts(pieces, _tmin(span.start_time), _tmin(span.end_time))
+        minutes += _range_minutes(pieces)
         bookings.append({
             "id": row.id,
             "reservation_date": row.reservation_date.isoformat(),
@@ -1275,15 +1418,21 @@ def _day_blocks(worker, day, reservations, offs, availability):
     weekday = day.weekday()
     work_rows = []
     book_rows = []
+    break_rows = []
     for row in availability:
         if row.weekday != weekday or not (row.start_time < row.end_time):
             continue
         if row.kind == WorkerAvailability.Kind.BOOKING:
             book_rows.append(row)
+        elif row.kind == WorkerAvailability.Kind.BREAK:
+            break_rows.append(row)
         else:
             work_rows.append(row)
     day_offs = [off for off in offs if off.date == day]
     all_day = any(off.start_time is None or off.end_time is None for off in day_offs)
+    day_breaks = [
+        (_tmin(row.start_time), _tmin(row.end_time)) for row in break_rows
+    ]
     shift = []
     shift_minutes = 0
     if not all_day:
@@ -1291,19 +1440,20 @@ def _day_blocks(worker, day, reservations, offs, availability):
             pieces = [(_tmin(row.start_time), _tmin(row.end_time))]
             for off in day_offs:
                 pieces = _cuts(pieces, _tmin(off.start_time), _tmin(off.end_time))
+            pieces = _subtract_ranges(pieces, day_breaks)
             shift.extend(pieces)
-            shift_minutes += max(0, _range_minutes(pieces) - int(row.break_minutes or 0))
+            shift_minutes += _range_minutes(pieces)
     work_spans = [
-        (_tmin(row.start_time), _tmin(row.end_time), int(row.break_minutes or 0))
-        for row in work_rows
+        (_tmin(row.start_time), _tmin(row.end_time)) for row in work_rows
     ]
     book_spans = [
-        (_tmin(row.start_time), _tmin(row.end_time), 0) for row in book_rows
+        (_tmin(row.start_time), _tmin(row.end_time)) for row in book_rows
     ]
     bookable = _bookable_ranges(
         work_spans,
         book_spans,
         [(off.start_time, off.end_time) for off in day_offs],
+        [] if all_day else day_breaks,
     )
     day_rows = [row for row in reservations if row.reservation_date == day]
     open_ranges = list(bookable)
@@ -1342,14 +1492,11 @@ def worker_week_board(worker, week_start=None):
             worker=worker, date__gte=start, date__lt=end
         )
     )
-    availability = list(
-        WorkerAvailability.objects.filter(worker=worker).order_by(
-            "weekday", "start_time", "id"
-        )
-    )
+    versions, grouped = _schedule_bundle(worker)
     days = []
     for offset in range(7):
         day = start + timedelta(days=offset)
+        availability = _availability_for_day(worker, day, versions, grouped)
         shift, open_ranges, day_rows, reservation_minutes, shift_minutes = _day_blocks(
             worker, day, reservations, offs, availability
         )
@@ -1427,18 +1574,41 @@ def worker_work_month(worker, year, month):
     offs = list(
         WorkerTimeOff.objects.filter(worker=worker, date__gte=start, date__lt=end)
     )
-    availability = list(WorkerAvailability.objects.filter(worker=worker))
+    versions, grouped = _schedule_bundle(worker)
     days = []
     day = start
     while day < end:
+        availability = _availability_for_day(worker, day, versions, grouped)
         shift, _open, day_rows, reservation_minutes, shift_minutes = _day_blocks(
             worker, day, reservations, offs, availability
         )
-        if shift or day_rows:
+        scheduled = [
+            row for row in availability
+            if row.weekday == day.weekday() and row.kind == WorkerAvailability.Kind.WORK
+        ]
+        day_breaks = [
+            row for row in availability
+            if row.weekday == day.weekday() and row.kind == WorkerAvailability.Kind.BREAK
+        ]
+        if shift or day_rows or scheduled:
             days.append({
                 "date": day.isoformat(),
                 "weekday": WEEKDAY_LABELS[day.weekday()],
                 "shift_minutes": shift_minutes,
+                "shift_spans": [
+                    {
+                        "start_time": row.start_time.strftime("%H:%M"),
+                        "end_time": row.end_time.strftime("%H:%M"),
+                    }
+                    for row in scheduled
+                ],
+                "breaks": [
+                    {
+                        "start_time": row.start_time.strftime("%H:%M"),
+                        "end_time": row.end_time.strftime("%H:%M"),
+                    }
+                    for row in day_breaks
+                ],
                 "reservation_count": len(day_rows),
                 "reservation_minutes": reservation_minutes,
                 "reservations": [_reservation_brief(row) for row in day_rows],
@@ -1465,13 +1635,17 @@ def worker_work_month(worker, year, month):
         bucket["reservation_count"] += row["reservation_count"]
         bucket["reservation_minutes"] += row["reservation_minutes"]
 
+    shift_minutes = sum(row["shift_minutes"] for row in days)
+    from .service_worker_pay import salary_breakdown
+
     return {
         "worker_id": worker.id,
         "year": year,
         "month": month,
-        "shift_minutes": sum(row["shift_minutes"] for row in days),
+        "shift_minutes": shift_minutes,
         "reservation_count": sum(row["reservation_count"] for row in days),
         "reservation_minutes": sum(row["reservation_minutes"] for row in days),
         "weeks": weeks,
         "days": days,
+        "pay": salary_breakdown(worker, year, month, shift_minutes),
     }

@@ -5885,15 +5885,20 @@ class ClubViewSet(viewsets.ModelViewSet):
             _, message = set_worker_courses(member, data.get("course_ids"))
             if message:
                 return Response({"detail": message}, status=400)
-        if "availability" in data or "booking_hours" in data:
+        if "availability" in data or "booking_hours" in data or "breaks" in data:
             _, message = replace_worker_availability(
                 member,
                 data.get("availability"),
                 data.get("booking_hours") or [],
+                data.get("breaks") or [],
             )
             if message:
                 return Response({"detail": message}, status=400)
-        if "monthly_hour_cap" in data or "hourly_rate" in data:
+        if (
+            "monthly_hour_cap" in data
+            or "hourly_rate" in data
+            or "shift_hourly_rate" in data
+        ):
             if error and not is_member_owner:
                 return error
             payload, message = update_worker_profile(member, data)
@@ -5989,6 +5994,46 @@ class ClubViewSet(viewsets.ModelViewSet):
         if month_n < 1 or month_n > 12:
             return Response({"detail": "month が不正です。"}, status=400)
         return Response(worker_work_month(member, year_n, month_n))
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/workers/(?P<worker_id>\d+)/pay-extras",
+    )
+    def worker_pay_extras(self, request, subdomain=None, worker_id=None):
+        from .service_worker_pay import add_worker_pay_extra
+
+        club, error = _staff_club(request, subdomain, "teacher_pay")
+        if error:
+            return error
+        member = club.members.filter(id=worker_id, is_worker=True).first()
+        if not member:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        payload, message = add_worker_pay_extra(club, member, request.data, request.user)
+        if message:
+            return Response({"detail": message}, status=400)
+        return Response(payload, status=status.HTTP_201_CREATED)
+
+    @action(
+        detail=False,
+        methods=["delete"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/workers/(?P<worker_id>\d+)/pay-extras/(?P<extra_id>\d+)",
+    )
+    def worker_pay_extra_record(self, request, subdomain=None, worker_id=None, extra_id=None):
+        from .service_worker_pay import delete_worker_pay_extra
+
+        club, error = _staff_club(request, subdomain, "teacher_pay")
+        if error:
+            return error
+        member = club.members.filter(id=worker_id, is_worker=True).first()
+        if not member:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        deleted, message = delete_worker_pay_extra(club, member, extra_id, request.user)
+        if message:
+            return Response({"detail": message}, status=400)
+        if not deleted:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(
         detail=False,
