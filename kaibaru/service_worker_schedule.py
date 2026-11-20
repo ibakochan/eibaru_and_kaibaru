@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import random
 import uuid
 from collections import defaultdict
@@ -692,6 +693,68 @@ def _apply_worker_picture(member, files=None):
         member.save(update_fields=["picture"])
 
 
+def _json_list(payload, key):
+    raw = _payload_get(payload, key, None)
+    if raw in (None, ""):
+        return []
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            raise ValueError("入力の形式が正しくありません。")
+        if not isinstance(parsed, list):
+            raise ValueError("入力の形式が正しくありません。")
+        return parsed
+    raise ValueError("入力の形式が正しくありません。")
+
+
+def _apply_created_worker_setup(club, _actor, member, payload):
+    """Courses, schedule, time off, and pay sent with the create form."""
+    course_ids = _json_list(payload, "course_ids")
+    if course_ids:
+        _, message = set_worker_courses(member, course_ids)
+        if message:
+            raise ValueError(message)
+    availability = _json_list(payload, "availability")
+    booking_hours = _json_list(payload, "booking_hours")
+    breaks = _json_list(payload, "breaks")
+    if availability or booking_hours or breaks:
+        _, message = replace_worker_availability(
+            member, availability, booking_hours, breaks
+        )
+        if message:
+            raise ValueError(message)
+    for row in _json_list(payload, "time_offs"):
+        _, message = add_worker_time_off(member, row if isinstance(row, dict) else {})
+        if message:
+            raise ValueError(message)
+    profile_payload = {}
+    for key in ("monthly_hour_cap", "hourly_rate", "shift_hourly_rate"):
+        if _payload_get(payload, key, None) is not None or (
+            hasattr(payload, "__contains__") and key in payload
+        ):
+            profile_payload[key] = _payload_get(payload, key, None)
+    if profile_payload:
+        _, message = update_worker_profile(member, profile_payload)
+        if message:
+            raise ValueError(message)
+    monthly_raw = _payload_get(payload, "monthly_amount", None)
+    if monthly_raw not in (None, ""):
+        from .models import WorkerPay
+        from .service_worker_pay import _yen
+
+        amount, error = _yen(monthly_raw, required=False)
+        if error:
+            raise ValueError(error)
+        WorkerPay.objects.update_or_create(
+            club=club,
+            worker=member,
+            defaults={"monthly_amount": amount, "active": True},
+        )
+
+
 def create_owner_worker(club, actor, payload, files=None):
     """Club owner creates a managed worker, or marks themselves as a worker."""
     if not actor or not getattr(actor, "is_authenticated", False):
@@ -742,9 +805,14 @@ def create_owner_worker(club, actor, payload, files=None):
             if introduction:
                 existing.introduction = introduction
                 update_fields.append("introduction")
-            existing.save(update_fields=update_fields)
-            _apply_worker_picture(existing, files)
-            ensure_worker_profile(existing)
+            try:
+                with transaction.atomic():
+                    existing.save(update_fields=update_fields)
+                    _apply_worker_picture(existing, files)
+                    ensure_worker_profile(existing)
+                    _apply_created_worker_setup(club, actor, existing, payload)
+            except ValueError as exc:
+                return None, str(exc)
             sync_worker_quantity(club)
             return worker_detail(existing), None
 
@@ -766,6 +834,9 @@ def create_owner_worker(club, actor, payload, files=None):
                 )
                 _apply_worker_picture(member, files)
                 ensure_worker_profile(member)
+                _apply_created_worker_setup(club, actor, member, payload)
+        except ValueError as exc:
+            return None, str(exc)
         except IntegrityError:
             existing = Member.objects.filter(club=club, user=actor).first()
             if existing is None:
@@ -814,6 +885,7 @@ def create_owner_worker(club, actor, payload, files=None):
                 _, message = link_worker_account(club, actor, member, login_email)
                 if message:
                     raise ValueError(message)
+            _apply_created_worker_setup(club, actor, member, payload)
     except ValueError as exc:
         return None, str(exc)
     except IntegrityError:
