@@ -1,4 +1,4 @@
-"""Teacher statements. The monthly task only covers a fixed salary."""
+"""Teacher statements. A club creates them from monthly salary plus lessons taught."""
 import logging
 from datetime import timedelta
 
@@ -17,58 +17,246 @@ def previous_month(day):
     return last.year, last.month
 
 
-def create_monthly_teacher_invoices(year=None, month=None):
-    """One statement per fixed salary for that calendar month.
+def _default_teachers(lesson):
+    links = list(lesson.lesson_instructors.all())
+    if links:
+        return [
+            link.instructor
+            for link in links
+            if link.instructor_id and link.instructor.is_instructor
+        ]
+    if lesson.instructor_id and lesson.instructor and lesson.instructor.is_instructor:
+        return [lesson.instructor]
+    return []
 
-    Called with no arguments, it uses the previous month in Asia/Tokyo.
-    Running it again does not create a second statement.
+
+def _club_taught_sessions(club, year, month):
+    """Lessons already held this month, with whoever taught that date.
+
+    A LessonDateStaff row replaces the default instructors for that date.
+    Canceled dates and future dates are left out.
     """
-    if year is None or month is None:
-        year, month = previous_month(timezone.localdate())
+    from datetime import date as date_cls
 
-    pays = (
-        InstructorPay.objects
-        .filter(
-            active=True,
-            monthly_amount__gt=0,
-            club__is_deleted=False,
-        )
-        .filter(
-            Q(instructor__is_instructor=True) | Q(instructor__is_manager=True)
-        )
-        .select_related("club", "instructor")
+    from .models import Lesson, LessonDateCancel, LessonDateStaff
+    from .service_instructor_sessions import _month_dates, lesson_fee_yen
+
+    today = timezone.localdate()
+    start = date_cls(year, month, 1)
+    end = date_cls(year + 1, 1, 1) if month == 12 else date_cls(year, month + 1, 1)
+    lessons = list(
+        Lesson.objects.filter(club=club)
+        .select_related("instructor")
+        .prefetch_related("lesson_instructors__instructor")
     )
+    canceled = set(
+        LessonDateCancel.objects.filter(
+            lesson__club=club, date__gte=start, date__lt=end
+        ).values_list("lesson_id", "date")
+    )
+    staff_rows = (
+        LessonDateStaff.objects.filter(lesson__club=club, date__gte=start, date__lt=end)
+        .prefetch_related("members__instructor")
+    )
+    staff_by = {(row.lesson_id, row.date): row for row in staff_rows}
+    applied = set(
+        TeacherInvoiceLesson.objects.filter(
+            invoice__club=club,
+            invoice__year=year,
+            invoice__month=month,
+            occurrence_date__isnull=False,
+            lesson_id__isnull=False,
+        ).values_list("lesson_id", "occurrence_date", "invoice__instructor_id")
+    )
+    sessions = []
+    for lesson in lessons:
+        fee = lesson_fee_yen(lesson)
+        for day in _month_dates(year, month, lesson.weekday):
+            if day > today or (lesson.id, day) in canceled:
+                continue
+            staff = staff_by.get((lesson.id, day))
+            if staff is not None:
+                people = [
+                    link.instructor
+                    for link in staff.members.all()
+                    if link.instructor_id and link.instructor.is_instructor
+                ]
+                replaced = True
+            else:
+                people = _default_teachers(lesson)
+                replaced = False
+            sessions.append({
+                "lesson_id": lesson.id,
+                "lesson_title": lesson.title or "",
+                "date": day.isoformat(),
+                "start_time": lesson.start_time.strftime("%H:%M"),
+                "fee_yen": fee,
+                "replaced": replaced,
+                "instructors": [
+                    {"id": person.id, "name": person.full_name}
+                    for person in people
+                ],
+                "applied_ids": [
+                    person.id
+                    for person in people
+                    if (lesson.id, day, person.id) in applied
+                ],
+            })
+    sessions.sort(key=lambda row: (row["date"], row["start_time"], row["lesson_id"]))
+    return sessions
+
+
+def preview_club_instructor_payslips(club, year, month, actor=None):
+    """Monthly salary plus one fee per lesson taught. Nothing is written."""
+    sessions = _club_taught_sessions(club, year, month)
+    pays = {
+        row.instructor_id: row
+        for row in InstructorPay.objects.filter(club=club, active=True).select_related("instructor")
+    }
+    existing = {}
+    for invoice in TeacherInvoice.objects.filter(club=club, year=year, month=month).select_related("instructor"):
+        if invoice.instructor_id and invoice.instructor_id not in existing:
+            existing[invoice.instructor_id] = invoice
+    counts = {}
+    for session in sessions:
+        fee = session["fee_yen"]
+        for person in session["instructors"]:
+            bucket = counts.setdefault(person["id"], {
+                "name": person["name"],
+                "lesson_count": 0,
+                "lesson_amount": 0,
+            })
+            bucket["lesson_count"] += 1
+            if fee is not None and person["id"] not in session["applied_ids"]:
+                bucket["lesson_amount"] += int(fee)
+    people = {}
+    for instructor_id, pay in pays.items():
+        people[instructor_id] = pay.instructor.full_name
+    for instructor_id, bucket in counts.items():
+        people.setdefault(instructor_id, bucket["name"])
+    members = {
+        member.id: member
+        for member in Member.objects.filter(club=club, id__in=list(people))
+    }
+    rows = []
+    for instructor_id, name in people.items():
+        pay = pays.get(instructor_id)
+        monthly = int(pay.monthly_amount or 0) if pay and pay.monthly_amount else 0
+        taught = counts.get(instructor_id) or {"lesson_count": 0, "lesson_amount": 0}
+        invoice = existing.get(instructor_id)
+        member = members.get(instructor_id)
+        rows.append({
+            "instructor_id": instructor_id,
+            "name": name,
+            "monthly_amount": monthly,
+            "lesson_count": taught["lesson_count"],
+            "lesson_amount": taught["lesson_amount"],
+            "total_amount": monthly + taught["lesson_amount"],
+            "created": invoice is not None,
+            "invoice_id": invoice.id if invoice else None,
+            "stored_amount": invoice.amount if invoice else None,
+            "paid_at": invoice.paid_at.isoformat() if invoice and invoice.paid_at else None,
+            "blocked": _self_pay_block(actor, member) if member is not None else None,
+        })
+    rows.sort(key=lambda row: row["name"])
+    return {
+        "year": year,
+        "month": month,
+        "rows": rows,
+        "sessions": sessions,
+    }
+
+
+def create_club_instructor_payslips(club, year, month, actor=None):
+    """Freeze monthly salary plus taught-lesson fees for this club.
+
+    A statement that already exists for that instructor and month is left as it is.
+    Lessons already on a statement are not added again.
+    """
+    from datetime import date as date_cls
+
+    preview = preview_club_instructor_payslips(club, year, month, actor)
+    sessions = preview["sessions"]
+    pays = {
+        row.instructor_id: row
+        for row in InstructorPay.objects.filter(club=club, active=True)
+    }
+    members = {
+        member.id: member
+        for member in Member.objects.filter(club=club, id__in=[row["instructor_id"] for row in preview["rows"]])
+    }
     created = 0
-    for pay in pays:
+    for row in preview["rows"]:
+        if row["created"] or row["total_amount"] <= 0:
+            continue
+        member = members.get(row["instructor_id"])
+        if member is None or _self_pay_block(actor, member):
+            continue
+        pay = pays.get(member.id)
+        own_sessions = [
+            session for session in sessions
+            if member.id in [person["id"] for person in session["instructors"]]
+            and member.id not in session["applied_ids"]
+            and session["fee_yen"] is not None
+        ]
         try:
             with transaction.atomic():
-                _, was_created = TeacherInvoice.objects.get_or_create(
-                    instructor_pay=pay,
-                    year=year,
-                    month=month,
-                    defaults={
-                        "club": pay.club,
-                        "instructor": pay.instructor,
-                        "amount": pay.monthly_amount,
-                    },
-                )
+                if pay is not None:
+                    invoice, was_created = TeacherInvoice.objects.get_or_create(
+                        instructor_pay=pay,
+                        year=year,
+                        month=month,
+                        defaults={
+                            "club": club,
+                            "instructor": member,
+                            "instructor_name": member.full_name,
+                            "amount": row["total_amount"],
+                        },
+                    )
+                else:
+                    invoice = TeacherInvoice.objects.create(
+                        club=club,
+                        instructor=member,
+                        instructor_name=member.full_name,
+                        year=year,
+                        month=month,
+                        amount=row["total_amount"],
+                    )
+                    was_created = True
+                if not was_created:
+                    continue
+                lesson_ids = {session["lesson_id"] for session in own_sessions}
+                lessons = {
+                    lesson.id: lesson
+                    for lesson in Lesson.objects.filter(club=club, id__in=lesson_ids)
+                }
+                TeacherInvoiceLesson.objects.bulk_create([
+                    TeacherInvoiceLesson(
+                        invoice=invoice,
+                        lesson=lessons.get(session["lesson_id"]),
+                        lesson_title=session["lesson_title"],
+                        times_taught=1,
+                        occurrence_date=date_cls.fromisoformat(session["date"]),
+                        fee_yen=int(session["fee_yen"]),
+                        session_key=TeacherInvoiceLesson.make_session_key(
+                            session["lesson_id"], session["date"]
+                        ),
+                    )
+                    for session in own_sessions
+                ])
         except IntegrityError:
             logger.info(
-                "[TEACHER PAY] statement already exists pay=%s %s-%s",
-                pay.id,
+                "[TEACHER PAY] statement already exists club=%s instructor=%s %s-%s",
+                club.id,
+                member.id,
                 year,
                 month,
             )
             continue
-        if was_created:
-            created += 1
-    logger.info(
-        "[TEACHER PAY] monthly statements year=%s month=%s created=%s",
-        year,
-        month,
-        created,
-    )
-    return {"year": year, "month": month, "created": created}
+        created += 1
+    fresh = preview_club_instructor_payslips(club, year, month, actor)
+    fresh["created_count"] = created
+    return fresh, None
 
 
 def _yen(value, *, required):

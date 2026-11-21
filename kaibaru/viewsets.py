@@ -6178,6 +6178,102 @@ class ClubViewSet(viewsets.ModelViewSet):
             return Response({"detail": message}, status=status.HTTP_400_BAD_REQUEST)
         return Response(payload)
 
+    def _payslip_month(self, request):
+        from django.utils import timezone
+
+        source = request.query_params if request.method == "GET" else request.data
+        try:
+            year = int(source.get("year"))
+            month = int(source.get("month"))
+        except (TypeError, ValueError):
+            return None, None, Response({"detail": "年月を入力してください。"}, status=400)
+        if year < 2000 or year > 2100 or month < 1 or month > 12:
+            return None, None, Response({"detail": "年月が正しくありません。"}, status=400)
+        today = timezone.localdate()
+        if (year, month) > (today.year, today.month):
+            return None, None, Response({"detail": "未来の月の明細は作成できません。"}, status=400)
+        return year, month, None
+
+    @action(
+        detail=False,
+        methods=["get", "post"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/worker-payslips",
+    )
+    def worker_payslips(self, request, subdomain=None):
+        from .service_worker_pay import create_club_worker_payslips, preview_club_worker_payslips
+
+        club, error = _staff_club(request, subdomain, "teacher_pay")
+        if error:
+            return error
+        year, month, error = self._payslip_month(request)
+        if error:
+            return error
+        if request.method == "GET":
+            return Response(preview_club_worker_payslips(club, year, month, request.user))
+        payload, message = create_club_worker_payslips(club, year, month, request.user)
+        if message:
+            return Response({"detail": message}, status=400)
+        return Response(payload, status=status.HTTP_201_CREATED)
+
+    @action(
+        detail=False,
+        methods=["get", "post"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/instructor-payslips",
+    )
+    def instructor_payslips(self, request, subdomain=None):
+        from .service_instructor_pay import (
+            create_club_instructor_payslips,
+            preview_club_instructor_payslips,
+        )
+
+        club, error = _staff_club(request, subdomain, "teacher_pay")
+        if error:
+            return error
+        year, month, error = self._payslip_month(request)
+        if error:
+            return error
+        if request.method == "GET":
+            return Response(preview_club_instructor_payslips(club, year, month, request.user))
+        payload, message = create_club_instructor_payslips(club, year, month, request.user)
+        if message:
+            return Response({"detail": message}, status=400)
+        return Response(payload, status=status.HTTP_201_CREATED)
+
+    @action(
+        detail=False,
+        methods=["post", "delete"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/lesson-date-staff",
+    )
+    def lesson_date_staff(self, request, subdomain=None):
+        from datetime import date as date_cls
+
+        from .models import Lesson
+        from .service_instructor_sessions import clear_lesson_date_staff, set_lesson_date_staff
+
+        club, error = _staff_club(request, subdomain, "teacher_pay")
+        if error:
+            return error
+        try:
+            lesson_id = int(request.data.get("lesson_id") or request.query_params.get("lesson_id"))
+            raw_day = request.data.get("date") or request.query_params.get("date")
+            day = date_cls.fromisoformat(str(raw_day)[:10])
+        except (TypeError, ValueError):
+            return Response({"detail": "レッスンと日付を指定してください。"}, status=400)
+        lesson = Lesson.objects.filter(club=club, id=lesson_id).first()
+        if lesson is None:
+            return Response({"detail": "レッスンが見つかりません。"}, status=404)
+        if request.method == "DELETE":
+            clear_lesson_date_staff(lesson, day)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        payload, message = set_lesson_date_staff(
+            lesson,
+            day,
+            request.data.get("instructor_ids") or [],
+        )
+        if message:
+            return Response({"detail": message}, status=400)
+        return Response(payload)
+
     @action(
         detail=False,
         methods=["get"],

@@ -9,7 +9,6 @@ from django.utils import timezone
 
 from .manager_permissions import SELF_PAYMENT_MESSAGE, manages_own_money
 from .models import Member, WorkerInvoice, WorkerPay, WorkerPayExtra, WorkerProfile
-from .service_instructor_pay import previous_month
 from .service_worker_schedule import work_month_stats
 
 logger = logging.getLogger(__name__)
@@ -156,64 +155,122 @@ def _hourly_amount(worker, year, month):
     return amount, hours, stats["reservation_count"]
 
 
-def create_monthly_worker_invoices(year=None, month=None):
-    """One statement per active worker pay for that calendar month.
+def _worker_statement_row(worker, year, month, existing, blocked):
+    from .service_worker_schedule import worker_work_month
 
-    The amount is reservation pay plus shift pay plus monthly pay plus extras.
-    Empty rates are left out. Later schedule edits do not rewrite an existing statement
-    unless an extra line is added or removed.
+    detail = worker_work_month(worker, year, month)
+    pay = detail["pay"]
+    return {
+        "worker_id": worker.id,
+        "name": worker.full_name,
+        "shift_hours": pay["shift_hours"],
+        "shift_amount": pay["shift_amount"],
+        "reservation_hours": pay["reservation_hours"],
+        "reservation_amount": pay["reservation_amount"],
+        "reservation_count": pay["reservation_count"],
+        "monthly_amount": pay["monthly_amount"] or 0,
+        "extra_amount": pay["extra_amount"],
+        "total_amount": pay["total_amount"],
+        "created": existing is not None,
+        "invoice_id": existing.id if existing else None,
+        "stored_amount": existing.amount if existing else None,
+        "paid_at": existing.paid_at.isoformat() if existing and existing.paid_at else None,
+        "blocked": blocked,
+    }
+
+
+def preview_club_worker_payslips(club, year, month, actor=None):
+    """Live totals for this club's workers. Nothing is written."""
+    workers = list(club.members.filter(is_worker=True).order_by("full_name", "id"))
+    existing = {
+        row.worker_id: row
+        for row in WorkerInvoice.objects.filter(club=club, year=year, month=month)
+        if row.worker_id
+    }
+    rows = [
+        _worker_statement_row(
+            worker,
+            year,
+            month,
+            existing.get(worker.id),
+            _self_pay_block(actor, worker),
+        )
+        for worker in workers
+    ]
+    return {"year": year, "month": month, "rows": rows}
+
+
+def create_club_worker_payslips(club, year, month, actor=None):
+    """Freeze one statement per worker for this club and month.
+
+    A statement that already exists is left as it is.
     """
-    if year is None or month is None:
-        year, month = previous_month(timezone.localdate())
-
-    pays = (
-        WorkerPay.objects
-        .filter(active=True, club__is_deleted=False, worker__is_worker=True)
-        .select_related("club", "worker")
-    )
+    workers = list(club.members.filter(is_worker=True).select_related("club").order_by("id"))
+    pays = {
+        row.worker_id: row
+        for row in WorkerPay.objects.filter(club=club, worker__in=workers)
+    }
+    existing = {
+        row.worker_id: row
+        for row in WorkerInvoice.objects.filter(club=club, year=year, month=month)
+        if row.worker_id
+    }
     created = 0
     from .service_worker_schedule import worker_work_month
 
-    for pay in pays:
-        month_detail = worker_work_month(pay.worker, year, month)
-        breakdown = month_detail["pay"]
-        amount = breakdown["total_amount"]
-        hours = Decimal(breakdown["reservation_hours"])
-        reservation_count = breakdown["reservation_count"]
+    for worker in workers:
+        if existing.get(worker.id) is not None:
+            continue
+        if _self_pay_block(actor, worker):
+            continue
+        detail = worker_work_month(worker, year, month)
+        pay = detail["pay"]
+        amount = pay["total_amount"]
         if amount <= 0:
             continue
+        worker_pay = pays.get(worker.id)
         try:
             with transaction.atomic():
-                _, was_created = WorkerInvoice.objects.get_or_create(
-                    worker_pay=pay,
-                    year=year,
-                    month=month,
-                    defaults={
-                        "club": pay.club,
-                        "worker": pay.worker,
-                        "worker_name": pay.worker.full_name,
-                        "amount": amount,
-                        "hours_worked": hours,
-                        "reservation_count": reservation_count,
-                    },
-                )
+                if worker_pay is not None:
+                    _, was_created = WorkerInvoice.objects.get_or_create(
+                        worker_pay=worker_pay,
+                        year=year,
+                        month=month,
+                        defaults={
+                            "club": club,
+                            "worker": worker,
+                            "worker_name": worker.full_name,
+                            "amount": amount,
+                            "hours_worked": Decimal(pay["reservation_hours"]),
+                            "reservation_count": pay["reservation_count"],
+                        },
+                    )
+                else:
+                    WorkerInvoice.objects.create(
+                        club=club,
+                        worker=worker,
+                        worker_name=worker.full_name,
+                        year=year,
+                        month=month,
+                        amount=amount,
+                        hours_worked=Decimal(pay["reservation_hours"]),
+                        reservation_count=pay["reservation_count"],
+                    )
+                    was_created = True
         except IntegrityError:
             logger.info(
-                "[WORKER PAY] statement already exists pay=%s %s-%s",
-                pay.id,
+                "[WORKER PAY] statement already exists club=%s worker=%s %s-%s",
+                club.id,
+                worker.id,
                 year,
                 month,
             )
             continue
         if was_created:
             created += 1
-    logger.info(
-        "[WORKER PAY] monthly statements year=%s month=%s created=%s",
-        year,
-        month,
-        created,
-    )
-    return {"year": year, "month": month, "created": created}
+    preview = preview_club_worker_payslips(club, year, month, actor)
+    preview["created_count"] = created
+    return preview, None
 
 
 def worker_pay_overview(club):

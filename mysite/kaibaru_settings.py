@@ -19,7 +19,6 @@ from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 import environ
 
-from celery.schedules import crontab
 
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -235,16 +234,7 @@ CRISPY_TEMPLATE_PACK = "bootstrap5"
 
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 
-CELERY_BEAT_SCHEDULE = {
-    "create-monthly-instructor-invoices": {
-        "task": "kaibaru.tasks.create_monthly_instructor_invoices",
-        "schedule": crontab(minute=0, hour=6, day_of_month="1"),
-    },
-    "create-monthly-worker-invoices": {
-        "task": "kaibaru.tasks.create_monthly_worker_invoices",
-        "schedule": crontab(minute=10, hour=6, day_of_month="1"),
-    },
-}
+CELERY_BEAT_SCHEDULE = {}
 
 
 STRIPE_SECRET_KEY = env('STRIPE_SECRET_KEY')
