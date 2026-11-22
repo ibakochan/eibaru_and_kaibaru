@@ -1,6 +1,8 @@
 """Club pictures and the single header video stored in cloud storage."""
 
 SLATE_IMAGE_LIMIT = 100
+# Lesson photos and salon course photos share one pile per club.
+CATALOG_IMAGE_LIMIT = 100
 NEWS_KEEP = 20
 IMAGE_MAX_BYTES = 5 * 1024 * 1024
 VIDEO_MAX_BYTES = 20 * 1024 * 1024
@@ -8,10 +10,30 @@ VIDEO_CONTENT_TYPES = {"video/mp4", "video/webm"}
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".heic", ".heif"}
 
 IMAGE_LIMIT_MESSAGE = "このサイトの画像は100枚までです。"
+CATALOG_IMAGE_LIMIT_MESSAGE = "レッスンとコースの画像は合わせて100枚までです。"
 IMAGE_SIZE_MESSAGE = "画像は5MBまでです。"
 VIDEO_SECTION_MESSAGE = "動画セクションは1つまでです。"
 VIDEO_SIZE_MESSAGE = "動画は20MBまでです。"
 VIDEO_TYPE_MESSAGE = "動画は mp4 か webm にしてください。"
+
+
+def catalog_picture_count(club_id):
+    """Stored lesson pictures plus stored course pictures for one club."""
+    from django.db.models import Q
+
+    from .models import Lesson, ServiceCourse
+
+    stored = ~Q(picture__isnull=True) & ~Q(picture="")
+    lessons = Lesson.objects.filter(stored, club_id=club_id).count()
+    courses = ServiceCourse.objects.filter(stored, club_id=club_id).count()
+    return lessons + courses
+
+
+def new_catalog_picture_rejected(club_id, *, already_has_picture):
+    """A replacement keeps the same slot. A first picture needs a free one."""
+    if already_has_picture:
+        return False
+    return catalog_picture_count(club_id) >= CATALOG_IMAGE_LIMIT
 
 
 def uploaded_image_too_large(uploaded):

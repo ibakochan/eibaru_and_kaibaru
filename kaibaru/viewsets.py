@@ -21,9 +21,11 @@ from .service_legacy_subscription import (
 )
 from .club_access import MEMBERS_REQUIRE_SUBSCRIPTION, club_has_platform_subscription
 from .club_media import (
+    CATALOG_IMAGE_LIMIT_MESSAGE,
     IMAGE_LIMIT_MESSAGE,
     NEWS_KEEP,
     SLATE_IMAGE_LIMIT,
+    new_catalog_picture_rejected,
     VIDEO_CONTENT_TYPES,
     VIDEO_MAX_BYTES,
     VIDEO_SECTION_MESSAGE,
@@ -3942,12 +3944,26 @@ class LessonViewSet(viewsets.ModelViewSet):
             if not instructor:
                 raise serializers.ValidationError({"instructor_id": "Instructor not found or not valid."})
 
+        picture_message = _new_catalog_picture_message(
+            self.request,
+            club.id,
+            already_has_picture=False,
+        )
+        if picture_message:
+            raise serializers.ValidationError({"picture": picture_message})
         serializer.save(club=club, instructor=instructor, section_id=section_id)
 
     def perform_update(self, serializer):
         lesson = serializer.instance
         if not has_permission(self.request.user, lesson.club, "lessons"):
             raise serializers.ValidationError({"detail": LESSON_PERMISSION_MESSAGE})
+        picture_message = _new_catalog_picture_message(
+            self.request,
+            lesson.club_id,
+            already_has_picture=bool(lesson.picture),
+        )
+        if picture_message:
+            raise serializers.ValidationError({"picture": picture_message})
         serializer.save()
 
     def perform_destroy(self, instance):
@@ -4192,6 +4208,14 @@ def _owner_club(request, subdomain):
     if not request.user.is_authenticated or club.owner_id != request.user.id:
         return None, Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
     return club, None
+
+
+def _new_catalog_picture_message(request, club_id, *, already_has_picture):
+    if not request.FILES.get("picture"):
+        return None
+    if new_catalog_picture_rejected(club_id, already_has_picture=already_has_picture):
+        return CATALOG_IMAGE_LIMIT_MESSAGE
+    return None
 
 
 def _staff_club(request, subdomain, permission):
@@ -5151,6 +5175,16 @@ class ClubViewSet(viewsets.ModelViewSet):
         )
         picture = request.FILES.get("picture")
         if picture:
+            picture_message = _new_catalog_picture_message(
+                request,
+                club.id,
+                already_has_picture=False,
+            )
+            if picture_message:
+                return Response(
+                    {"detail": picture_message, "code": "image_limit"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             course.picture = picture
         course.save()
         try:
@@ -5283,6 +5317,16 @@ class ClubViewSet(viewsets.ModelViewSet):
             course.picture.delete(save=False)
             course.picture = None
         elif picture:
+            picture_message = _new_catalog_picture_message(
+                request,
+                club.id,
+                already_has_picture=bool(course.picture),
+            )
+            if picture_message:
+                return Response(
+                    {"detail": picture_message, "code": "image_limit"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             if course.picture:
                 course.picture.delete(save=False)
             course.picture = picture
