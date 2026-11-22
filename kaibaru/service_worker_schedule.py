@@ -192,7 +192,7 @@ def _prefetch_worker_days(workers, days, *, exclude_reservation_id=None):
         holding_reservations_q(),
         worker_id__in=worker_ids,
         reservation_date__in=unique_days,
-    )
+    ).exclude(no_show=True)
     if exclude_reservation_id is not None:
         busy_qs = busy_qs.exclude(id=exclude_reservation_id)
     busy_by_day = defaultdict(lambda: defaultdict(list))

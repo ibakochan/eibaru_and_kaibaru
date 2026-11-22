@@ -99,11 +99,14 @@ def manage_flags(reservation, user, *, actor=None):
         flags["can_cancel"] = False
         return flags
 
+    worker_only = bool(actor and actor.get("role") == "worker")
     if reservation.paid_at is not None:
-        flags["can_unmark_paid"] = not reservation.platform_fee_applied
+        if not worker_only:
+            flags["can_unmark_paid"] = not reservation.platform_fee_applied
         return flags
 
-    flags["can_mark_paid"] = True
+    if not worker_only:
+        flags["can_mark_paid"] = True
     flags["can_mark_no_show"] = True
     return flags
 
@@ -211,6 +214,9 @@ def list_worker_appointments(club, user):
             "reservation_date": row.reservation_date.isoformat(),
             "start_time": row.start_time.strftime("%H:%M"),
             "end_time": row.end_time.strftime("%H:%M"),
+            "payment_method": row.payment_method,
+            "amount": row.amount or 0,
+            "paid_at": row.paid_at.isoformat() if row.paid_at else None,
         })
     return payload
 
@@ -238,6 +244,9 @@ def apply_service_manage_action(*, reservation_id, action, user, club):
 
         if not can_manage_service_reservation(reservation, user, actor=actor):
             raise CashReservationError("この予約を操作する権限がありません。", 403)
+
+        if actor["role"] == "worker" and action in (ACTION_PAID, ACTION_UNPAID):
+            raise CashReservationError("受領の記録は店舗側で行います。", 403)
 
         if reservation.status != ServiceReservation.Status.PAID:
             raise CashReservationError("確定した予約ではありません。")
