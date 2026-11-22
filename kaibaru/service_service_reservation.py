@@ -75,9 +75,8 @@ def unpaid_hold_q(hold_cutoff):
 def open_course_reservations_q(today=None):
     """Upcoming reservations still on the books for a course.
 
-    Used for owner archive notes. Inactive courses stay on the public menu
-    as closed regardless; this flag only explains whether anything is still
-    scheduled (paid or unpaid, not canceled / no-show / deleted).
+    A stopped course stays on the public menu only while one of these remains.
+    Paid or unpaid, and not canceled, no-show, or deleted.
     """
     today = today or timezone.localdate()
     return Q(

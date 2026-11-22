@@ -5113,9 +5113,9 @@ class ClubViewSet(viewsets.ModelViewSet):
         if not club:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
         if request.method == "GET":
-            # Active + stopped. Stopped stay visible as 受付していません;
-            # booking endpoints still require active=True. ?all=1 is accepted
-            # for owners but returns the same rows (archive filters client-side).
+            # Every course, including stopped ones. The booking screen hides
+            # a stopped course once has_open_reservations is false. Booking
+            # still requires active=True.
             qs = (
                 ServiceCourse.objects.filter(club=club)
                 .prefetch_related("addons")
