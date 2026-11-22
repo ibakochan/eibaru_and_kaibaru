@@ -7,3 +7,6 @@ class KaibaruConfig(AppConfig):
 
     def ready(self):
         import kaibaru.signals
+        from kaibaru.stripe_failure import install_stripe_failure_client
+
+        install_stripe_failure_client()

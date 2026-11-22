@@ -1,0 +1,19 @@
+from .stripe_failure import fail_this_request, failure_testing_enabled
+
+
+class StripeFailureMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        token = None
+        if (
+            failure_testing_enabled()
+            and request.headers.get("X-Stripe-Fail") == "1"
+        ):
+            token = fail_this_request.set(True)
+        try:
+            return self.get_response(request)
+        finally:
+            if token is not None:
+                fail_this_request.reset(token)

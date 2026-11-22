@@ -89,6 +89,7 @@ MIDDLEWARE = [
     'django.contrib.sessions.middleware.SessionMiddleware',
     
     'django.middleware.common.CommonMiddleware',
+    'kaibaru.stripe_failure_middleware.StripeFailureMiddleware',
     'kaibaru.club_media.ImageSizeLimitMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     
@@ -238,6 +239,7 @@ CELERY_BEAT_SCHEDULE = {}
 
 
 STRIPE_SECRET_KEY = env('STRIPE_SECRET_KEY')
+STRIPE_FAILURE_TEST = env.bool('STRIPE_FAILURE_TEST', default=False)
 STRIPE_PUBLISHABLE_KEY = env('STRIPE_PUBLISHABLE_KEY')
 
 STRIPE_WEBHOOK_SECRET = env('STRIPE_WEBHOOK_SECRET')
@@ -357,6 +359,15 @@ SESSION_CACHE_ALIAS = 'default'
 CORS_ALLOWED_ORIGINS = [
     "https://kaibaru.jp",
 ]
+CORS_ALLOW_HEADERS = (
+    "accept",
+    "authorization",
+    "content-type",
+    "user-agent",
+    "x-csrftoken",
+    "x-requested-with",
+    "x-stripe-fail",
+)
 ASGI_APPLICATION = 'mysite.asgi.application'
 
 CHANNEL_LAYERS = {
