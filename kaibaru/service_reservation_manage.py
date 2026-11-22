@@ -173,10 +173,17 @@ def list_worker_appointments(club, user):
     """Confirmed bookings assigned to the logged-in worker, from today on.
 
     Cash already marked received still counts. The appointment is on the
-    books until it is canceled or marked a no-show.
+    books until it is canceled or marked a no-show. An owner or manager who
+    is also a worker still gets their own rows. Staff access would otherwise
+    hide that member record.
     """
-    actor = resolve_service_actor(user, club)
-    member = actor.get("member") if actor and actor.get("role") == "worker" else None
+    if not user or not getattr(user, "is_authenticated", False) or club is None:
+        raise CashReservationError("許可なし", 403)
+    member = (
+        Member.objects.filter(club=club, user=user, is_worker=True)
+        .order_by("id")
+        .first()
+    )
     if member is None:
         raise CashReservationError("許可なし", 403)
 
