@@ -5765,6 +5765,24 @@ class ClubViewSet(viewsets.ModelViewSet):
 
     @action(
         detail=False,
+        methods=["get"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/worker-appointments",
+    )
+    def worker_appointments(self, request, subdomain=None):
+        from .cash_reservations import CashReservationError
+        from .service_reservation_manage import list_worker_appointments
+
+        club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
+        if not club:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            rows = list_worker_appointments(club, request.user)
+        except CashReservationError as exc:
+            return Response({"detail": exc.message}, status=exc.status_code)
+        return Response({"reservations": rows})
+
+    @action(
+        detail=False,
         methods=["post"],
         url_path=(
             r"by-subdomain/(?P<subdomain>[^/.]+)/service-reservations/"

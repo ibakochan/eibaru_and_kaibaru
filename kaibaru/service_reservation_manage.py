@@ -169,6 +169,45 @@ def list_manageable_reservations(club, user, *, actor=None):
     return [reservation_payload(row, user, actor=actor) for row in qs]
 
 
+def list_worker_appointments(club, user):
+    """Confirmed bookings assigned to the logged-in worker, from today on.
+
+    Cash already marked received still counts. The appointment is on the
+    books until it is canceled or marked a no-show.
+    """
+    actor = resolve_service_actor(user, club)
+    member = actor.get("member") if actor and actor.get("role") == "worker" else None
+    if member is None:
+        raise CashReservationError("許可なし", 403)
+
+    today = timezone.localdate()
+    rows = (
+        ServiceReservation.objects.filter(
+            club=club,
+            worker=member,
+            is_deleted=False,
+            status=ServiceReservation.Status.PAID,
+            canceled=False,
+            no_show=False,
+            reservation_date__gte=today,
+        )
+        .select_related("course")
+        .order_by("reservation_date", "start_time", "id")
+    )
+    payload = []
+    for row in rows:
+        course = row.course
+        payload.append({
+            "id": row.id,
+            "full_name": row.full_name,
+            "course_name": course.name if course else row.price_name,
+            "reservation_date": row.reservation_date.isoformat(),
+            "start_time": row.start_time.strftime("%H:%M"),
+            "end_time": row.end_time.strftime("%H:%M"),
+        })
+    return payload
+
+
 def apply_service_manage_action(*, reservation_id, action, user, club):
     if action not in MANAGE_ACTIONS:
         raise CashReservationError("この操作は利用できません。", 404)
