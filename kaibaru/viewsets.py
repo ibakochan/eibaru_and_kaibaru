@@ -4210,6 +4210,18 @@ def _owner_club(request, subdomain):
     return club, None
 
 
+def _course_position(raw):
+    if raw in (None, ""):
+        return 0
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        raise ValueError("表示順は0以上の数字にしてください。")
+    if value < 0:
+        raise ValueError("表示順は0以上の数字にしてください。")
+    return value
+
+
 def _new_catalog_picture_message(request, club_id, *, already_has_picture):
     if not request.FILES.get("picture"):
         return None
@@ -5161,6 +5173,10 @@ class ClubViewSet(viewsets.ModelViewSet):
             addon_ids = parse_addon_ids(request.data)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=400)
+        try:
+            position = _course_position(request.data.get("position"))
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
         course = ServiceCourse(
             club=club,
             name=name[:80],
@@ -5170,7 +5186,7 @@ class ClubViewSet(viewsets.ModelViewSet):
             amount=amount,
             description=(request.data.get("description") or "")[:2000],
             includes=(request.data.get("includes") or "")[:2000],
-            position=int(request.data.get("position") or 0),
+            position=position,
             active=str(request.data.get("active", "true")).lower() in ("true", "1", "yes"),
         )
         picture = request.FILES.get("picture")
@@ -5302,9 +5318,9 @@ class ClubViewSet(viewsets.ModelViewSet):
             course.includes = (request.data.get("includes") or "")[:2000]
         if "position" in request.data:
             try:
-                course.position = int(request.data.get("position") or 0)
-            except (TypeError, ValueError):
-                pass
+                course.position = _course_position(request.data.get("position"))
+            except ValueError as exc:
+                return Response({"detail": str(exc)}, status=400)
         if "active" in request.data:
             course.active = str(request.data.get("active")).lower() in ("true", "1", "yes")
         clear_picture = str(request.data.get("clear_picture") or "").lower() in (
