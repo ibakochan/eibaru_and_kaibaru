@@ -5825,6 +5825,53 @@ class ClubViewSet(viewsets.ModelViewSet):
 
     @action(
         detail=False,
+        methods=["get", "post"],
+        url_path=(
+            r"by-subdomain/(?P<subdomain>[^/.]+)/service-reservations/"
+            r"(?P<reservation_id>\d+)/refund"
+        ),
+    )
+    def service_reservation_refund(
+        self, request, subdomain=None, reservation_id=None
+    ):
+        from .service_reservation_refund import (
+            RefundError,
+            refund_service_preview,
+            refund_service_reservation,
+        )
+
+        club = Club.objects.filter(subdomain=subdomain, is_deleted=False).first()
+        if not club:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            reservation_id = int(reservation_id)
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "予約が見つかりません。"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        try:
+            if request.method == "GET":
+                payload = refund_service_preview(
+                    reservation_id=reservation_id,
+                    user=request.user,
+                    club=club,
+                )
+            else:
+                payload = refund_service_reservation(
+                    reservation_id=reservation_id,
+                    user=request.user,
+                    club=club,
+                )
+        except RefundError as exc:
+            return Response(
+                {"detail": exc.message},
+                status=exc.status_code,
+            )
+        return Response(payload)
+
+    @action(
+        detail=False,
         methods=["get"],
         url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/service-reservation-history",
     )

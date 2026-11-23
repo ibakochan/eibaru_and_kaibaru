@@ -913,8 +913,11 @@ def reconcile_reservation_refunds():
 
         result = ReservationRefundReconciler.reconcile_started_refunds()
         event_result = ReservationRefundReconciler.reconcile_started_event_refunds()
+        service_result = ReservationRefundReconciler.reconcile_started_service_refunds()
         result["event_checked"] = event_result["checked"]
         result["event_completed"] = event_result["completed"]
+        result["service_checked"] = service_result["checked"]
+        result["service_completed"] = service_result["completed"]
 
         logger.info(
             "[RESERVATION REFUND TASK] Finished reconciliation result=%s",

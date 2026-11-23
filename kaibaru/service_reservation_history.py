@@ -43,6 +43,12 @@ def reservation_collected(reservation):
     return reservation.paid_at is not None
 
 
+def _can_refund(reservation, user):
+    from .service_reservation_refund import service_reservation_is_refundable
+
+    return service_reservation_is_refundable(reservation, user)
+
+
 def can_reopen_reservation(reservation, today=None):
     """Paid, canceled, or no-show rows can return to 予約管理 through that date."""
     if not reopen_still_allowed(reservation, today):
@@ -153,6 +159,7 @@ def _reservation_row(reservation, today=None, user=None, actor=None):
         "no_show": reservation.no_show,
         "refunded": reservation.refunded_at is not None,
         "can_reopen": can_reopen_reservation(reservation, today),
+        "can_refund": _can_refund(reservation, user),
     }
 
 

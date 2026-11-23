@@ -1,14 +1,12 @@
-"""Owner/worker board for salon (ServiceReservation) bookings.
+"""Owner/worker board for open salon cash bookings.
 
-Lists confirmed reservations in the cash-action window and lets staff
-mark cash received, no-show, cancel, or restore. Stripe refunds are not
-handled here — cancel only frees the slot.
+Card bookings are already paid, so they stay on 受領・キャンセル・欠席.
+Canceling one from the club is a refund, not a plain cancel.
 """
 
 from __future__ import annotations
 
 from django.db import transaction
-from django.db.models import Q
 from django.utils import timezone
 
 from .cash_reservations import (
@@ -86,7 +84,12 @@ def manage_flags(reservation, user, *, actor=None):
         return flags
 
     if reservation.canceled:
+        if _is_card_charge(reservation):
+            return flags
         flags["can_restore"] = True
+        return flags
+
+    if _is_card_charge(reservation):
         return flags
 
     flags["can_cancel"] = not reservation.no_show
@@ -158,10 +161,10 @@ def list_manageable_reservations(club, user, *, actor=None):
             canceled=False,
             no_show=False,
         )
-        .exclude(
-            Q(payment_method=ServiceReservation.PaymentMethod.CASH)
-            & Q(paid_at__isnull=False)
-            & Q(amount__gt=0)
+        .filter(
+            payment_method=ServiceReservation.PaymentMethod.CASH,
+            amount__gt=0,
+            paid_at__isnull=True,
         )
         .select_related("course", "worker")
         .order_by("reservation_date", "start_time", "id")
@@ -280,7 +283,19 @@ def apply_service_manage_action(*, reservation_id, action, user, club):
     return reservation_payload(reservation, user, actor=actor)
 
 
+def _is_card_charge(reservation):
+    return (
+        (reservation.payment_method or "") == ServiceReservation.PaymentMethod.STRIPE
+        and int(reservation.amount or 0) > 0
+    )
+
+
 def _cancel(reservation):
+    if _is_card_charge(reservation):
+        raise CashReservationError(
+            "カード払いの予約は、受領・キャンセル・欠席から返金してください。"
+            "返金するとキャンセルになります。"
+        )
     if reservation.canceled:
         return
     if reservation.no_show:
@@ -313,10 +328,11 @@ def _reopen(reservation, today=None):
     Cash that was marked received is unmarked. Cancel and no-show are
     cleared. Stripe charges are not undone.
     """
+    if getattr(reservation, "refunded_at", None):
+        raise CashReservationError("返金した予約は元に戻せません。")
+
     if not reopen_still_allowed(reservation, today):
-        raise CashReservationError(
-            "予約日の翌日以降は、予約管理に戻せません。"
-        )
+        raise CashReservationError("予約日の翌日以降は、戻せません。")
 
     cash_paid = (
         is_cash_reservation(reservation) and reservation.paid_at is not None

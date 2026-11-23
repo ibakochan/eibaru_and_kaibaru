@@ -7,7 +7,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from .models import EventReservation, Reservation, TicketUsage
+from .models import EventReservation, Reservation, ServiceReservation, TicketUsage
 
 
 logger = logging.getLogger(__name__)
@@ -229,6 +229,132 @@ def _event_explanation(reservation, already_refunded):
         "",
         f"お支払いの{label}は、Stripeから{name}様へ返金されます。",
         "Stripeが引いた手数料と、Kaibaruが受け取った1%は戻りません。",
+    ])
+
+
+def service_reservation_is_refundable(reservation, user):
+    if user is None or not getattr(user, "is_authenticated", False):
+        return False
+    if reservation.club.owner_id != user.id:
+        return False
+    if (
+        reservation.refunded_at
+        or reservation.is_deleted
+        or reservation.canceled
+        or reservation.no_show
+    ):
+        return False
+    if reservation.status != ServiceReservation.Status.PAID:
+        return False
+    return (
+        reservation.payment_method == ServiceReservation.PaymentMethod.STRIPE
+        and reservation.amount > 0
+        and bool(reservation.stripe_payment_intent_id)
+        and bool(reservation.club.stripe_account_id)
+    )
+
+
+def refund_service_preview(*, reservation_id, user, club):
+    reservation = _load_service(reservation_id, club)
+    _assert_owner(reservation, user)
+    if reservation.refunded_at:
+        return _service_payload(reservation, already_refunded=True)
+    _assert_service_refundable(reservation)
+    return _service_payload(reservation, already_refunded=False)
+
+
+def refund_service_reservation(*, reservation_id, user, club):
+    with transaction.atomic():
+        reservation = _lock_service(reservation_id, club)
+        _assert_owner(reservation, user)
+        if reservation.refunded_at and reservation.canceled:
+            return _service_payload(reservation, already_refunded=True)
+        _assert_service_refundable(reservation)
+        reservation.refund_started_at = timezone.now()
+        reservation.save(update_fields=["refund_started_at"])
+
+    stripe_refund_id = _refund_stripe(
+        reservation,
+        metadata_key="service_reservation_id",
+        idempotency_key=f"service_reservation_refund_{reservation.id}",
+    )
+
+    with transaction.atomic():
+        reservation = _lock_service(reservation_id, club)
+        if reservation.refunded_at and reservation.canceled:
+            return _service_payload(reservation, already_refunded=True)
+        _mark_refunded(reservation, stripe_refund_id=stripe_refund_id)
+
+    reservation.refresh_from_db()
+    return _service_payload(reservation, already_refunded=False)
+
+
+def _load_service(reservation_id, club):
+    reservation = (
+        ServiceReservation.objects
+        .select_related("club")
+        .filter(id=reservation_id, club=club, is_deleted=False)
+        .first()
+    )
+    if reservation is None:
+        raise RefundError("予約が見つかりません。", 404)
+    return reservation
+
+
+def _lock_service(reservation_id, club):
+    reservation = (
+        ServiceReservation.objects
+        .select_for_update()
+        .select_related("club")
+        .filter(id=reservation_id, club=club, is_deleted=False)
+        .first()
+    )
+    if reservation is None:
+        raise RefundError("予約が見つかりません。", 404)
+    return reservation
+
+
+def _assert_service_refundable(reservation):
+    if reservation.canceled and not reservation.refunded_at:
+        raise RefundError("キャンセル済みのカード予約は返金できません。")
+    if reservation.status != ServiceReservation.Status.PAID:
+        raise RefundError("支払い済みの予約だけ返金できます。")
+    if reservation.refunded_at:
+        return
+    if (
+        reservation.payment_method != ServiceReservation.PaymentMethod.STRIPE
+        or reservation.amount <= 0
+        or not reservation.stripe_payment_intent_id
+        or not reservation.club.stripe_account_id
+    ):
+        raise RefundError("Stripeの支払い情報がないため、返金できません。")
+
+
+def _service_payload(reservation, *, already_refunded):
+    return {
+        "reservation_id": reservation.id,
+        "already_refunded": already_refunded,
+        "payment_method": reservation.payment_method,
+        "canceled": reservation.canceled,
+        "refunded_at": (
+            reservation.refunded_at.isoformat()
+            if reservation.refunded_at
+            else None
+        ),
+        "explanation": _service_explanation(reservation, already_refunded),
+    }
+
+
+def _service_explanation(reservation, already_refunded):
+    if already_refunded:
+        return "この予約はすでに返金済みです。キャンセルのまま戻りません。"
+    name = reservation.full_name or "お客様"
+    amount = f"¥{reservation.amount:,}"
+    return "\n".join([
+        f"{name}様のカード予約を返金します。予約はキャンセルになり、元には戻せません。",
+        "",
+        f"お支払いの{amount}は、Stripeから{name}様へ返金されます。",
+        "Stripeが引いた約4%と、Kaibaruが受け取った1%は戻りません。",
     ])
 
 
@@ -721,6 +847,102 @@ class ReservationRefundReconciler:
             return "completed"
 
         cleared = EventReservation.objects.filter(
+            id=reservation_id,
+            refund_started_at=observed_started_at,
+            refund_started_at__lt=cutoff,
+            refunded_at__isnull=True,
+        ).update(refund_started_at=None)
+        return "cleared" if cleared else "skipped"
+
+    @classmethod
+    def reconcile_started_service_refunds(cls):
+        cutoff = timezone.now() - REFUND_RECONCILE_AFTER
+        reservations = (
+            ServiceReservation.objects
+            .filter(
+                payment_method=ServiceReservation.PaymentMethod.STRIPE,
+                refund_started_at__isnull=False,
+                refund_started_at__lt=cutoff,
+                is_deleted=False,
+            )
+            .filter(Q(refunded_at__isnull=True) | Q(canceled=False))
+            .select_related("club")
+            .order_by("refund_started_at", "id")
+        )
+        checked = completed = cleared = skipped = failed = 0
+        for reservation in reservations:
+            checked += 1
+            try:
+                result = cls.reconcile_service_reservation(reservation.id)
+            except Exception:
+                failed += 1
+                logger.exception(
+                    "[SERVICE RESERVATION REFUND RECONCILE] Unexpected error reservation=%s",
+                    reservation.id,
+                )
+                continue
+            if result == "completed":
+                completed += 1
+            elif result == "cleared":
+                cleared += 1
+            elif result == "skipped":
+                skipped += 1
+            else:
+                failed += 1
+        return {
+            "checked": checked,
+            "completed": completed,
+            "cleared": cleared,
+            "skipped": skipped,
+            "failed": failed,
+        }
+
+    @classmethod
+    def reconcile_service_reservation(cls, reservation_id):
+        cutoff = timezone.now() - REFUND_RECONCILE_AFTER
+        with transaction.atomic():
+            reservation = (
+                ServiceReservation.objects
+                .select_for_update()
+                .select_related("club")
+                .filter(id=reservation_id, is_deleted=False)
+                .first()
+            )
+            if reservation is None or not _refund_is_due(reservation, cutoff):
+                return "skipped"
+            if reservation.refunded_at and not reservation.canceled:
+                reservation.canceled = True
+                reservation.save(update_fields=["canceled"])
+                return "completed"
+            observed_started_at = reservation.refund_started_at
+
+        try:
+            stripe.api_key = settings.STRIPE_SECRET_KEY
+            refund = _find_stripe_refund(
+                reservation,
+                metadata_key="service_reservation_id",
+            )
+        except stripe.error.StripeError:
+            logger.exception(
+                "[SERVICE RESERVATION REFUND RECONCILE] Stripe error reservation=%s",
+                reservation_id,
+            )
+            return "failed"
+
+        if refund is not None:
+            with transaction.atomic():
+                reservation = (
+                    ServiceReservation.objects
+                    .select_for_update()
+                    .filter(id=reservation_id, is_deleted=False)
+                    .first()
+                )
+                if reservation is None or not _refund_is_due(reservation, cutoff):
+                    return "skipped"
+                _mark_refunded(reservation, stripe_refund_id=_refund_id(refund))
+            return "completed"
+
+        cleared = ServiceReservation.objects.filter(
             id=reservation_id,
             refund_started_at=observed_started_at,
             refund_started_at__lt=cutoff,

@@ -253,8 +253,8 @@ class ServiceReservationHistoryTests(TestCase):
         rows = list_manageable_reservations(self.club, self.owner)
         ids = [row["id"] for row in rows]
         self.assertIn(open_row.id, ids)
-        self.assertIn(future_paid.id, ids)
-        self.assertEqual(len(ids), 2)
+        self.assertNotIn(future_paid.id, ids)
+        self.assertEqual(len(ids), 1)
         open_payload = next(row for row in rows if row["id"] == open_row.id)
         self.assertTrue(open_payload["can_mark_paid"])
         self.assertTrue(open_payload["can_cancel"])
