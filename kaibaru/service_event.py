@@ -668,6 +668,7 @@ class EventReservationService:
         method = _event_payment_method(club, event, payment_method, amount)
         reservation_key = visitor_reservation_key(event, email)
         instant = is_instant_confirm(club)
+        resume_checkout = False
 
         try:
             with transaction.atomic():
@@ -683,7 +684,11 @@ class EventReservationService:
                     terms_accepted=terms_accepted,
                     payment_method=payment_method,
                 )
-                if not instant:
+                resume_checkout = (
+                    reservation.status == EventReservation.Status.UNPAID
+                    and hold_is_active(reservation, hold_cutoff_at())
+                )
+                if not instant and not resume_checkout:
                     _queue_start_email(token)
         except IntegrityError:
             existing = (
@@ -703,7 +708,7 @@ class EventReservationService:
                 "このイベントの予約処理がすでに開始されています。"
             )
 
-        if instant:
+        if instant or resume_checkout:
             return _finish_event_visitor_instant(token, reservation.id)
         return _email_sent_result(reservation)
 
@@ -790,9 +795,11 @@ def _save_visitor_reservation(
                 event=locked_event,
                 hold_cutoff=hold_cutoff,
             )
-            if payment_view.open_url:
+            if payment_view.open_url and existing.start_token:
                 existing.is_deleted = False
                 existing.save(update_fields=["is_deleted"])
+                return existing.start_token, existing
+            if payment_view.open_url:
                 raise ValueError(
                     "このイベントの予約はお支払い手続き中です。"
                     "メールのリンクからお支払いを続けてください。"
@@ -807,6 +814,8 @@ def _save_visitor_reservation(
             existing.status == EventReservation.Status.UNPAID
             and hold_is_active(existing, hold_cutoff)
         ):
+            if existing.start_token:
+                return existing.start_token, existing
             raise ValueError(
                 "このイベントの予約はお支払い手続き中です。"
                 "メールのリンクからお支払いを続けてください。"

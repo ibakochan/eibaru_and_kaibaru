@@ -70,13 +70,15 @@ class VisitorReservationService:
             addon_ids=addon_ids,
         )
         instant = is_instant_confirm(club)
+        resume_checkout = False
 
         try:
             with transaction.atomic():
                 token, reservation_ids = _save_visitor_reservation(
                     **prepared
                 )
-                if not instant:
+                resume_checkout = _checkout_is_open(reservation_ids)
+                if not instant and not resume_checkout:
                     queue_reservation_start_email(token)
         except IntegrityError:
             existing = (
@@ -113,7 +115,7 @@ class VisitorReservationService:
                 "このレッスンの予約処理がすでに開始されています。"
             )
 
-        if instant:
+        if instant or resume_checkout:
             try:
                 begin_result = ReservationStartService.begin(token)
             except ReservationStartError as exc:
@@ -125,6 +127,14 @@ class VisitorReservationService:
             )
 
         return _email_sent_result(reservation_ids)
+
+
+def _checkout_is_open(reservation_ids):
+    cutoff = hold_cutoff_at()
+    return any(
+        row.status == Reservation.Status.UNPAID and hold_is_active(row, cutoff)
+        for row in Reservation.objects.filter(id__in=reservation_ids)
+    )
 
 
 def _assert_visitor_room(
@@ -340,9 +350,11 @@ def _save_visitor_reservation(
                 email=email,
                 hold_cutoff=hold_cutoff,
             )
-            if payment_view.open_url:
+            if payment_view.open_url and existing.start_token:
                 existing.is_deleted = False
                 existing.save(update_fields=["is_deleted"])
+                return existing.start_token, [existing.id]
+            if payment_view.open_url:
                 raise ValueError(
                     "このレッスンの予約はお支払い手続き中です。"
                     "メールのリンクからお支払いを続けてください。"
@@ -357,6 +369,8 @@ def _save_visitor_reservation(
             existing.status == Reservation.Status.UNPAID
             and hold_is_active(existing, hold_cutoff)
         ):
+            if existing.start_token:
+                return existing.start_token, [existing.id]
             raise ValueError(
                 "このレッスンの予約はお支払い手続き中です。"
                 "メールのリンクからお支払いを続けてください。"

@@ -95,13 +95,15 @@ class TrialReservationService:
             addon_ids=addon_ids,
         )
         instant = is_instant_confirm(club)
+        resume_checkout = False
 
         try:
             with transaction.atomic():
                 token, reservation_ids = _save_trial_reservations(
                     **prepared
                 )
-                if not instant:
+                resume_checkout = _checkout_is_open(reservation_ids)
+                if not instant and not resume_checkout:
                     queue_reservation_start_email(token)
         except IntegrityError:
             existing = (
@@ -140,7 +142,7 @@ class TrialReservationService:
                 "メールをご確認ください。"
             )
 
-        if instant:
+        if instant or resume_checkout:
             try:
                 begin_result = ReservationStartService.begin(token)
             except ReservationStartError as exc:
@@ -152,6 +154,14 @@ class TrialReservationService:
             )
 
         return _email_sent_result(reservation_ids)
+
+
+def _checkout_is_open(reservation_ids):
+    cutoff = hold_cutoff_at()
+    return any(
+        row.status == Reservation.Status.UNPAID and hold_is_active(row, cutoff)
+        for row in Reservation.objects.filter(id__in=reservation_ids)
+    )
 
 
 def _email_sent_result(reservation_ids):
@@ -483,7 +493,11 @@ def _save_trial_reservations(
             [row.id for row in resend_rows],
         )
 
+    unpaid_group = []
     for person, rows, row, kind in grouped:
+        if kind == "unpaid" and row is not None and row.start_token:
+            unpaid_group.append(row)
+            continue
         if kind in ("paid", "unpaid", "canceled"):
             raise ValueError(
                 _trial_blocker_message(
@@ -491,6 +505,20 @@ def _save_trial_reservations(
                     kind,
                 )
             )
+    if unpaid_group:
+        if len(unpaid_group) == len(grouped):
+            tokens = {row.start_token for row in unpaid_group}
+            if len(tokens) == 1:
+                return (
+                    unpaid_group[0].start_token,
+                    [row.id for row in unpaid_group],
+                )
+        raise ValueError(
+            _trial_blocker_message(
+                unpaid_group[0].full_name,
+                "unpaid",
+            )
+        )
 
     deleted_ids = set()
     tokens_to_clear = set()
@@ -570,9 +598,11 @@ def _save_trial_reservations(
                     f"{person['full_name']}さんは、このクラブで"
                     "体験予約をすでにご利用済みです。"
                 )
-            if payment_view.open_url:
+            if payment_view.open_url and existing.start_token:
                 existing.is_deleted = False
                 existing.save(update_fields=["is_deleted"])
+                return existing.start_token, [existing.id]
+            if payment_view.open_url:
                 raise ValueError(
                     f"{person['full_name']}さんの体験予約は"
                     "お支払い手続き中です。"
