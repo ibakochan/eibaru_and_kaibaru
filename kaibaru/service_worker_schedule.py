@@ -1334,6 +1334,25 @@ def _time_off_payload(off):
     }
 
 
+def _yasumi_overlaps_existing(member, day, start, end):
+    """True when this yasumi crosses one already stored that day.
+
+    Paid and unpaid block each other. A block that ends when the next
+    one starts does not overlap. An all-day row covers the whole day.
+    """
+    rows = WorkerTimeOff.objects.filter(worker=member, date=day).only(
+        "start_time", "end_time"
+    )
+    for row in rows:
+        if start is None or row.start_time is None or row.end_time is None:
+            return True
+        if _overlaps(
+            _tmin(start), _tmin(end), _tmin(row.start_time), _tmin(row.end_time)
+        ):
+            return True
+    return False
+
+
 def _yasumi_blocked_by_reservation(member, day, start, end):
     """A taken reservation on a past day blocks yasumi that overlaps it."""
     rows = ServiceReservation.objects.filter(
@@ -1391,12 +1410,19 @@ def add_worker_time_off(member, payload):
             return None, f"{label}は過去の月なので、休みにできません。"
         if day < today and _yasumi_blocked_by_reservation(member, day, start, end):
             return None, f"{label}には予約があるので、休みにできません。"
+        if _yasumi_overlaps_existing(member, day, start, end):
+            return None, f"{label}は、入っている休みまたは有給と重なっています。"
     note = payload.get("note") or ""
     if not isinstance(note, str):
         note = ""
     paid = payload.get("paid") in (True, 1, "1", "true", "True")
     created = []
     with transaction.atomic():
+        WorkerProfile.objects.select_for_update().filter(worker=member).first()
+        for day in days:
+            label = f"{day.month}/{day.day}"
+            if _yasumi_overlaps_existing(member, day, start, end):
+                return None, f"{label}は、入っている休みまたは有給と重なっています。"
         for day in days:
             off = WorkerTimeOff.objects.create(
                 worker=member,
