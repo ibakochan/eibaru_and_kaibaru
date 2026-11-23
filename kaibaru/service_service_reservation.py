@@ -113,6 +113,70 @@ def request_is_fresh(reservation, now=None):
     return requested_at >= now - timedelta(hours=START_LINK_HOURS)
 
 
+CUSTOMER_OVERLAP_MESSAGE = "この時間は、このサロンの別の予約と重なっています。"
+
+
+def _customer_blocks_slot(row, now):
+    """A live same-salon booking this person cannot sit through twice."""
+    if row.canceled or row.is_deleted or row.no_show:
+        return False
+    if row.status == ServiceReservation.Status.PAID:
+        return True
+    if row.status == ServiceReservation.Status.UNPAID and hold_is_active(
+        row, hold_cutoff_at(now)
+    ):
+        return True
+    return (
+        row.status == ServiceReservation.Status.NOT_STARTED
+        and request_is_fresh(row, now)
+    )
+
+
+def customer_time_overlaps(
+    club,
+    email,
+    day,
+    start,
+    end,
+    *,
+    user=None,
+    exclude_id=None,
+    exclude_key=None,
+    now=None,
+):
+    """True when this email or account already has an overlapping booking here.
+
+    A course that ends exactly when the next one starts does not overlap.
+    Call inside transaction.atomic(); matching rows are locked.
+    """
+    now = now or timezone.now()
+    email = (email or "").strip().lower()
+    authenticated = user is not None and getattr(user, "is_authenticated", False)
+    if not email and not authenticated:
+        return False
+    identity = Q()
+    if email:
+        identity |= Q(email__iexact=email)
+    if authenticated:
+        identity |= Q(user=user)
+    rows = (
+        ServiceReservation.objects.select_for_update()
+        .filter(club=club, reservation_date=day)
+        .filter(identity)
+        .order_by("id")
+    )
+    if exclude_id:
+        rows = rows.exclude(id=exclude_id)
+    if exclude_key:
+        rows = rows.exclude(reservation_key=exclude_key)
+    for row in rows:
+        if not _customer_blocks_slot(row, now):
+            continue
+        if row.start_time < end and start < row.end_time:
+            return True
+    return False
+
+
 def queue_service_reservation_start_email(start_token):
     from .tasks_emails import send_service_reservation_start_email
 
@@ -344,6 +408,17 @@ def create_service_reservation(club, payload, user=None):
 
     try:
         with transaction.atomic():
+            if customer_time_overlaps(
+                club,
+                email,
+                day,
+                start,
+                end,
+                user=user,
+                exclude_key=reservation_key,
+                now=now,
+            ):
+                raise ValueError(CUSTOMER_OVERLAP_MESSAGE)
             reservation = _save_not_started(
                 club=club,
                 course=course,
@@ -707,6 +782,17 @@ def _prepare_start(token, force_new=False):
             raise ServiceStartError(message)
 
         now = timezone.now()
+        if customer_time_overlaps(
+            club,
+            reservation.email,
+            reservation.reservation_date,
+            reservation.start_time,
+            reservation.end_time,
+            user=reservation.user,
+            exclude_id=reservation.id,
+            now=now,
+        ):
+            raise ServiceStartError(CUSTOMER_OVERLAP_MESSAGE, retryable=True)
         hold_cutoff = hold_cutoff_at(now)
 
         preferred = reservation.preferred_worker
