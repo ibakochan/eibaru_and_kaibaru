@@ -41,8 +41,11 @@ from .models import (
     Tournament,
 )
 from .reservation_checkout_recovery import (
+    checkout_content_changed,
+    expire_checkout_session,
     read_stripe_payment,
     record_stripe_payment,
+    same_checkout_person,
     soft_delete_reservation,
 )
 from .stripe_service import get_or_create_stripe_customer
@@ -434,7 +437,36 @@ class EventReservationService:
                     return _paid_result(existing)
 
                 if payment_view.open_url:
-                    open_checkout = payment_view
+                    same_person = same_checkout_person(
+                        existing,
+                        user=member.owner,
+                        email=email,
+                        full_name=full_name,
+                    )
+                    changed = checkout_content_changed(
+                        existing,
+                        amount=amount,
+                        price_name=price_name,
+                        payment_method=method,
+                    )
+                    if same_person and not changed and not pays_at_venue:
+                        open_checkout = payment_view
+                    elif same_person:
+                        expire_checkout_session(
+                            club.stripe_account_id,
+                            payment_view.session_id,
+                        )
+                        existing.stripe_checkout_session_id = None
+                        existing.stripe_payment_intent_id = None
+                        existing.save(
+                            update_fields=[
+                                "stripe_checkout_session_id",
+                                "stripe_payment_intent_id",
+                            ]
+                        )
+                        reused = True
+                    else:
+                        raise ValueError(_CARD_IN_PROGRESS_MESSAGE)
                 elif not payment_view.confirmed_unpaid:
                     raise ValueError(
                         "決済の確認ができませんでした。"
@@ -669,6 +701,7 @@ class EventReservationService:
         reservation_key = visitor_reservation_key(event, email)
         instant = is_instant_confirm(club)
         resume_checkout = False
+        replace_checkout = False
 
         try:
             with transaction.atomic():
@@ -687,6 +720,22 @@ class EventReservationService:
                 resume_checkout = (
                     reservation.status == EventReservation.Status.UNPAID
                     and hold_is_active(reservation, hold_cutoff_at())
+                )
+                if resume_checkout and not same_checkout_person(
+                    reservation,
+                    user=user,
+                    email=email,
+                    full_name=full_name,
+                ):
+                    raise ValueError(
+                        "このイベントの予約はお支払い手続き中です。"
+                        "メールのリンクからお支払いを続けてください。"
+                    )
+                replace_checkout = resume_checkout and checkout_content_changed(
+                    reservation,
+                    amount=amount,
+                    price_name=price_name,
+                    payment_method=method,
                 )
                 if not instant and not resume_checkout:
                     _queue_start_email(token)
@@ -708,16 +757,80 @@ class EventReservationService:
                 "このイベントの予約処理がすでに開始されています。"
             )
 
+        if replace_checkout:
+            if _revise_event_checkout(
+                reservation,
+                club,
+                amount=amount,
+                price_name=price_name,
+                payment_method=method,
+                full_name=full_name,
+                phone_number=phone_number,
+            ):
+                raise ValueError("このイベントはすでに予約済みです。")
+            return _finish_event_visitor_instant(
+                token,
+                reservation.id,
+                force_new=True,
+            )
         if instant or resume_checkout:
             return _finish_event_visitor_instant(token, reservation.id)
         return _email_sent_result(reservation)
 
 
-def _finish_event_visitor_instant(start_token, reservation_id):
+def _revise_event_checkout(
+    reservation,
+    club,
+    *,
+    amount,
+    price_name,
+    payment_method,
+    full_name,
+    phone_number,
+):
+    from .reservation_checkout_recovery import (
+        expire_checkout_session,
+        read_stripe_payment,
+        record_stripe_payment,
+    )
+
+    session_id = reservation.stripe_checkout_session_id
+    if session_id and club.stripe_account_id:
+        view = read_stripe_payment(
+            reservation,
+            club.stripe_account_id,
+            metadata_key="event_reservation_id",
+        )
+        if view.paid:
+            record_stripe_payment(reservation, view)
+            return True
+        expire_checkout_session(club.stripe_account_id, session_id)
+    reservation.amount = amount
+    reservation.price_name = price_name
+    reservation.payment_method = payment_method
+    reservation.full_name = full_name
+    reservation.phone_number = phone_number
+    reservation.stripe_checkout_session_id = None
+    reservation.stripe_payment_intent_id = None
+    reservation.save(
+        update_fields=[
+            "amount",
+            "price_name",
+            "payment_method",
+            "full_name",
+            "phone_number",
+            "stripe_checkout_session_id",
+            "stripe_payment_intent_id",
+        ]
+    )
+    return False
+
+
+def _finish_event_visitor_instant(start_token, reservation_id, force_new=False):
     from .visitor_booking import create_result_from_begin
 
     try:
-        begin_result = EventStartService.begin(start_token)
+        begin_result = EventStartService.begin(start_token, force_new=force_new)
     except EventStartError as exc:
         raise ValueError(exc.message) from exc
     return create_result_from_begin(
@@ -1209,8 +1322,8 @@ class EventStartService:
         return {"mode": "ready", **page}
 
     @staticmethod
-    def begin(token):
-        prepared = _prepare_start(token)
+    def begin(token, force_new=False):
+        prepared = _prepare_start(token, force_new=force_new)
 
         if prepared["action"] == "done":
             return _public_start_result(prepared)

@@ -6,8 +6,11 @@ from django.utils import timezone
 from .cash_reservations import resolve_payment_method
 from .models import Reservation
 from .reservation_checkout_recovery import (
+    checkout_content_changed,
+    expire_checkout_session,
     read_stripe_payment,
     record_stripe_payment,
+    same_checkout_person,
 )
 from .tasks_emails import send_visitor_reservation_confirmation_email
 from .rules_eligibility import assert_visitor_eligible_for_lesson
@@ -71,13 +74,31 @@ class VisitorReservationService:
         )
         instant = is_instant_confirm(club)
         resume_checkout = False
+        replace_checkout = False
 
         try:
             with transaction.atomic():
                 token, reservation_ids = _save_visitor_reservation(
                     **prepared
                 )
-                resume_checkout = _checkout_is_open(reservation_ids)
+                open_row = _open_checkout_row(reservation_ids)
+                resume_checkout = open_row is not None
+                if resume_checkout and not same_checkout_person(
+                    open_row,
+                    user=prepared["user"],
+                    email=prepared["email"],
+                    full_name=prepared["full_name"],
+                ):
+                    raise ValueError(
+                        "このレッスンの予約はお支払い手続き中です。"
+                        "メールのリンクからお支払いを続けてください。"
+                    )
+                replace_checkout = resume_checkout and checkout_content_changed(
+                    open_row,
+                    amount=prepared["reservation_price"],
+                    price_name=prepared["price_name"],
+                    payment_method=prepared["payment_method"],
+                )
                 if not instant and not resume_checkout:
                     queue_reservation_start_email(token)
         except IntegrityError:
@@ -115,6 +136,27 @@ class VisitorReservationService:
                 "このレッスンの予約処理がすでに開始されています。"
             )
 
+        if replace_checkout:
+            if _revise_lesson_checkout(
+                open_row,
+                prepared["club"],
+                amount=prepared["reservation_price"],
+                price_name=prepared["price_name"],
+                payment_method=prepared["payment_method"],
+                full_name=prepared["full_name"],
+                phone_number=prepared["phone_number"],
+            ):
+                raise ValueError("このレッスンはすでに予約済みです。")
+            try:
+                begin_result = ReservationStartService.begin(token, force_new=True)
+            except ReservationStartError as exc:
+                raise ValueError(exc.message) from exc
+            return create_result_from_begin(
+                begin_result=begin_result,
+                reservation_id=reservation_ids[0],
+                reservation_ids=reservation_ids,
+            )
+
         if instant or resume_checkout:
             try:
                 begin_result = ReservationStartService.begin(token)
@@ -129,12 +171,54 @@ class VisitorReservationService:
         return _email_sent_result(reservation_ids)
 
 
-def _checkout_is_open(reservation_ids):
+def _open_checkout_row(reservation_ids):
     cutoff = hold_cutoff_at()
-    return any(
-        row.status == Reservation.Status.UNPAID and hold_is_active(row, cutoff)
-        for row in Reservation.objects.filter(id__in=reservation_ids)
+    for row in Reservation.objects.filter(id__in=reservation_ids):
+        if row.status == Reservation.Status.UNPAID and hold_is_active(row, cutoff):
+            return row
+    return None
+
+
+def _revise_lesson_checkout(
+    reservation,
+    club,
+    *,
+    amount,
+    price_name,
+    payment_method,
+    full_name,
+    phone_number,
+):
+    session_id = reservation.stripe_checkout_session_id
+    if session_id and club.stripe_account_id:
+        view = read_stripe_payment(
+            reservation,
+            club.stripe_account_id,
+            metadata_key="reservation_id",
+        )
+        if view.paid:
+            record_stripe_payment(reservation, view)
+            return True
+        expire_checkout_session(club.stripe_account_id, session_id)
+    reservation.amount = amount
+    reservation.price_name = price_name
+    reservation.payment_method = payment_method
+    reservation.full_name = full_name
+    reservation.phone_number = phone_number
+    reservation.stripe_checkout_session_id = None
+    reservation.stripe_payment_intent_id = None
+    reservation.save(
+        update_fields=[
+            "amount",
+            "price_name",
+            "payment_method",
+            "full_name",
+            "phone_number",
+            "stripe_checkout_session_id",
+            "stripe_payment_intent_id",
+        ]
     )
+    return False
 
 
 def _assert_visitor_room(

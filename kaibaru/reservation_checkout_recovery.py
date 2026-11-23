@@ -249,3 +249,45 @@ def _search_succeeded_payment_intent(
         paid=True,
         payment_intent_id=payment_intent.id,
     )
+
+
+def folded_name(value):
+    return " ".join(str(value or "").replace("\u3000", " ").split())
+
+
+def same_checkout_person(existing, *, user, email, full_name):
+    """Same logged-in account, or the same email and name."""
+    existing_email = (existing.email or "").strip().lower()
+    email = (email or "").strip().lower()
+    authenticated = user is not None and getattr(user, "is_authenticated", False)
+    if (
+        authenticated
+        and existing.user_id
+        and existing.user_id == getattr(user, "id", None)
+    ):
+        return True
+    return (
+        bool(email)
+        and email == existing_email
+        and folded_name(full_name) == folded_name(existing.full_name)
+    )
+
+
+def checkout_content_changed(existing, *, amount, price_name, payment_method):
+    return (
+        int(existing.amount or 0) != int(amount or 0)
+        or (existing.price_name or "") != (price_name or "")
+        or (existing.payment_method or "") != (payment_method or "")
+    )
+
+
+def expire_checkout_session(stripe_account, session_id):
+    if not stripe_account or not session_id:
+        return
+    try:
+        stripe.checkout.Session.expire(
+            session_id,
+            stripe_account=stripe_account,
+        )
+    except Exception:
+        logger.exception("Failed to expire checkout session %s", session_id)

@@ -6,8 +6,11 @@ from django.db import IntegrityError, transaction
 from .cash_reservations import resolve_payment_method
 from .models import Club, Lesson, Reservation
 from .reservation_checkout_recovery import (
+    checkout_content_changed,
+    expire_checkout_session,
     read_stripe_payment,
     record_stripe_payment,
+    same_checkout_person,
 )
 from .tasks_emails import send_visitor_reservation_confirmation_email
 from .rules_eligibility import assert_visitor_eligible_for_lesson
@@ -96,13 +99,38 @@ class TrialReservationService:
         )
         instant = is_instant_confirm(club)
         resume_checkout = False
+        replace_checkout = False
+        open_rows = []
 
         try:
             with transaction.atomic():
                 token, reservation_ids = _save_trial_reservations(
                     **prepared
                 )
-                resume_checkout = _checkout_is_open(reservation_ids)
+                open_rows = _open_checkout_rows(reservation_ids)
+                resume_checkout = bool(open_rows)
+                if resume_checkout and not all(
+                    same_checkout_person(
+                        row,
+                        user=prepared["user"],
+                        email=prepared["email"],
+                        full_name=row.full_name,
+                    )
+                    for row in open_rows
+                ):
+                    raise ValueError(
+                        "この体験予約はお支払い手続き中です。"
+                        "メールのリンクからお支払いを続けてください。"
+                    )
+                replace_checkout = resume_checkout and any(
+                    checkout_content_changed(
+                        row,
+                        amount=prepared["reservation_price"],
+                        price_name=prepared["price_name"],
+                        payment_method=prepared["payment_method"],
+                    )
+                    for row in open_rows
+                )
                 if not instant and not resume_checkout:
                     queue_reservation_start_email(token)
         except IntegrityError:
@@ -142,6 +170,27 @@ class TrialReservationService:
                 "メールをご確認ください。"
             )
 
+        if replace_checkout:
+            if _revise_trial_checkout(
+                open_rows,
+                prepared["club"],
+                amount=prepared["reservation_price"],
+                price_name=prepared["price_name"],
+                payment_method=prepared["payment_method"],
+            ):
+                raise ValueError(
+                    "この体験予約はすでに申し込み済みです。"
+                )
+            try:
+                begin_result = ReservationStartService.begin(token, force_new=True)
+            except ReservationStartError as exc:
+                raise ValueError(exc.message) from exc
+            return create_result_from_begin(
+                begin_result=begin_result,
+                reservation_id=reservation_ids[0],
+                reservation_ids=reservation_ids,
+            )
+
         if instant or resume_checkout:
             try:
                 begin_result = ReservationStartService.begin(token)
@@ -156,12 +205,46 @@ class TrialReservationService:
         return _email_sent_result(reservation_ids)
 
 
-def _checkout_is_open(reservation_ids):
+def _open_checkout_rows(reservation_ids):
     cutoff = hold_cutoff_at()
-    return any(
-        row.status == Reservation.Status.UNPAID and hold_is_active(row, cutoff)
+    return [
+        row
         for row in Reservation.objects.filter(id__in=reservation_ids)
+        if row.status == Reservation.Status.UNPAID and hold_is_active(row, cutoff)
+    ]
+
+
+def _revise_trial_checkout(rows, club, *, amount, price_name, payment_method):
+    session_id = next(
+        (row.stripe_checkout_session_id for row in rows if row.stripe_checkout_session_id),
+        None,
     )
+    if session_id and club.stripe_account_id:
+        view = read_stripe_payment(
+            rows[0],
+            club.stripe_account_id,
+            metadata_key="reservation_id",
+        )
+        if view.paid:
+            record_stripe_payment(rows[0], view)
+            return True
+        expire_checkout_session(club.stripe_account_id, session_id)
+    for row in rows:
+        row.amount = amount
+        row.price_name = price_name
+        row.payment_method = payment_method
+        row.stripe_checkout_session_id = None
+        row.stripe_payment_intent_id = None
+        row.save(
+            update_fields=[
+                "amount",
+                "price_name",
+                "payment_method",
+                "stripe_checkout_session_id",
+                "stripe_payment_intent_id",
+            ]
+        )
+    return False
 
 
 def _email_sent_result(reservation_ids):

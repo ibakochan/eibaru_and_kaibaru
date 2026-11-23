@@ -21,7 +21,9 @@ from .cash_reservations import (
 from .charge_amounts import persisted_charge_amount, platform_fee_kwargs
 from .models import ServiceCourse, ServiceReservation
 from .reservation_checkout_recovery import (
+    checkout_content_changed,
     read_stripe_payment,
+    same_checkout_person,
     soft_delete_reservation,
 )
 from .stripe_service import get_or_create_stripe_customer
@@ -406,6 +408,8 @@ def create_service_reservation(club, payload, user=None):
     token = secrets.token_urlsafe(32)
     instant = is_instant_confirm(club)
     resume_checkout = False
+    replace_checkout = False
+    old_session_id = None
 
     try:
         with transaction.atomic():
@@ -444,6 +448,23 @@ def create_service_reservation(club, payload, user=None):
                 reservation.status == ServiceReservation.Status.UNPAID
                 and hold_is_active(reservation, hold_cutoff_at(now))
             )
+            replace_checkout = False
+            if resume_checkout:
+                if not same_checkout_person(
+                    reservation,
+                    user=user,
+                    email=email,
+                    full_name=full_name,
+                ):
+                    raise ValueError(CUSTOMER_OVERLAP_MESSAGE)
+                replace_checkout = checkout_content_changed(
+                    reservation,
+                    amount=amount,
+                    price_name=price_name,
+                    payment_method=payment_method or "",
+                )
+                if replace_checkout:
+                    old_session_id = reservation.stripe_checkout_session_id
             if not instant and not resume_checkout:
                 queue_service_reservation_start_email(start_token)
     except IntegrityError:
@@ -461,16 +482,86 @@ def create_service_reservation(club, payload, user=None):
     except ValueError as exc:
         return None, str(exc)
 
+    if replace_checkout:
+        paid = _replace_service_checkout(
+            reservation,
+            club,
+            amount=amount,
+            price_name=price_name,
+            payment_method=payment_method or "",
+            full_name=full_name,
+            phone_number=(payload.get("phone_number") or "")[:30],
+            session_id=old_session_id,
+        )
+        if paid:
+            return None, "この予約はすでに確定しています。"
+        return _finish_service_instant(
+            start_token,
+            reservation.id,
+            force_new=True,
+        )
     if instant or resume_checkout:
         return _finish_service_instant(start_token, reservation.id)
     return _email_sent_result(reservation), None
 
 
-def _finish_service_instant(start_token, reservation_id):
+def _replace_service_checkout(
+    reservation,
+    club,
+    *,
+    amount,
+    price_name,
+    payment_method,
+    full_name,
+    phone_number,
+    session_id,
+):
+    from .reservation_checkout_recovery import (
+        expire_checkout_session,
+        read_stripe_payment,
+        record_stripe_payment,
+    )
+
+    if session_id and club.stripe_account_id:
+        reservation.stripe_checkout_session_id = session_id
+        view = read_stripe_payment(
+            reservation,
+            club.stripe_account_id,
+            metadata_key="service_reservation_id",
+        )
+        if view.paid:
+            record_stripe_payment(reservation, view)
+            return True
+        expire_checkout_session(club.stripe_account_id, session_id)
+    reservation.amount = amount
+    reservation.price_name = price_name
+    reservation.payment_method = payment_method
+    reservation.full_name = full_name
+    reservation.phone_number = phone_number
+    reservation.stripe_checkout_session_id = None
+    reservation.stripe_payment_intent_id = None
+    reservation.save(
+        update_fields=[
+            "amount",
+            "price_name",
+            "payment_method",
+            "full_name",
+            "phone_number",
+            "stripe_checkout_session_id",
+            "stripe_payment_intent_id",
+        ]
+    )
+    return False
+
+
+def _finish_service_instant(start_token, reservation_id, force_new=False):
     from .visitor_booking import create_result_from_begin
 
     try:
-        begin_result = ServiceReservationStartService.begin(start_token)
+        begin_result = ServiceReservationStartService.begin(
+            start_token,
+            force_new=force_new,
+        )
     except ServiceStartError as exc:
         return None, exc.message
     return (
@@ -652,8 +743,8 @@ class ServiceReservationStartService:
         return {"mode": "ready", **page}
 
     @staticmethod
-    def begin(token):
-        prepared = _prepare_start(token)
+    def begin(token, force_new=False):
+        prepared = _prepare_start(token, force_new=force_new)
         if prepared["action"] == "done":
             return {
                 key: value

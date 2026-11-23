@@ -21,8 +21,11 @@ from .charge_amounts import persisted_charge_amount, platform_fee_kwargs
 from .discounts import calculate_age
 from .rules_eligibility import assert_member_eligible_for_lesson
 from .reservation_checkout_recovery import (
+    checkout_content_changed,
+    expire_checkout_session,
     read_stripe_payment,
     record_stripe_payment,
+    same_checkout_person,
 )
 from .rules_reservations import (
     assert_member_reservation_caps,
@@ -616,30 +619,53 @@ class MemberReservationService:
                         "requires_checkout": False,
                     }
 
+                replaced_checkout = False
                 if payment_view.open_url:
-                    if payment_method == "cash":
+                    same_person = same_checkout_person(
+                        existing,
+                        user=member.owner,
+                        email=email,
+                        full_name=full_name,
+                    )
+                    changed = checkout_content_changed(
+                        existing,
+                        amount=reservation_price,
+                        price_name=price_name,
+                        payment_method=payment_method,
+                    )
+                    if same_person and not changed:
+                        if existing.is_deleted:
+                            existing.is_deleted = False
+                            existing.save(update_fields=["is_deleted"])
+                        return {
+                            "reservation_id": existing.id,
+                            "checkout_session_id": payment_view.session_id,
+                            "checkout_url": payment_view.open_url,
+                            "requires_checkout": True,
+                            "paid": False,
+                            "success": True,
+                        }
+                    if not same_person:
                         raise ValueError(
                             "このレッスンの予約はカード決済の"
                             "手続き中です。決済を完了するか、"
                             "しばらくしてからもう一度お試しください。"
                         )
-                    if existing.is_deleted:
-                        existing.is_deleted = False
-                        existing.save(
-                            update_fields=["is_deleted"]
-                        )
-                    return {
-                        "reservation_id": existing.id,
-                        "checkout_session_id": (
-                            payment_view.session_id
-                        ),
-                        "checkout_url": payment_view.open_url,
-                        "requires_checkout": True,
-                        "paid": False,
-                        "success": True,
-                    }
+                    expire_checkout_session(
+                        club.stripe_account_id,
+                        payment_view.session_id,
+                    )
+                    existing.stripe_checkout_session_id = None
+                    existing.stripe_payment_intent_id = None
+                    existing.save(
+                        update_fields=[
+                            "stripe_checkout_session_id",
+                            "stripe_payment_intent_id",
+                        ]
+                    )
+                    replaced_checkout = True
 
-                if not payment_view.confirmed_unpaid:
+                if not replaced_checkout and not payment_view.confirmed_unpaid:
                     raise ValueError(
                         "決済の確認ができませんでした。"
                         "しばらくしてからもう一度お試しください。"

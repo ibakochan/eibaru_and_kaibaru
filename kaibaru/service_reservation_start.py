@@ -103,8 +103,8 @@ class ReservationStartService:
         return {"mode": "ready", **page}
 
     @staticmethod
-    def begin(token):
-        prepared = _prepare(token)
+    def begin(token, force_new=False):
+        prepared = _prepare(token, force_new=force_new)
 
         if prepared["action"] == "done":
             return _public_result(prepared)
