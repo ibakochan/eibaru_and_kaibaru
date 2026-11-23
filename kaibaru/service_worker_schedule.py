@@ -305,6 +305,70 @@ def _bookable_ranges(work_spans, book_spans, offs, breaks=None):
     return _subtract_ranges(chosen, breaks or [])
 
 
+def viewer_worker(club, user):
+    """The salon worker tied to this login, if they have one."""
+    if club is None or user is None or not getattr(user, "is_authenticated", False):
+        return None
+    return (
+        Member.objects.filter(club=club, user=user, is_worker=True)
+        .order_by("id")
+        .first()
+    )
+
+
+def duty_ranges_by_day(worker, days):
+    """出勤 for each date, with breaks and 休み removed."""
+    if worker is None or not days:
+        return {}
+    unique_days = list(dict.fromkeys(days))
+    versions, spans = _load_schedule_index([worker.id])
+    version_list = versions.get(worker.id) or []
+    offs_by_day = defaultdict(list)
+    for off_day, start_t, end_t in WorkerTimeOff.objects.filter(
+        worker=worker,
+        date__in=unique_days,
+    ).values_list("date", "start_time", "end_time"):
+        offs_by_day[off_day].append((start_t, end_t))
+    result = {}
+    for day in unique_days:
+        weekday = _weekday(day)
+        version_key = _version_key_for_day(version_list, day)
+        work = _kind_spans(
+            spans, worker.id, version_key, WorkerAvailability.Kind.WORK, weekday
+        )
+        breaks = _kind_spans(
+            spans, worker.id, version_key, WorkerAvailability.Kind.BREAK, weekday
+        )
+        result[day] = _bookable_ranges(work, [], offs_by_day.get(day, []), breaks)
+    return result
+
+
+def shift_blocks_own_booking(club, user, day, start, end):
+    """True when this worker's own booking would run into their 出勤."""
+    worker = viewer_worker(club, user)
+    if worker is None:
+        return False
+    duty = duty_ranges_by_day(worker, [day]).get(day) or []
+    start_min = _tmin(start)
+    end_min = _tmin(end)
+    return any(_overlaps(start_min, end_min, duty_start, duty_end) for duty_start, duty_end in duty)
+
+
+def _drop_slots_on_duty(day_payload, duty, duration):
+    if not duty:
+        return
+    for row in day_payload.get("slots") or []:
+        if not row.get("available"):
+            continue
+        hour, minute = str(row.get("time") or "0:0").split(":")[:2]
+        start = int(hour) * 60 + int(minute)
+        if any(_overlaps(start, start + duration, duty_start, duty_end) for duty_start, duty_end in duty):
+            row["available"] = False
+            row.pop("workers", None)
+    slots = day_payload.get("slots") or []
+    day_payload["available_count"] = sum(1 for row in slots if row.get("available"))
+
+
 def _range_covered(start, end, spans) -> bool:
     """True when [start, end) sits inside the union of spans."""
     cursor = start
@@ -468,7 +532,7 @@ def _build_day_slots(
     }
 
 
-def available_slots(club, course_id, day: date, section_id=None, step_minutes=None):
+def available_slots(club, course_id, day: date, section_id=None, step_minutes=None, user=None):
     """Return timed slots with availability for the day schedule UI.
 
     Closed weekdays (no windows) return an empty day payload instead of an error,
@@ -492,24 +556,27 @@ def available_slots(club, course_id, day: date, section_id=None, step_minutes=No
     workers = _qualified_workers(club, course)
     day_data = _prefetch_worker_day(workers, day)
     now_min = _tmin(timezone.localtime().time()) if day == today else None
-    return (
-        _build_day_slots(
-            workers=workers,
-            day_data=day_data,
-            windows=windows,
-            duration=int(course.duration_minutes),
-            step=step,
-            include_workers=include_workers,
-            day=day,
-            today=today,
-            now_min=now_min,
-        ),
-        None,
+    payload = _build_day_slots(
+        workers=workers,
+        day_data=day_data,
+        windows=windows,
+        duration=int(course.duration_minutes),
+        step=step,
+        include_workers=include_workers,
+        day=day,
+        today=today,
+        now_min=now_min,
     )
+    viewer = viewer_worker(club, user)
+    if viewer is not None:
+        duty = duty_ranges_by_day(viewer, [day]).get(day) or []
+        _drop_slots_on_duty(payload, duty, int(course.duration_minutes))
+        payload["hides_own_shift"] = True
+    return payload, None
 
 
 def available_week_slots(
-    club, course_id, week_start: date, section_id=None, step_minutes=None
+    club, course_id, week_start: date, section_id=None, step_minutes=None, user=None
 ):
     """Return slots for Mon–Sun starting at week_start in one DB-prefetch pass.
 
@@ -574,11 +641,25 @@ def available_week_slots(
             now_min=now_min if day == today else None,
         )
 
+    viewer = viewer_worker(club, user)
+    if viewer is not None:
+        duty_by_day = duty_ranges_by_day(viewer, days)
+        for day in days:
+            payload = days_payload.get(day.isoformat())
+            if not payload:
+                continue
+            _drop_slots_on_duty(
+                payload,
+                duty_by_day.get(day) or [],
+                duration,
+            )
+
     return {
         "week_start": week_start.isoformat(),
         "days": days_payload,
         "step_minutes": step,
         "allow_choose_worker": include_workers,
+        "hides_own_shift": viewer is not None,
     }, None
 
 

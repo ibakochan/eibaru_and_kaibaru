@@ -5502,7 +5502,7 @@ class ClubViewSet(viewsets.ModelViewSet):
                     status=400,
                 )
             payload, message = available_week_slots(
-                club, course_id, week_start, section_id
+                club, course_id, week_start, section_id, user=request.user
             )
             if message:
                 return Response({"detail": message, "days": {}}, status=400)
@@ -5513,7 +5513,9 @@ class ClubViewSet(viewsets.ModelViewSet):
             day = date_cls.fromisoformat(str(request.query_params.get("date"))[:10])
         except (TypeError, ValueError):
             return Response({"detail": "コースと日付を指定してください。"}, status=400)
-        payload, message = available_slots(club, course_id, day, section_id)
+        payload, message = available_slots(
+            club, course_id, day, section_id, user=request.user
+        )
         if message:
             return Response({"detail": message, "slots": []}, status=400)
         return Response(payload)

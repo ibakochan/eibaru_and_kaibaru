@@ -175,6 +175,7 @@ def create_service_reservation(club, payload, user=None):
         _window_allows,
         assignment_mode,
         pick_worker,
+        shift_blocks_own_booking,
         windows_for,
     )
     from .visitor_booking import (
@@ -252,6 +253,9 @@ def create_service_reservation(club, payload, user=None):
     windows = windows_for(club, section_id, day=day)
     if not _window_allows(windows, _tmin(start), end_min):
         return None, "この時間帯は予約できません。"
+
+    if shift_blocks_own_booking(club, user, day, start, end):
+        return None, "出勤時間と重なるため、この時間は予約できません。"
 
     full_name = (payload.get("full_name") or "").strip()
     if user is not None and getattr(user, "email", None):
