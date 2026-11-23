@@ -4564,6 +4564,7 @@ class ClubViewSet(viewsets.ModelViewSet):
                     ),
                 ),
                 "levels__level_system",
+                "worker_profile__courses",
                 Prefetch(
                     "ticket_grants",
                     queryset=(

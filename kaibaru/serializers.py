@@ -1757,6 +1757,7 @@ class MemberSerializer(serializers.ModelSerializer):
     tickets = serializers.SerializerMethodField()
     other_owned_club_subdomains = serializers.SerializerMethodField()
     manager_permissions = serializers.SerializerMethodField()
+    service_courses = serializers.SerializerMethodField()
 
     class Meta:
         model = Member
@@ -1790,6 +1791,7 @@ class MemberSerializer(serializers.ModelSerializer):
             "tickets",
             "other_owned_club_subdomains",
             "accepted_join_terms",
+            "service_courses",
         ]
         read_only_fields = [
             "id",
@@ -1799,6 +1801,23 @@ class MemberSerializer(serializers.ModelSerializer):
             "is_worker",
             "manager_permissions",
             "accepted_join_terms",
+            "service_courses",
+        ]
+
+    def get_service_courses(self, member):
+        """Course names this worker can perform. Empty for anyone else."""
+        if not member.is_worker:
+            return []
+        from django.core.exceptions import ObjectDoesNotExist
+
+        try:
+            profile = member.worker_profile
+        except ObjectDoesNotExist:
+            return []
+        return [
+            course.name
+            for course in profile.courses.all()
+            if course.active
         ]
 
     def _apply_role_flags(self, instance):
@@ -2105,6 +2124,7 @@ class MemberSerializer(serializers.ModelSerializer):
             ]:
                 data.pop(field, None)
             self._hide_level_counts(data)
+            self._hide_public_worker_private(data, instance)
             return data
 
         club = getattr(instance, "club", None)
@@ -2160,8 +2180,34 @@ class MemberSerializer(serializers.ModelSerializer):
         ]:
             data.pop(field, None)
         self._hide_level_counts(data)
+        self._hide_public_worker_private(data, instance)
 
         return data
+
+    def _hide_public_worker_private(self, data, instance):
+        """A salon worker shown on the public staff list keeps name, photo, intro, and courses."""
+        club = getattr(instance, "club", None)
+        owner_id = club.owner_id if club is not None else None
+        if (
+            not instance.is_worker
+            or instance.is_instructor
+            or instance.is_manager
+            or instance.user_id == owner_id
+        ):
+            return
+        for field in (
+            "phone_number",
+            "emergency_number",
+            "birth_date",
+            "gender",
+            "furigana",
+            "other_information",
+            "tickets",
+            "has_paid_joining_fee",
+            "has_been_charged_joining_fee",
+            "counts_for_family_discount",
+        ):
+            data.pop(field, None)
 
     def _hide_level_counts(self, data):
         levels = data.get("levels")
@@ -3131,6 +3177,7 @@ class ClubNewsSerializer(serializers.ModelSerializer):
 
 class ClubSerializer(serializers.ModelSerializer):
     members = serializers.SerializerMethodField()
+    service_staff = serializers.SerializerMethodField()
     lessons = LessonSerializer(many=True, read_only=True)
     events = serializers.SerializerMethodField()
     current_user = serializers.SerializerMethodField()
@@ -3158,6 +3205,43 @@ class ClubSerializer(serializers.ModelSerializer):
     def get_news(self, club):
         posts = club.news_posts.all()
         return ClubNewsSerializer(posts, many=True, context=self.context).data
+
+    def get_service_staff(self, club):
+        """Public salon staff: name, photo, introduction, and course names."""
+        from django.core.exceptions import ObjectDoesNotExist
+
+        request = self.context.get("request")
+        rows = [member for member in club.members.all() if member.is_worker]
+        rows.sort(key=lambda member: (
+            0 if member.user_id == club.owner_id else 1,
+            member.full_name or "",
+        ))
+        payload = []
+        for member in rows:
+            names = []
+            try:
+                courses = [
+                    course for course in member.worker_profile.courses.all()
+                    if course.active
+                ]
+                courses.sort(key=lambda course: (course.position, course.name))
+                names = [course.name for course in courses]
+            except ObjectDoesNotExist:
+                names = []
+            picture = None
+            if member.picture:
+                picture = member.picture.url
+                if request is not None and picture.startswith("/"):
+                    picture = request.build_absolute_uri(picture)
+            payload.append({
+                "id": member.id,
+                "full_name": member.full_name,
+                "picture": picture,
+                "introduction": member.introduction or "",
+                "is_owner": member.user_id == club.owner_id,
+                "service_courses": names,
+            })
+        return payload
 
     def get_members(self, club):
         request = self.context.get("request")
@@ -3230,6 +3314,7 @@ class ClubSerializer(serializers.ModelSerializer):
             "custom_domain_status",
             "custom_domain_target",
             "members",
+            "service_staff",
             "join_requests",
             "my_join_requests",
             "lessons",
