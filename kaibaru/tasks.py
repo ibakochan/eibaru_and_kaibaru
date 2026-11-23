@@ -417,6 +417,19 @@ def reconcile_stripe_subscriptions():
     stripe.api_key = settings.STRIPE_SECRET_KEY
 
     try:
+        from .cash_reservations import (
+            mark_past_cash_lesson_and_event_reservations_paid,
+        )
+        from .service_reservation_manage import (
+            mark_stale_open_service_reservations_paid,
+        )
+
+        mark_past_cash_lesson_and_event_reservations_paid()
+        mark_stale_open_service_reservations_paid()
+    except Exception:
+        logger.exception("[CASH RESERVATION] Automatic received mark failed")
+
+    try:
         apply_previous_month_cash_platform_fees(today)
     except Exception:
         logger.exception(

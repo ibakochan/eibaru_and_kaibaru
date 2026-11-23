@@ -362,14 +362,24 @@ class ServiceReservationHistoryTests(TestCase):
         self.assertEqual(body["earned_yen"], 5000)
         self.assertEqual(len(body["days"][0]["paid"]), 1)
 
-    def test_open_booking_is_marked_paid_a_full_day_after_it_starts(self):
+    def test_open_cash_booking_is_marked_paid_on_the_next_date(self):
         now = timezone.now()
-        stale_local = timezone.localtime(
-            now - timedelta(days=1, minutes=1)
-        ).replace(microsecond=0)
-        fresh_local = timezone.localtime(
-            now - timedelta(hours=23)
-        ).replace(microsecond=0)
+        today = timezone.localdate()
+        stale_local = timezone.localtime(now).replace(
+            year=(today - timedelta(days=1)).year,
+            month=(today - timedelta(days=1)).month,
+            day=(today - timedelta(days=1)).day,
+            hour=23,
+            minute=15,
+            second=0,
+            microsecond=0,
+        )
+        fresh_local = timezone.localtime(now).replace(
+            hour=23,
+            minute=15,
+            second=0,
+            microsecond=0,
+        )
 
         def at(local, key, **overrides):
             end = time(23, 59) if local.time() < time(23, 59) else local.time()

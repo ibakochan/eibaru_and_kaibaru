@@ -3921,6 +3921,7 @@ class ReservationSerializer(serializers.ModelSerializer):
     can_unmark_paid = serializers.SerializerMethodField()
     can_mark_no_show = serializers.SerializerMethodField()
     can_clear_no_show = serializers.SerializerMethodField()
+    can_cancel_cash = serializers.SerializerMethodField()
 
     class Meta:
         model = Reservation
@@ -3966,6 +3967,7 @@ class ReservationSerializer(serializers.ModelSerializer):
             "can_unmark_paid",
             "can_mark_no_show",
             "can_clear_no_show",
+            "can_cancel_cash",
 
             # Metadata
             "created_at",
@@ -4062,6 +4064,9 @@ class ReservationSerializer(serializers.ModelSerializer):
 
     def get_can_clear_no_show(self, obj):
         return self._cash_flags(obj)["can_clear_no_show"]
+
+    def get_can_cancel_cash(self, obj):
+        return self._cash_flags(obj)["can_cancel"]
 
     def get_instructor(self, obj):
         instructor = obj.lesson.instructor

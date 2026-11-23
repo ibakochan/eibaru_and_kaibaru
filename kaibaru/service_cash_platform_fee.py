@@ -9,7 +9,7 @@ from django.db.models import Q, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
-from .models import EventReservation, Invoice, Reservation, Subscription
+from .models import EventReservation, Invoice, Reservation, ServiceReservation, Subscription
 from .discounts import calculate_discounted_amount
 from .pricing import get_effective_subscription_price
 
@@ -127,7 +127,7 @@ def apply_cash_platform_fees_for_month(year, month):
         _unbilled_cash_invoices(Invoice.objects, start, end)
         .values_list("club_id", flat=True)
     )
-    for model in (Reservation, EventReservation):
+    for model in (Reservation, EventReservation, ServiceReservation):
         club_ids.update(
             _billable_cash_reservations(
                 model,
@@ -158,8 +158,17 @@ def apply_cash_platform_fees_for_month(year, month):
     return results
 
 
-def apply_previous_month_cash_platform_fees(today=None):
-    today = today or timezone.localdate()
+def cash_fee_ready(now=None):
+    """Wait until 01:00 on the 1st so the previous day's cash can be marked."""
+    now = timezone.localtime(now or timezone.now())
+    return not (now.day == 1 and now.hour < 1)
+
+
+def apply_previous_month_cash_platform_fees(today=None, now=None):
+    current = timezone.localtime(now or timezone.now())
+    today = today or current.date()
+    if today == current.date() and not cash_fee_ready(current):
+        return []
     year, month = previous_month(today)
     return apply_cash_platform_fees_for_month(year, month)
 
@@ -220,7 +229,16 @@ def _apply_club_month(club_id, year, month, start, end):
                 unbilled_only=True,
             ).order_by("id")
         )
-        if not invoices and not lesson_rows and not event_rows:
+        salon_rows = list(
+            _billable_cash_reservations(
+                ServiceReservation.objects.select_for_update().select_related("club"),
+                club_id=club_id,
+                start=start,
+                end=end,
+                unbilled_only=True,
+            ).order_by("id")
+        )
+        if not invoices and not lesson_rows and not event_rows and not salon_rows:
             return {
                 "club_id": club_id,
                 "applied": False,
@@ -230,6 +248,7 @@ def _apply_club_month(club_id, year, month, start, end):
         amounts = [invoice.amount_due for invoice in invoices]
         amounts.extend(row.amount for row in lesson_rows)
         amounts.extend(row.amount for row in event_rows)
+        amounts.extend(row.amount for row in salon_rows)
         fee = total_platform_fee(amounts)
 
         club = (
@@ -238,10 +257,13 @@ def _apply_club_month(club_id, year, month, start, end):
             else lesson_rows[0].club
             if lesson_rows
             else event_rows[0].club
+            if event_rows
+            else salon_rows[0].club
         )
         invoice_ids = [invoice.id for invoice in invoices]
         lesson_ids = [row.id for row in lesson_rows]
         event_ids = [row.id for row in event_rows]
+        salon_ids = [row.id for row in salon_rows]
 
         if fee > 0 and not club.stripe_customer_id:
             logger.warning(
@@ -249,7 +271,7 @@ def _apply_club_month(club_id, year, month, start, end):
                 "Leaving %s invoices and %s reservations unmarked.",
                 club_id,
                 len(invoice_ids),
-                len(lesson_ids) + len(event_ids),
+                len(lesson_ids) + len(event_ids) + len(salon_ids),
             )
             return {
                 "club_id": club_id,
@@ -272,7 +294,7 @@ def _apply_club_month(club_id, year, month, start, end):
                     year,
                     month,
                     len(invoice_ids),
-                    len(lesson_ids) + len(event_ids),
+                    len(lesson_ids) + len(event_ids) + len(salon_ids),
                 )
             else:
                 stripe.InvoiceItem.create(
@@ -294,6 +316,7 @@ def _apply_club_month(club_id, year, month, start, end):
                         invoice_ids,
                         lesson_ids,
                         event_ids,
+                        salon_ids,
                     ),
                 )
 
@@ -307,6 +330,10 @@ def _apply_club_month(club_id, year, month, start, end):
             )
         if event_ids:
             EventReservation.objects.filter(id__in=event_ids).update(
+                platform_fee_applied=True,
+            )
+        if salon_ids:
+            ServiceReservation.objects.filter(id__in=salon_ids).update(
                 platform_fee_applied=True,
             )
 
@@ -379,11 +406,13 @@ def _idempotency_key(
     invoice_ids,
     lesson_ids=None,
     event_ids=None,
+    salon_ids=None,
 ):
     parts = [
         "i:" + ",".join(str(invoice_id) for invoice_id in invoice_ids),
         "l:" + ",".join(str(row_id) for row_id in (lesson_ids or [])),
         "e:" + ",".join(str(row_id) for row_id in (event_ids or [])),
+        "s:" + ",".join(str(row_id) for row_id in (salon_ids or [])),
     ]
     digest = hashlib.sha256("|".join(parts).encode()).hexdigest()[:16]
     return f"cash_platform_fee_{club_id}_{year}{month:02d}_{digest}"
@@ -423,7 +452,7 @@ def _cash_reservation_amounts_for_month(club_ids, year, month):
         return []
     start, end = month_bounds(year, month)
     amounts = []
-    for model in (Reservation, EventReservation):
+    for model in (Reservation, EventReservation, ServiceReservation):
         amounts.extend(
             _billable_cash_reservations(
                 model,
@@ -465,6 +494,18 @@ def _cash_reservation_rows_for_month(club_ids, year, month):
     )
     for reservation in event_qs:
         rows.append(_cash_reservation_line_item(reservation, kind="event"))
+    salon_qs = (
+        _billable_cash_reservations(
+            ServiceReservation,
+            club_ids=club_ids,
+            start=start,
+            end=end,
+        )
+        .select_related("club", "course")
+        .order_by("paid_at", "id")
+    )
+    for reservation in salon_qs:
+        rows.append(_cash_reservation_line_item(reservation, kind="salon"))
     return rows
 
 
@@ -473,6 +514,10 @@ def _cash_reservation_line_item(reservation, *, kind):
     if kind == "lesson":
         title = getattr(reservation.lesson, "title", None) or "レッスン予約"
         label = "レッスン"
+    elif kind == "salon":
+        course = getattr(reservation, "course", None)
+        title = getattr(course, "name", None) or reservation.price_name or "サロン予約"
+        label = "サロン"
     else:
         title = getattr(reservation.event, "title", None) or "イベント予約"
         label = "イベント"

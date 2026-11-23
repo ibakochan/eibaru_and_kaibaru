@@ -7,8 +7,6 @@ handled here — cancel only frees the slot.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
-
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -81,6 +79,8 @@ def manage_flags(reservation, user, *, actor=None):
         "can_restore": False,
     }
     if not can_manage_service_reservation(reservation, user, actor=actor):
+        return flags
+    if reservation.reservation_date < timezone.localdate():
         return flags
     if not _live_confirmed(reservation):
         return flags
@@ -248,6 +248,9 @@ def apply_service_manage_action(*, reservation_id, action, user, club):
         if actor["role"] == "worker" and action in (ACTION_PAID, ACTION_UNPAID):
             raise CashReservationError("受領の記録は店舗側で行います。", 403)
 
+        if reservation.reservation_date < timezone.localdate():
+            raise CashReservationError("予約日を過ぎた予約の状態は変えられません。")
+
         if reservation.status != ServiceReservation.Status.PAID:
             raise CashReservationError("確定した予約ではありません。")
 
@@ -385,49 +388,23 @@ def _run_service_cash_action(reservation, action):
 
 
 def mark_stale_open_service_reservations_paid(now=None):
-    """Mark confirmed salon bookings paid once their start was a full day ago.
+    """Mark open salon cash received once the reservation date has passed.
 
-    Open means confirmed, not canceled, not a no-show, and not yet paid.
-    Ticket and free bookings already count as paid, so they are left alone.
-    paid_at is set the same way as 受領済み. The platform fee is not applied here.
+    A booking at 23:15 is included as soon as the next calendar day starts.
+    Card bookings are already received. Canceled and no-show rows stay.
     """
     now = now or timezone.now()
     if timezone.is_naive(now):
         now = timezone.make_aware(now, timezone.get_current_timezone())
-    cutoff = now - timedelta(days=1)
-    cutoff_local = timezone.localtime(cutoff)
-    tz = timezone.get_current_timezone()
-
-    candidates = (
-        ServiceReservation.objects.filter(
-            is_deleted=False,
-            status=ServiceReservation.Status.PAID,
-            canceled=False,
-            no_show=False,
-            paid_at__isnull=True,
-            refunded_at__isnull=True,
-            amount__gt=0,
-            reservation_date__lte=cutoff_local.date(),
-        )
-        .exclude(payment_method=ServiceReservation.PaymentMethod.TICKET)
-        .only("id", "reservation_date", "start_time")
-    )
-
-    ids = []
-    for reservation in candidates.iterator():
-        start = timezone.make_aware(
-            datetime.combine(reservation.reservation_date, reservation.start_time),
-            tz,
-        )
-        if start <= cutoff:
-            ids.append(reservation.id)
-
-    updated = 0
-    for offset in range(0, len(ids), 500):
-        updated += ServiceReservation.objects.filter(
-            id__in=ids[offset:offset + 500],
-            paid_at__isnull=True,
-            canceled=False,
-            no_show=False,
-        ).update(paid_at=now)
-    return updated
+    today = timezone.localtime(now).date()
+    return ServiceReservation.objects.filter(
+        is_deleted=False,
+        status=ServiceReservation.Status.PAID,
+        payment_method=ServiceReservation.PaymentMethod.CASH,
+        canceled=False,
+        no_show=False,
+        paid_at__isnull=True,
+        refunded_at__isnull=True,
+        amount__gt=0,
+        reservation_date__lt=today,
+    ).update(paid_at=now)

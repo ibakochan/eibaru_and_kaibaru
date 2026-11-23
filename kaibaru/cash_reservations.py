@@ -12,7 +12,7 @@ tracked separately:
   platform invoice together with the cash member invoices.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 
 from django.db import transaction
 from django.utils import timezone
@@ -37,7 +37,15 @@ ACTION_PAID = "paid"
 ACTION_UNPAID = "unpaid"
 ACTION_NO_SHOW = "no_show"
 ACTION_CLEAR_NO_SHOW = "clear_no_show"
-ACTIONS = (ACTION_PAID, ACTION_UNPAID, ACTION_NO_SHOW, ACTION_CLEAR_NO_SHOW)
+ACTION_CANCEL = "cancel"
+ACTIONS = (
+    ACTION_PAID,
+    ACTION_UNPAID,
+    ACTION_NO_SHOW,
+    ACTION_CLEAR_NO_SHOW,
+    ACTION_CANCEL,
+)
+PAST_DATE_MESSAGE = "予約日を過ぎた予約の状態は変えられません。"
 
 KIND_LESSON = "lesson"
 KIND_EVENT = "event"
@@ -151,12 +159,80 @@ def has_started(reservation, *, now=None):
     return start <= now
 
 
+def cash_reservation_date(reservation):
+    """Calendar date that decides when a cash booking locks, in Japan."""
+    if isinstance(reservation, EventReservation):
+        starts = reservation.event.starts_at
+        if timezone.is_naive(starts):
+            starts = timezone.make_aware(starts, timezone.get_current_timezone())
+        return timezone.localtime(starts).date()
+    return reservation.reservation_date
+
+
+def cash_date_is_past(reservation, today=None):
+    today = today or timezone.localdate()
+    return cash_reservation_date(reservation) < today
+
+
+def _authenticated(user):
+    return user is not None and getattr(user, "is_authenticated", False)
+
+
 def _is_owner(reservation, user):
+    return _authenticated(user) and reservation.club.owner_id == user.id
+
+
+def _manages_cash(reservation, user):
+    """Owner for lessons. Owner or an events manager for events."""
+    if not _authenticated(user):
+        return False
+    if reservation.club.owner_id == user.id:
+        return True
+    if isinstance(reservation, EventReservation):
+        from .manager_permissions import has_permission
+
+        return has_permission(user, reservation.club, "events")
+    return False
+
+
+def _instructor_member(user, club):
+    from django.db.models import Q
+
+    from .models import Member
+
+    if not _authenticated(user):
+        return None
     return (
-        user is not None
-        and getattr(user, "is_authenticated", False)
-        and reservation.club.owner_id == user.id
+        Member.objects.filter(club=club, is_instructor=True)
+        .filter(Q(user=user) | Q(owner=user))
+        .order_by("id")
+        .first()
     )
+
+
+def _teaches_lesson(user, reservation):
+    """True when this instructor is scheduled for that lesson on that date."""
+    if isinstance(reservation, EventReservation):
+        return False
+    member = _instructor_member(user, reservation.club)
+    if member is None or reservation.lesson_id is None:
+        return False
+    from .models import LessonDateStaff
+
+    staff = (
+        LessonDateStaff.objects.filter(
+            lesson_id=reservation.lesson_id,
+            date=reservation.reservation_date,
+        )
+        .prefetch_related("members")
+        .first()
+    )
+    if staff is not None:
+        return staff.members.filter(instructor_id=member.id).exists()
+    lesson = reservation.lesson
+    if lesson.lesson_instructors.filter(instructor_id=member.id).exists():
+        return True
+    return lesson.instructor_id == member.id
 
 
 def _live_cash_row(reservation):
@@ -170,27 +246,45 @@ def _live_cash_row(reservation):
 
 
 def owner_cash_flags(reservation, user, *, now=None):
-    """Which cash buttons the owner may use on this reservation."""
+    """Cash buttons for the owner, an events manager, or the lesson's instructor.
+
+    A previous date is locked. The instructor can cancel or mark a no-show
+    on a lesson they teach. Only the owner marks cash received.
+    """
     flags = {
         "can_mark_paid": False,
         "can_unmark_paid": False,
         "can_mark_no_show": False,
         "can_clear_no_show": False,
+        "can_cancel": False,
     }
 
-    if not _is_owner(reservation, user) or not _live_cash_row(reservation):
+    if not _live_cash_row(reservation) or cash_date_is_past(reservation):
+        return flags
+
+    owner = _manages_cash(reservation, user)
+    instructor = (
+        not owner
+        and not isinstance(reservation, EventReservation)
+        and _teaches_lesson(user, reservation)
+    )
+    if not owner and not instructor:
         return flags
 
     if reservation.no_show:
-        flags["can_clear_no_show"] = True
+        if owner:
+            flags["can_clear_no_show"] = True
         return flags
 
     if reservation.paid_at is not None:
-        flags["can_unmark_paid"] = not reservation.platform_fee_applied
+        if owner:
+            flags["can_unmark_paid"] = not reservation.platform_fee_applied
         return flags
 
-    flags["can_mark_paid"] = True
+    flags["can_cancel"] = True
     flags["can_mark_no_show"] = has_started(reservation, now=now)
+    if owner:
+        flags["can_mark_paid"] = True
     return flags
 
 
@@ -243,9 +337,23 @@ def apply_cash_action(*, kind, reservation_id, action, user):
         if reservation is None:
             raise CashReservationError("予約が見つかりません。", 404)
 
-        if not _is_owner(reservation, user):
+        if cash_date_is_past(reservation):
+            raise CashReservationError(PAST_DATE_MESSAGE)
+
+        owner = _manages_cash(reservation, user)
+        instructor = (
+            not owner
+            and kind == KIND_LESSON
+            and _teaches_lesson(user, reservation)
+        )
+        if not owner and not instructor:
             raise CashReservationError(
                 "操作できるのはクラブのオーナーだけです。",
+                403,
+            )
+        if instructor and action not in (ACTION_CANCEL, ACTION_NO_SHOW):
+            raise CashReservationError(
+                "受領の記録はクラブのオーナーが行います。",
                 403,
             )
 
@@ -306,6 +414,22 @@ def _run_action(reservation, action):
             reservation.save(update_fields=["no_show"])
         return
 
+    if action == ACTION_CANCEL:
+        if reservation.paid_at is not None:
+            raise CashReservationError(
+                "お支払い済みの予約はキャンセルできません。"
+                "先に支払いを取り消してください。"
+            )
+        if reservation.no_show:
+            raise CashReservationError(
+                "欠席として記録された予約はキャンセルできません。"
+                "先に欠席を取り消してください。"
+            )
+        if not reservation.canceled:
+            reservation.canceled = True
+            reservation.save(update_fields=["canceled"])
+        return
+
     if reservation.no_show:
         reservation.no_show = False
         reservation.save(update_fields=["no_show"])
@@ -328,3 +452,38 @@ def payload_for(reservation, user):
 def action_window_start(today=None):
     today = today or timezone.localdate()
     return today - timedelta(days=CASH_ACTION_WINDOW_DAYS)
+
+
+def mark_past_cash_lesson_and_event_reservations_paid(now=None):
+    """Mark open cash lessons and events received once their date has passed.
+
+    The event date is the event's start date. Stripe bookings are left
+    alone. Canceled and no-show rows stay as they are.
+    """
+    now = now or timezone.now()
+    if timezone.is_naive(now):
+        now = timezone.make_aware(now, timezone.get_current_timezone())
+    today = timezone.localtime(now).date()
+    start_of_today = timezone.make_aware(
+        datetime.combine(today, time.min),
+        timezone.get_current_timezone(),
+    )
+    open_cash = dict(
+        payment_method=CASH,
+        status="paid",
+        canceled=False,
+        no_show=False,
+        is_deleted=False,
+        paid_at__isnull=True,
+        refunded_at__isnull=True,
+        amount__gt=0,
+    )
+    lesson_count = Reservation.objects.filter(
+        reservation_date__lt=today,
+        **open_cash,
+    ).update(paid_at=now)
+    event_count = EventReservation.objects.filter(
+        event__starts_at__lt=start_of_today,
+        **open_cash,
+    ).update(paid_at=now)
+    return lesson_count + event_count
