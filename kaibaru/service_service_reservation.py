@@ -169,9 +169,11 @@ def _email_sent_result(reservation):
 def create_service_reservation(club, payload, user=None):
     """Create a visitor salon booking (email link or instant finish)."""
     from .service_worker_schedule import (
+        ASSIGNMENT_CHOOSE,
         _from_min,
         _tmin,
         _window_allows,
+        assignment_mode,
         pick_worker,
         windows_for,
     )
@@ -303,7 +305,7 @@ def create_service_reservation(club, payload, user=None):
     except ValueError as exc:
         return None, str(exc)
 
-    allow_choose = bool(getattr(club, "service_allow_choose_worker", False))
+    allow_choose = assignment_mode(club) == ASSIGNMENT_CHOOSE
     preferred_worker = None
     raw_worker = payload.get("worker_id")
     if allow_choose and raw_worker not in (None, "", "random"):

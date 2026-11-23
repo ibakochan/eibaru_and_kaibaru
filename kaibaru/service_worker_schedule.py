@@ -478,7 +478,7 @@ def available_slots(club, course_id, day: date, section_id=None, step_minutes=No
     if not course:
         return None, "コースが見つかりません。"
 
-    include_workers = bool(getattr(club, "service_allow_choose_worker", False))
+    include_workers = assignment_mode(club) == ASSIGNMENT_CHOOSE
     step = resolve_slot_step(club, step_minutes)
     today = timezone.localdate()
     max_days_ahead = getattr(club, "visitor_reservation_max_days_ahead", None)
@@ -520,7 +520,7 @@ def available_week_slots(
     if not course:
         return None, "コースが見つかりません。"
 
-    include_workers = bool(getattr(club, "service_allow_choose_worker", False))
+    include_workers = assignment_mode(club) == ASSIGNMENT_CHOOSE
     step = resolve_slot_step(club, step_minutes)
     today = timezone.localdate()
     now_min = _tmin(timezone.localtime().time())
@@ -582,6 +582,48 @@ def available_week_slots(
     }, None
 
 
+ASSIGNMENT_RANDOM = "random"
+ASSIGNMENT_CHOOSE = "choose"
+ASSIGNMENT_BALANCED = "balanced"
+ASSIGNMENT_MODES = (ASSIGNMENT_RANDOM, ASSIGNMENT_CHOOSE, ASSIGNMENT_BALANCED)
+
+
+def assignment_mode(club):
+    """How a service booking picks its worker.
+
+    Clubs saved before the assignment field existed stay on customer
+    choice when that boolean is still on.
+    """
+    mode = (getattr(club, "service_worker_assignment", None) or "").strip()
+    if mode == ASSIGNMENT_BALANCED:
+        return ASSIGNMENT_BALANCED
+    if mode == ASSIGNMENT_CHOOSE or getattr(club, "service_allow_choose_worker", False):
+        return ASSIGNMENT_CHOOSE
+    return ASSIGNMENT_RANDOM
+
+
+def _booked_minutes_by_worker(worker_ids, day, *, exclude_reservation_id=None):
+    """Confirmed booking minutes already on each worker for that date."""
+    totals = {worker_id: 0 for worker_id in worker_ids}
+    if not totals:
+        return totals
+    rows = ServiceReservation.objects.filter(
+        worker_id__in=list(totals),
+        reservation_date=day,
+        canceled=False,
+        is_deleted=False,
+        no_show=False,
+        status=ServiceReservation.Status.PAID,
+    )
+    if exclude_reservation_id:
+        rows = rows.exclude(id=exclude_reservation_id)
+    for start, end, worker_id in rows.values_list(
+        "start_time", "end_time", "worker_id"
+    ):
+        totals[worker_id] += max(0, _tmin(end) - _tmin(start))
+    return totals
+
+
 def pick_worker(
     club,
     course,
@@ -592,7 +634,12 @@ def pick_worker(
     exclude_reservation_id=None,
     preferred_worker=None,
 ):
-    """Choose a free worker: preferred if still free, otherwise random."""
+    """Choose a free worker.
+
+    A named worker is used only while they are free. Otherwise the club
+    setting picks at random, or gives the slot to whoever has the fewest
+    booked minutes that day. A tie is broken at random.
+    """
     free_workers = free_workers_for_slot(
         club,
         course,
@@ -609,6 +656,15 @@ def pick_worker(
             if worker.id == preferred_id:
                 return worker
         return None
+    if assignment_mode(club) == ASSIGNMENT_BALANCED:
+        minutes = _booked_minutes_by_worker(
+            [worker.id for worker in free_workers],
+            day,
+            exclude_reservation_id=exclude_reservation_id,
+        )
+        least = min(minutes[worker.id] for worker in free_workers)
+        tied = [worker for worker in free_workers if minutes[worker.id] == least]
+        return random.choice(tied)
     return random.choice(free_workers)
 
 

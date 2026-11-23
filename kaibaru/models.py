@@ -229,11 +229,22 @@ class Club(models.Model):
     )
     # When false, service bookings always get a random free worker.
     # When true, the booker may pick "おまかせ" (random) or a free worker.
+    # Kept in step with service_worker_assignment: true only for "choose".
     service_allow_choose_worker = models.BooleanField(
         default=False,
         help_text=(
             "If true, service_schedule bookers may choose a worker "
             "(or leave it random). If false, assignment is always random."
+        ),
+    )
+    # random: any free worker. choose: the booker may pick.
+    # balanced: the free worker with the fewest booked minutes that day.
+    service_worker_assignment = models.CharField(
+        max_length=20,
+        default="random",
+        help_text=(
+            "random, choose, or balanced. Balanced gives the slot to the "
+            "free worker with the fewest booked minutes that day."
         ),
     )
 

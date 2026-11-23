@@ -3264,6 +3264,7 @@ class ClubSerializer(serializers.ModelSerializer):
             "service_slot_step_minutes",
             "service_reservation_payment_options",
             "service_allow_choose_worker",
+            "service_worker_assignment",
             "join_picture_mode",
             "join_picture_min_age",
             "join_terms",

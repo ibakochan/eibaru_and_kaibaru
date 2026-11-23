@@ -5531,6 +5531,7 @@ class ClubViewSet(viewsets.ModelViewSet):
             OPTION_CASH,
             clean_payment_option,
         )
+        from .service_worker_schedule import assignment_mode
 
         payment_options = clean_payment_option(
             getattr(club, "service_reservation_payment_options", None),
@@ -5559,6 +5560,7 @@ class ClubViewSet(viewsets.ModelViewSet):
                 "service_allow_choose_worker": bool(
                     getattr(club, "service_allow_choose_worker", False)
                 ),
+                "service_worker_assignment": assignment_mode(club),
                 "visitor_booking_confirm": visitor_booking_confirm(club),
                 "visitor_booking_auth": visitor_booking_auth(club),
             })
@@ -5601,18 +5603,31 @@ class ClubViewSet(viewsets.ModelViewSet):
             club.service_reservation_payment_options = option
             update_fields.append("service_reservation_payment_options")
 
-        if "service_allow_choose_worker" in request.data:
+        if "service_worker_assignment" in request.data:
+            mode = str(request.data.get("service_worker_assignment") or "").strip()
+            if mode not in ("random", "choose", "balanced"):
+                return Response(
+                    {"detail": "担当の決め方を選んでください。"},
+                    status=400,
+                )
+            club.service_worker_assignment = mode
+            club.service_allow_choose_worker = mode == "choose"
+            update_fields.extend([
+                "service_worker_assignment",
+                "service_allow_choose_worker",
+            ])
+        elif "service_allow_choose_worker" in request.data:
             raw = request.data.get("service_allow_choose_worker")
             if isinstance(raw, str):
-                club.service_allow_choose_worker = raw.strip().lower() in {
-                    "1",
-                    "true",
-                    "yes",
-                    "on",
-                }
+                choose = raw.strip().lower() in {"1", "true", "yes", "on"}
             else:
-                club.service_allow_choose_worker = bool(raw)
-            update_fields.append("service_allow_choose_worker")
+                choose = bool(raw)
+            club.service_allow_choose_worker = choose
+            club.service_worker_assignment = "choose" if choose else "random"
+            update_fields.extend([
+                "service_allow_choose_worker",
+                "service_worker_assignment",
+            ])
 
         if "visitor_booking_confirm" in request.data:
             confirm = str(
@@ -5653,6 +5668,7 @@ class ClubViewSet(viewsets.ModelViewSet):
             "service_allow_choose_worker": bool(
                 club.service_allow_choose_worker
             ),
+            "service_worker_assignment": assignment_mode(club),
             "visitor_booking_confirm": visitor_booking_confirm(club),
             "visitor_booking_auth": visitor_booking_auth(club),
         })
