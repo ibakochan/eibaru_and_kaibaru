@@ -5929,6 +5929,21 @@ class ClubViewSet(viewsets.ModelViewSet):
             )
         )
 
+    def _worker_patch_data(self, data):
+        """Copy a worker PATCH body and decode JSON lists sent as form fields."""
+        if hasattr(data, "keys") and hasattr(data, "get"):
+            plain = {key: data.get(key) for key in data.keys()}
+        else:
+            plain = dict(data or {})
+        for key in ("course_ids", "availability", "booking_hours", "breaks"):
+            value = plain.get(key)
+            if isinstance(value, str) and value[:1] in "[{":
+                try:
+                    plain[key] = json.loads(value)
+                except json.JSONDecodeError:
+                    pass
+        return plain
+
     @action(
         detail=False,
         methods=["get", "post"],
@@ -6014,8 +6029,17 @@ class ClubViewSet(viewsets.ModelViewSet):
         club_staff, error = _staff_club(request, subdomain, "lessons")
         if error and not is_self and not is_member_owner:
             return error
-        data = request.data
-        if "introduction" in data or request.FILES.get("picture"):
+        data = self._worker_patch_data(request.data)
+        if (
+            "introduction" in data
+            or "full_name" in data
+            or "furigana" in data
+            or "birth_date" in data
+            or "gender" in data
+            or "phone_number" in data
+            or "clear_picture" in data
+            or request.FILES.get("picture")
+        ):
             payload, message = update_worker_public_profile(
                 member, data, request.FILES
             )

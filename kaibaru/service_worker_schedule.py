@@ -1106,17 +1106,56 @@ def remove_owner_worker(club, actor, member):
 
 
 def update_worker_public_profile(member, payload, files=None):
-    """Owner/self can edit introduction and optional picture."""
+    """Edit the salon-facing name, contact fields, introduction, and picture."""
     if not member.is_worker:
         return None, "ワーカーではありません。"
     keys = set(getattr(payload, "keys", lambda: [])())
     update_fields = []
+    if "full_name" in keys:
+        full_name = str(_payload_get(payload, "full_name") or "").strip()
+        if not full_name:
+            return None, "姓名を入力してください。"
+        member.full_name = full_name[:200]
+        update_fields.append("full_name")
+    if "furigana" in keys:
+        member.furigana = str(_payload_get(payload, "furigana") or "").strip()[:200]
+        update_fields.append("furigana")
+    if "birth_date" in keys:
+        birth = _parse_birth_date(_payload_get(payload, "birth_date"))
+        if birth is None:
+            return None, "生年月日を入力してください。"
+        member.birth_date = birth
+        update_fields.append("birth_date")
+    if "gender" in keys:
+        gender = str(_payload_get(payload, "gender") or "").strip()
+        if gender not in ("male", "female"):
+            return None, "性別を選択してください。"
+        member.gender = gender
+        update_fields.append("gender")
+    if "phone_number" in keys:
+        phone = str(_payload_get(payload, "phone_number") or "").strip()[:20]
+        member.phone_number = phone or None
+        update_fields.append("phone_number")
     if "introduction" in keys:
         member.introduction = str(_payload_get(payload, "introduction") or "")[:2000]
         update_fields.append("introduction")
     if update_fields:
-        member.save(update_fields=update_fields)
-    _apply_worker_picture(member, files)
+        from django.db import IntegrityError
+
+        try:
+            member.save(update_fields=update_fields)
+        except IntegrityError:
+            return None, "同じ姓名と生年月日の人がすでにいます。"
+    clear_picture = _payload_get(payload, "clear_picture") in (
+        True, 1, "1", "true", "True",
+    )
+    has_picture = bool(files and hasattr(files, "get") and files.get("picture"))
+    if has_picture:
+        _apply_worker_picture(member, files)
+    elif clear_picture and member.picture:
+        member.picture.delete(save=False)
+        member.picture = None
+        member.save(update_fields=["picture"])
     return worker_detail(member), None
 
 
@@ -1520,6 +1559,10 @@ def worker_detail(member, *, include_login=False):
     return {
         "id": member.id,
         "full_name": member.full_name,
+        "furigana": member.furigana or "",
+        "birth_date": member.birth_date.isoformat() if member.birth_date else None,
+        "gender": member.gender or "",
+        "phone_number": member.phone_number or "",
         "picture": member.picture.url if member.picture else None,
         "introduction": member.introduction or "",
         "user_id": member.user_id,
