@@ -3717,7 +3717,11 @@ class WorkerScheduleVersion(models.Model):
 
 
 class WorkerTimeOff(models.Model):
-    """Yasumi: a full day or a time range a worker is unavailable."""
+    """Yasumi: a full day or a time range a worker is unavailable.
+
+    paid is 有給. Those hours still block reservations, and they stay
+    in the 出勤 pay total instead of being subtracted.
+    """
 
     worker = models.ForeignKey(
         Member,
@@ -3733,6 +3737,10 @@ class WorkerTimeOff(models.Model):
     )
     end_time = models.TimeField(null=True, blank=True)
     note = models.CharField(max_length=200, blank=True, default="")
+    paid = models.BooleanField(
+        default=False,
+        help_text="有給. Hours stay in 出勤 pay. Reservations stay blocked.",
+    )
 
     class Meta:
         ordering = ["-date", "start_time", "id"]

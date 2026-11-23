@@ -1330,6 +1330,7 @@ def _time_off_payload(off):
         "start_time": off.start_time.strftime("%H:%M") if off.start_time else None,
         "end_time": off.end_time.strftime("%H:%M") if off.end_time else None,
         "note": off.note,
+        "paid": bool(off.paid),
     }
 
 
@@ -1393,6 +1394,7 @@ def add_worker_time_off(member, payload):
     note = payload.get("note") or ""
     if not isinstance(note, str):
         note = ""
+    paid = payload.get("paid") in (True, 1, "1", "true", "True")
     created = []
     with transaction.atomic():
         for day in days:
@@ -1402,6 +1404,7 @@ def add_worker_time_off(member, payload):
                 start_time=start,
                 end_time=end,
                 note=note[:200],
+                paid=paid,
             )
             created.append(_time_off_payload(off))
     if len(created) == 1:
@@ -1546,6 +1549,7 @@ def worker_detail(member, *, include_login=False):
                 "start_time": row.start_time.strftime("%H:%M") if row.start_time else None,
                 "end_time": row.end_time.strftime("%H:%M") if row.end_time else None,
                 "note": row.note,
+                "paid": bool(row.paid),
             }
             for row in offs
         ],
@@ -1740,6 +1744,41 @@ def _active_reservations(worker, start: date, end: date):
     )
 
 
+def _off_slices(offs, paid):
+    """All-day flag and timed ranges for paid or unpaid yasumi."""
+    all_day = False
+    ranges = []
+    for off in offs:
+        if bool(off.paid) != paid:
+            continue
+        if off.start_time is None or off.end_time is None:
+            all_day = True
+        else:
+            ranges.append((_tmin(off.start_time), _tmin(off.end_time)))
+    return all_day, ranges
+
+
+def _take_cover(base, all_day, ranges):
+    """Minutes of base covered by these ranges, and the base that remains.
+
+    Overlapping ranges are counted once. An all-day row covers the whole base.
+    """
+    if all_day:
+        return list(base), []
+    covered = []
+    remaining = list(base)
+    for start, end in ranges:
+        if end <= start:
+            continue
+        for block_start, block_end in remaining:
+            lo = max(start, block_start)
+            hi = min(end, block_end)
+            if hi > lo:
+                covered.append((lo, hi))
+        remaining = _cuts(remaining, start, end)
+    return covered, remaining
+
+
 def _day_blocks(worker, day, reservations, offs, availability):
     weekday = day.weekday()
     work_rows = []
@@ -1759,16 +1798,17 @@ def _day_blocks(worker, day, reservations, offs, availability):
     day_breaks = [
         (_tmin(row.start_time), _tmin(row.end_time)) for row in break_rows
     ]
-    shift = []
-    shift_minutes = 0
-    if not all_day:
-        for row in work_rows:
-            pieces = [(_tmin(row.start_time), _tmin(row.end_time))]
-            for off in day_offs:
-                pieces = _cuts(pieces, _tmin(off.start_time), _tmin(off.end_time))
-            pieces = _subtract_ranges(pieces, day_breaks)
-            shift.extend(pieces)
-            shift_minutes += _range_minutes(pieces)
+    payable = []
+    for row in work_rows:
+        pieces = [(_tmin(row.start_time), _tmin(row.end_time))]
+        payable.extend(_subtract_ranges(pieces, day_breaks))
+    paid_all, paid_ranges = _off_slices(day_offs, True)
+    unpaid_all, unpaid_ranges = _off_slices(day_offs, False)
+    paid_cover, after_paid = _take_cover(payable, paid_all, paid_ranges)
+    unpaid_cover, shift = _take_cover(after_paid, unpaid_all, unpaid_ranges)
+    shift_minutes = _range_minutes(shift)
+    off_minutes = _range_minutes(unpaid_cover)
+    paid_off_minutes = _range_minutes(paid_cover)
     work_spans = [
         (_tmin(row.start_time), _tmin(row.end_time)) for row in work_rows
     ]
@@ -1788,7 +1828,15 @@ def _day_blocks(worker, day, reservations, offs, availability):
     reservation_minutes = sum(
         max(0, _tmin(row.end_time) - _tmin(row.start_time)) for row in day_rows
     )
-    return shift, open_ranges, day_rows, reservation_minutes, shift_minutes
+    return (
+        shift,
+        open_ranges,
+        day_rows,
+        reservation_minutes,
+        shift_minutes,
+        off_minutes,
+        paid_off_minutes,
+    )
 
 
 def _reservation_brief(row):
@@ -1823,9 +1871,15 @@ def worker_week_board(worker, week_start=None):
     for offset in range(7):
         day = start + timedelta(days=offset)
         availability = _availability_for_day(worker, day, versions, grouped)
-        shift, open_ranges, day_rows, reservation_minutes, shift_minutes = _day_blocks(
-            worker, day, reservations, offs, availability
-        )
+        (
+            shift,
+            open_ranges,
+            day_rows,
+            reservation_minutes,
+            shift_minutes,
+            _off_minutes,
+            _paid_off_minutes,
+        ) = _day_blocks(worker, day, reservations, offs, availability)
         days.append({
             "date": day.isoformat(),
             "weekday": WEEKDAY_LABELS[day.weekday()],
@@ -1905,9 +1959,15 @@ def worker_work_month(worker, year, month):
     day = start
     while day < end:
         availability = _availability_for_day(worker, day, versions, grouped)
-        shift, _open, day_rows, reservation_minutes, shift_minutes = _day_blocks(
-            worker, day, reservations, offs, availability
-        )
+        (
+            shift,
+            _open,
+            day_rows,
+            reservation_minutes,
+            shift_minutes,
+            off_minutes,
+            paid_off_minutes,
+        ) = _day_blocks(worker, day, reservations, offs, availability)
         scheduled = [
             row for row in availability
             if row.weekday == day.weekday() and row.kind == WorkerAvailability.Kind.WORK
@@ -1916,7 +1976,7 @@ def worker_work_month(worker, year, month):
             row for row in availability
             if row.weekday == day.weekday() and row.kind == WorkerAvailability.Kind.BREAK
         ]
-        if shift or day_rows or scheduled:
+        if shift or day_rows or scheduled or off_minutes or paid_off_minutes:
             days.append({
                 "date": day.isoformat(),
                 "weekday": WEEKDAY_LABELS[day.weekday()],
@@ -1937,6 +1997,8 @@ def worker_work_month(worker, year, month):
                 ],
                 "reservation_count": len(day_rows),
                 "reservation_minutes": reservation_minutes,
+                "off_minutes": off_minutes,
+                "paid_off_minutes": paid_off_minutes,
                 "reservations": [_reservation_brief(row) for row in day_rows],
             })
         day += timedelta(days=1)
@@ -1955,11 +2017,15 @@ def worker_work_month(worker, year, month):
                 "shift_minutes": 0,
                 "reservation_count": 0,
                 "reservation_minutes": 0,
+                "off_minutes": 0,
+                "paid_off_minutes": 0,
             }
             weeks.append(bucket)
         bucket["shift_minutes"] += row["shift_minutes"]
         bucket["reservation_count"] += row["reservation_count"]
         bucket["reservation_minutes"] += row["reservation_minutes"]
+        bucket["off_minutes"] += row["off_minutes"]
+        bucket["paid_off_minutes"] += row["paid_off_minutes"]
 
     shift_minutes = sum(row["shift_minutes"] for row in days)
     from .service_worker_pay import salary_breakdown
@@ -1969,6 +2035,8 @@ def worker_work_month(worker, year, month):
         "year": year,
         "month": month,
         "shift_minutes": shift_minutes,
+        "off_minutes": sum(row["off_minutes"] for row in days),
+        "paid_off_minutes": sum(row["paid_off_minutes"] for row in days),
         "reservation_count": sum(row["reservation_count"] for row in days),
         "reservation_minutes": sum(row["reservation_minutes"] for row in days),
         "weeks": weeks,
