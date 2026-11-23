@@ -405,6 +405,7 @@ def create_service_reservation(club, payload, user=None):
     now = timezone.now()
     token = secrets.token_urlsafe(32)
     instant = is_instant_confirm(club)
+    resume_checkout = False
 
     try:
         with transaction.atomic():
@@ -439,7 +440,11 @@ def create_service_reservation(club, payload, user=None):
                 user=user,
             )
             start_token = reservation.start_token
-            if not instant:
+            resume_checkout = (
+                reservation.status == ServiceReservation.Status.UNPAID
+                and hold_is_active(reservation, hold_cutoff_at(now))
+            )
+            if not instant and not resume_checkout:
                 queue_service_reservation_start_email(start_token)
     except IntegrityError:
         existing = (
@@ -456,7 +461,7 @@ def create_service_reservation(club, payload, user=None):
     except ValueError as exc:
         return None, str(exc)
 
-    if instant:
+    if instant or resume_checkout:
         return _finish_service_instant(start_token, reservation.id)
     return _email_sent_result(reservation), None
 
@@ -537,12 +542,11 @@ def _save_not_started(
         if (
             existing.status == ServiceReservation.Status.UNPAID
             and not existing.is_deleted
+            and existing.start_token
             and hold_is_active(existing, hold_cutoff_at(now))
         ):
-            raise ValueError(
-                "この予約の決済手続き中です。"
-                "しばらくしてからもう一度お試しください。"
-            )
+            # Same account or same email, course, and start. Reopen this checkout.
+            return existing
 
         if (
             existing.status == ServiceReservation.Status.NOT_STARTED
