@@ -1,16 +1,33 @@
 """Club pictures and the single header video stored in cloud storage."""
 
-SLATE_IMAGE_LIMIT = 100
+FREE_IMAGE_LIMIT = 100
+SUBSCRIBED_IMAGE_LIMIT = 1000
+SLATE_IMAGE_LIMIT = FREE_IMAGE_LIMIT
 # Lesson photos and salon course photos share one pile per club.
-CATALOG_IMAGE_LIMIT = 100
+CATALOG_IMAGE_LIMIT = FREE_IMAGE_LIMIT
 NEWS_KEEP = 20
 IMAGE_MAX_BYTES = 5 * 1024 * 1024
 VIDEO_MAX_BYTES = 20 * 1024 * 1024
 VIDEO_CONTENT_TYPES = {"video/mp4", "video/webm"}
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".heic", ".heif"}
 
-IMAGE_LIMIT_MESSAGE = "このサイトの画像は100枚までです。"
-CATALOG_IMAGE_LIMIT_MESSAGE = "レッスンとコースの画像は合わせて100枚までです。"
+def media_image_limit(club):
+    """Gallery and lesson photos stay at 100 until the club is subscribed."""
+    if getattr(club, "subscription_active", False):
+        return SUBSCRIBED_IMAGE_LIMIT
+    return FREE_IMAGE_LIMIT
+
+
+def slate_image_limit_message(limit):
+    return f"このサイトの画像は{limit}枚までです。"
+
+
+def catalog_image_limit_message(limit):
+    return f"レッスンとコースの画像は合わせて{limit}枚までです。"
+
+
+IMAGE_LIMIT_MESSAGE = slate_image_limit_message(FREE_IMAGE_LIMIT)
+CATALOG_IMAGE_LIMIT_MESSAGE = catalog_image_limit_message(FREE_IMAGE_LIMIT)
 IMAGE_SIZE_MESSAGE = "画像は5MBまでです。"
 VIDEO_SECTION_MESSAGE = "動画セクションは1つまでです。"
 VIDEO_SIZE_MESSAGE = "動画は20MBまでです。"
@@ -29,11 +46,25 @@ def catalog_picture_count(club_id):
     return lessons + courses
 
 
-def new_catalog_picture_rejected(club_id, *, already_has_picture):
+def catalog_image_limit_for(club_id):
+    from .models import Club
+
+    club = Club.objects.filter(pk=club_id).only("subscription_active").first()
+    return media_image_limit(club)
+
+
+def catalog_picture_block_message(club_id, *, already_has_picture):
     """A replacement keeps the same slot. A first picture needs a free one."""
     if already_has_picture:
-        return False
-    return catalog_picture_count(club_id) >= CATALOG_IMAGE_LIMIT
+        return None
+    limit = catalog_image_limit_for(club_id)
+    if catalog_picture_count(club_id) >= limit:
+        return catalog_image_limit_message(limit)
+    return None
+
+
+def new_catalog_picture_rejected(club_id, *, already_has_picture):
+    return catalog_picture_block_message(club_id, already_has_picture=already_has_picture) is not None
 
 
 def uploaded_image_too_large(uploaded):

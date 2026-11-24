@@ -21,11 +21,10 @@ from .service_legacy_subscription import (
 )
 from .club_access import MEMBERS_REQUIRE_SUBSCRIPTION, club_has_platform_subscription
 from .club_media import (
-    CATALOG_IMAGE_LIMIT_MESSAGE,
-    IMAGE_LIMIT_MESSAGE,
     NEWS_KEEP,
-    SLATE_IMAGE_LIMIT,
-    new_catalog_picture_rejected,
+    catalog_picture_block_message,
+    media_image_limit,
+    slate_image_limit_message,
     VIDEO_CONTENT_TYPES,
     VIDEO_MAX_BYTES,
     VIDEO_SECTION_MESSAGE,
@@ -1395,9 +1394,10 @@ class SlateImageViewSet(viewsets.ModelViewSet):
             serializer = self.get_serializer(existing)
             return Response(serializer.data, status=status.HTTP_200_OK)
 
-        if SlateImage.objects.filter(club_id=club_id).count() >= SLATE_IMAGE_LIMIT:
+        image_limit = media_image_limit(club)
+        if SlateImage.objects.filter(club_id=club_id).count() >= image_limit:
             return Response(
-                {"detail": IMAGE_LIMIT_MESSAGE, "code": "image_limit"},
+                {"detail": slate_image_limit_message(image_limit), "code": "image_limit"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
  
@@ -4225,9 +4225,7 @@ def _course_position(raw):
 def _new_catalog_picture_message(request, club_id, *, already_has_picture):
     if not request.FILES.get("picture"):
         return None
-    if new_catalog_picture_rejected(club_id, already_has_picture=already_has_picture):
-        return CATALOG_IMAGE_LIMIT_MESSAGE
-    return None
+    return catalog_picture_block_message(club_id, already_has_picture=already_has_picture)
 
 
 def _staff_club(request, subdomain, permission):
