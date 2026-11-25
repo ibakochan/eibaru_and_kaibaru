@@ -4,6 +4,8 @@ from allauth.account.adapter import DefaultAccountAdapter
 from django.shortcuts import resolve_url
 import logging
 
+from accounts.models import CustomUser
+
 from kaibaru.custom_domain_hosts import (
     login_return_url,
     prefer_login_return,
@@ -13,6 +15,28 @@ from kaibaru.custom_domain_hosts import (
 logger = logging.getLogger(__name__)
 
 class DynamicSocialAccountAdapter(DefaultSocialAccountAdapter):
+    def pre_social_login(self, request, sociallogin):
+        """Attach Google to the password account that already uses this email."""
+        if sociallogin.is_existing:
+            return
+        email = ""
+        for address in sociallogin.email_addresses:
+            if address.verified and address.email:
+                email = address.email.strip().lower()
+                break
+        if not email:
+            email = (sociallogin.user.email or "").strip().lower()
+        if not email:
+            return
+        matches = list(CustomUser.objects.filter(email__iexact=email)[:2])
+        if len(matches) != 1:
+            return
+        user = matches[0]
+        if not user.is_active:
+            user.is_active = True
+            user.save(update_fields=["is_active"])
+        sociallogin.connect(request, user)
+
     def get_login_redirect_url(self, request):
         stored = request.session.pop("next_subdomain", None)
         target = login_return_url(request.user, stored)
