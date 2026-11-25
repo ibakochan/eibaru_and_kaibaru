@@ -93,7 +93,7 @@ class CustomDomainRedirectTests(SimpleTestCase):
             url = custom_domain_redirect_url("gy.kaibaru.jp", "/")
         self.assertIsNone(url)
 
-    def test_middleware_sends_a_temporary_redirect(self):
+    def test_middleware_sends_a_permanent_redirect(self):
         def app(request):
             return HttpResponse("ok")
 
@@ -103,7 +103,7 @@ class CustomDomainRedirectTests(SimpleTestCase):
             return_value="https://ibarubibaru.lol/members/",
         ):
             response = CustomDomainHostMiddleware(app)(request)
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 301)
         self.assertEqual(response["Location"], "https://ibarubibaru.lol/members/")
 
 

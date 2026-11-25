@@ -206,12 +206,17 @@ class KaibaruPageView(View):
             ).first()
             subdomain = club.subdomain if club else ""
 
+        custom_domain = ""
+        if club and club.custom_domain_status == "active":
+            custom_domain = (club.custom_domain or "").strip().lower().rstrip(".")
+
         club_data = {
             'title': club.title if club and club.title else 'ホームページ兼会員管理システム作成',
             'search_description': club.search_description if club and club.search_description else 'Wordのようにページを作成でき、会員管理システムです',
             'favicon': club.favicon.url if club and club.favicon else 'https://storage.googleapis.com/ibaru_repair/kaibarufavicon.png',
             'og_image': club.og_image.url if club and club.og_image else 'https://storage.googleapis.com/ibaru_repair/kaibarufavicon.png',
             'subdomain': subdomain or 'kaibaru',
+            'custom_domain': custom_domain,
         }
 
 

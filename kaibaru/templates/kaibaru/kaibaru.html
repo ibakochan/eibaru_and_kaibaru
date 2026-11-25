@@ -37,7 +37,11 @@
     <title>{{ club_data.title }}</title>
     <meta name="description" content="{{ club_data.search_description }}">
     <link rel="icon" href="{{ club_data.favicon }}" type="image/x-icon">
+    {% if club_data.custom_domain %}
+    <link rel="canonical" href="https://{{ club_data.custom_domain }}/" />
+    {% else %}
     <link rel="canonical" href="https://{{ club_data.subdomain }}.kaibaru.jp/" />
+    {% endif %}
     <meta property="og:title" content="{{ club_data.title }}">
     <meta property="og:description" content="{{ club_data.search_description }}">
     <meta property="og:image" content="{{ club_data.og_image }}">

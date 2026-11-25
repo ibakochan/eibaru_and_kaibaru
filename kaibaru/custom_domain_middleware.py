@@ -1,5 +1,5 @@
 from django.conf import settings
-from django.http import HttpResponseBadRequest, HttpResponseRedirect
+from django.http import HttpResponseBadRequest, HttpResponsePermanentRedirect
 
 from .custom_domain_hosts import custom_domain_redirect_url, is_platform_host
 
@@ -52,7 +52,7 @@ class CustomDomainHostMiddleware:
         host = raw_host(request)
         target = custom_domain_redirect_url(host, request.get_full_path())
         if target:
-            return HttpResponseRedirect(target)
+            return HttpResponsePermanentRedirect(target)
         if not host or host_is_known(host):
             return self.get_response(request)
 
