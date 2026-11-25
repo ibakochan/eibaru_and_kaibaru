@@ -3346,6 +3346,10 @@ class ClubSerializer(serializers.ModelSerializer):
             "has_member_subscription",
             "joining_fee",
             "default_instructor_lesson_fee",
+            "default_reservation_only",
+            "default_reservation_limit",
+            "lesson_reservation_payment_options",
+            "default_lesson_instructors",
             "service_slot_step_minutes",
             "service_reservation_payment_options",
             "service_allow_choose_worker",
@@ -3414,6 +3418,17 @@ class ClubSerializer(serializers.ModelSerializer):
             instance = super().update(instance, validated_data)
             _sync_reservation_catalog(self, instance, "club")
         return instance
+
+    def validate_default_lesson_instructors(self, members):
+        club = self.instance
+        if club is None:
+            return members
+        for member in members:
+            if member.club_id != club.id or not member.is_instructor:
+                raise serializers.ValidationError(
+                    "担当の先生は、このクラブの指導者から選んでください。"
+                )
+        return members
 
     def validate_default_background_color(self, value):
         if value in (None, ""):

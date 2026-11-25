@@ -23,12 +23,9 @@ from .models import (
 
 
 def lesson_fee_yen(lesson):
-    """Effective fee for one instructor teaching this lesson once."""
+    """Fee for one instructor teaching this lesson once. Empty means no fee."""
     if lesson.instructor_fee is not None:
         return int(lesson.instructor_fee)
-    club_fee = getattr(lesson.club, "default_instructor_lesson_fee", None)
-    if club_fee is not None:
-        return int(club_fee)
     return None
 
 

@@ -121,11 +121,10 @@ def assert_lesson_has_spots(
         raise ValueError("このレッスンは満員です。")
 
 
-def resolve_lesson_or_club(lesson_value, club_value):
-    if lesson_value is not None:
-        return lesson_value
-
-    return club_value
+def resolve_lesson_or_club(lesson_value, _club_value):
+    # The lesson stores its own value. Empty means unlimited, not the club.
+    # Club numbers only prefill the lesson form.
+    return lesson_value
 
 
 def resolve_max_days_ahead(lesson_value, club_value):

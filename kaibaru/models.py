@@ -156,7 +156,7 @@ class Club(models.Model):
     member_reservation_max_count = models.PositiveIntegerField(
         null=True,
         blank=True,
-        help_text="Default maximum upcoming member reservations per member per lesson. Empty means unlimited. Lessons may override.",
+        help_text="Starting member-reservation cap copied into a new lesson. Empty means unlimited.",
     )
     member_reservation_max_days_ahead = models.PositiveIntegerField(
         null=True,
@@ -166,7 +166,7 @@ class Club(models.Model):
     visitor_reservation_max_count = models.PositiveIntegerField(
         null=True,
         blank=True,
-        help_text="Default maximum upcoming visitor reservations per email per lesson. Empty means unlimited. Lessons may override.",
+        help_text="Starting visitor-reservation cap copied into a new lesson. Empty means unlimited.",
     )
     visitor_reservation_max_days_ahead = models.PositiveIntegerField(
         null=True,
@@ -203,7 +203,32 @@ class Club(models.Model):
     default_instructor_lesson_fee = models.PositiveIntegerField(
         null=True,
         blank=True,
-        help_text="Default yen paid to each instructor per lesson taught. Lessons may override.",
+        help_text="Yen copied into a new lesson as its instructor fee. Empty means no fee.",
+    )
+    default_reservation_only = models.BooleanField(
+        default=False,
+        help_text="Starting value for a new lesson: join only by reservation.",
+    )
+    default_reservation_limit = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Starting reservation capacity for a new lesson. Empty means unlimited.",
+    )
+    lesson_reservation_payment_options = models.CharField(
+        max_length=10,
+        choices=[
+            ("stripe", "Card (Stripe)"),
+            ("cash", "Pay at the venue"),
+            ("both", "Card or pay at the venue"),
+        ],
+        default="stripe",
+        help_text="Starting payment method for a new lesson. stripe, cash, or both.",
+    )
+    default_lesson_instructors = models.ManyToManyField(
+        "Member",
+        blank=True,
+        related_name="default_instructor_for_clubs",
+        limit_choices_to={"is_instructor": True},
     )
     SERVICE_SLOT_STEP_CHOICES = (
         (15, "15 minutes"),
@@ -1304,22 +1329,22 @@ class Lesson(models.Model):
     member_reservation_max_count = models.PositiveIntegerField(
         null=True,
         blank=True,
-        help_text="Maximum upcoming member reservations for this lesson. Empty uses the club setting.",
+        help_text="Maximum upcoming member reservations for this lesson. Empty means unlimited.",
     )
     member_reservation_max_days_ahead = models.PositiveIntegerField(
         null=True,
         blank=True,
-        help_text="How many days ahead a member may reserve this lesson. Empty uses the club setting.",
+        help_text="How many days ahead a member may reserve this lesson. Empty means no date horizon. 0 means today only.",
     )
     visitor_reservation_max_count = models.PositiveIntegerField(
         null=True,
         blank=True,
-        help_text="Maximum upcoming visitor reservations for this lesson per email. Empty uses the club setting.",
+        help_text="Maximum upcoming visitor reservations for this lesson per email. Empty means unlimited.",
     )
     visitor_reservation_max_days_ahead = models.PositiveIntegerField(
         null=True,
         blank=True,
-        help_text="How many days ahead a visitor may reserve this lesson. Empty uses the club setting.",
+        help_text="How many days ahead a visitor may reserve this lesson. Empty means no date horizon. 0 means today only.",
     )
 
     age_min = models.PositiveIntegerField(null=True, blank=True)
@@ -1334,7 +1359,7 @@ class Lesson(models.Model):
     instructor_fee = models.PositiveIntegerField(
         null=True,
         blank=True,
-        help_text="Yen paid to each instructor for this lesson. Empty uses the club default.",
+        help_text="Yen paid to each instructor for this lesson. Empty means no instructor fee.",
     )
     default_instructors = models.ManyToManyField(
         "Member",
