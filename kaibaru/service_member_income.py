@@ -475,6 +475,7 @@ def _month_of(paid_at):
 def _expense_total_for_month(club, year, month):
     total = ExpenseReceipt.objects.filter(
         club=club,
+        entry_kind="expense",
         purchased_on__year=year,
         purchased_on__month=month,
     ).aggregate(total=Sum("amount"))["total"]
@@ -648,7 +649,32 @@ def _load_month_rows(club, year, month):
     stripe_account = getattr(club, "stripe_account_id", None)
     _ensure_invoice_nets(rows, stripe_account)
     _ensure_reservation_nets(reservations, stripe_account)
+    reservations.extend(_extra_income_rows(club, year, month))
     return rows, reservations
+
+
+def _extra_income_rows(club, year, month):
+    receipts = ExpenseReceipt.objects.filter(
+        club=club,
+        entry_kind="income",
+        purchased_on__year=year,
+        purchased_on__month=month,
+    )
+    rows = []
+    for receipt in receipts:
+        amount = int(receipt.amount or 0)
+        rows.append({
+            "id": f"extra-{receipt.id}",
+            "kind": "extra",
+            "title": receipt.title or "追加の収入",
+            "full_name": receipt.description or "",
+            "amount": amount,
+            "net_yen": amount,
+            "paid_on": receipt.purchased_on.isoformat(),
+            "payment_intent_id": "",
+            "payment_method": "extra",
+        })
+    return rows
 
 
 def _save_month_snapshot(club, year, month, start, invoices, reservations, platform_fee):

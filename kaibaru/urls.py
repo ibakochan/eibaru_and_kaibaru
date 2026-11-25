@@ -147,4 +147,13 @@ urlpatterns = [
         views.todo_checklist,
         name='todo_checklist',
     ),
+    path('generate_attendance_qr/', views.generate_attendance_qr, name='generate_attendance_qr'),
+    path('attendance_qr/', views.attendance_qr_status, name='attendance_qr_status'),
+    path('attendance_qr_checkin/', views.attendance_qr_checkin, name='attendance_qr_checkin'),
+    path('my_lesson_schedule/', views.my_lesson_schedule, name='my_lesson_schedule'),
+    path('save_lesson_absence/', views.save_lesson_absence, name='save_lesson_absence'),
+    path('delete_lesson_absence/', views.delete_lesson_absence, name='delete_lesson_absence'),
+    path('lesson_day_off/', views.lesson_day_off, name='lesson_day_off'),
+    path('lessons/<int:lesson_id>/absences/', views.lesson_absences_today, name='lesson_absences_today'),
+    path('member_absence_history/', views.member_absence_history, name='member_absence_history'),
 ]

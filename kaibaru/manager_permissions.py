@@ -11,6 +11,7 @@ PERMISSION_FIELDS = (
     "member_payments",
     "expenses",
     "income",
+    "stock",
 )
 
 SELF_PAYMENT_MESSAGE = "自分の支払いや給与は変更できません。"

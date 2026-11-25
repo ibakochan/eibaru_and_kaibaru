@@ -426,6 +426,10 @@ def reconcile_stripe_subscriptions():
 
         mark_past_cash_lesson_and_event_reservations_paid()
         mark_stale_open_service_reservations_paid()
+        from .service_merch import mark_cash_merch_paid, reconcile_open_merch_orders
+
+        reconcile_open_merch_orders()
+        mark_cash_merch_paid()
     except Exception:
         logger.exception("[CASH RESERVATION] Automatic received mark failed")
 

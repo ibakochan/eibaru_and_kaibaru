@@ -3951,7 +3951,8 @@ class LessonViewSet(viewsets.ModelViewSet):
         )
         if picture_message:
             raise serializers.ValidationError({"picture": picture_message})
-        serializer.save(club=club, instructor=instructor, section_id=section_id)
+        lesson = serializer.save(club=club, instructor=instructor, section_id=section_id)
+        self._sync_expected_members(lesson)
 
     def perform_update(self, serializer):
         lesson = serializer.instance
@@ -3964,7 +3965,25 @@ class LessonViewSet(viewsets.ModelViewSet):
         )
         if picture_message:
             raise serializers.ValidationError({"picture": picture_message})
-        serializer.save()
+        lesson = serializer.save()
+        self._sync_expected_members(lesson)
+
+    def _sync_expected_members(self, lesson):
+        data = self.request.data
+        if hasattr(data, "getlist"):
+            if "expected_member_ids" not in data:
+                return
+            raw = data.getlist("expected_member_ids")
+        elif "expected_member_ids" not in data:
+            return
+        else:
+            raw = data.get("expected_member_ids")
+        from .service_lesson_attendance import sync_expected_members
+
+        try:
+            sync_expected_members(lesson, raw)
+        except ValueError as exc:
+            raise serializers.ValidationError({"expected_member_ids": str(exc)})
 
     def perform_destroy(self, instance):
         if not has_permission(self.request.user, instance.club, "lessons"):
@@ -4002,9 +4021,23 @@ class LessonViewSet(viewsets.ModelViewSet):
             clear_lesson_date_staff(lesson, day_value)
             return Response(lesson_date_status(lesson, day_value))
         if action_name == "cancel":
-            return Response(
-                cancel_lesson_date(lesson, day_value, request.data.get("note") or "")
-            )
+            payload = cancel_lesson_date(lesson, day_value, request.data.get("note") or "")
+            makeup = request.data.get("makeup")
+            if isinstance(makeup, str) and makeup.strip():
+                import json
+                makeup = json.loads(makeup)
+            if isinstance(makeup, dict) and makeup.get("date"):
+                from .service_lesson_attendance import _clock_time, create_makeup_lesson
+
+                try:
+                    makeup_day = date_cls.fromisoformat(makeup["date"])
+                    start = _clock_time(makeup.get("start_time"))
+                    end = _clock_time(makeup.get("end_time"))
+                    created = create_makeup_lesson(lesson, makeup_day, start, end)
+                except (KeyError, TypeError, ValueError) as exc:
+                    return Response({"detail": str(exc) or "振替を作れませんでした。"}, status=400)
+                payload["makeup_lesson_id"] = created.id
+            return Response(payload)
         if action_name == "uncancel":
             uncancel_lesson_date(lesson, day_value)
             return Response(lesson_date_status(lesson, day_value))
@@ -4239,10 +4272,75 @@ def _staff_club(request, subdomain, permission):
     return club, None
 
 
+def _form_flag(value):
+    if isinstance(value, bool):
+        return value
+    return str(value or "").lower() in ("1", "true", "on", "yes")
+
+
+def _save_stock_item(club, request, item):
+    from .models import StockItem
+    from .service_merch import MerchError, clean_item_fields
+
+    name = request.data.get("name") or ""
+    if not isinstance(name, str):
+        name = str(name)
+    name = name.strip()
+    if not name:
+        raise MerchError("名前を入力してください。")
+    if len(name) > 120:
+        raise MerchError("名前は120文字以内にしてください。")
+    description = str(request.data.get("description") or "").strip()
+    category = str(request.data.get("category") or "").strip()[:40]
+    detail = str(request.data.get("detail") or "").strip()[:80]
+    try:
+        quantity = int(request.data.get("quantity") or 0)
+        quantity_for_sale = int(request.data.get("quantity_for_sale") or 0)
+    except (TypeError, ValueError):
+        raise MerchError("数量は整数で入力してください。")
+    raw_price = request.data.get("price")
+    price = None if raw_price in (None, "") else raw_price
+    audience = str(request.data.get("audience") or "").strip()
+    payment = str(request.data.get("payment_options") or "").strip()
+    price = clean_item_fields(
+        quantity=quantity,
+        quantity_for_sale=quantity_for_sale,
+        price=price,
+        audience=audience,
+        payment_options=payment,
+    )
+    if item is None:
+        item = StockItem(club=club)
+    item.name = name
+    item.description = description
+    item.category = category
+    item.detail = detail
+    item.quantity = quantity
+    item.quantity_for_sale = quantity_for_sale
+    item.price = price
+    item.audience = audience
+    item.payment_options = payment
+    picture = request.FILES.get("picture")
+    if picture:
+        item.picture = picture
+    elif _form_flag(request.data.get("clear_picture")):
+        item.picture = None
+    item.save()
+    return item
+
+
 def _parse_expense_fields(request, *, image_required):
     from datetime import date as date_cls
 
+    if "entry_kind" in request.data:
+        entry_kind = request.data.get("entry_kind") or "expense"
+        if entry_kind not in ("expense", "income"):
+            entry_kind = "expense"
+    else:
+        entry_kind = None
     image = request.FILES.get("image")
+    if entry_kind == "income":
+        image_required = False
     if image_required and not image:
         return None, Response(
             {"detail": "領収書の画像を選択してください。"},
@@ -4304,6 +4402,7 @@ def _parse_expense_fields(request, *, image_required):
         "title": title,
         "description": description,
         "amount": amount,
+        "entry_kind": entry_kind,
     }, None
 
 
@@ -4320,6 +4419,8 @@ def _apply_expense_fields(receipt, fields):
     receipt.title = fields["title"]
     receipt.description = fields["description"]
     receipt.amount = fields["amount"]
+    if fields.get("entry_kind"):
+        receipt.entry_kind = fields["entry_kind"]
     if image:
         receipt.image = image
         try:
@@ -4361,7 +4462,7 @@ def _expense_months(club):
             }
             months.append(current)
         current["receipt_count"] += 1
-        if receipt.amount is not None:
+        if receipt.amount is not None and receipt.entry_kind != "income":
             current["total_yen"] += receipt.amount
         current["receipts"].append(
             ExpenseReceiptSerializer(receipt).data
@@ -4709,7 +4810,7 @@ class ClubViewSet(viewsets.ModelViewSet):
         if not request.user.is_authenticated:
             return Response({"detail": "許可なし"}, status=status.HTTP_403_FORBIDDEN)
         is_owner = club.owner_id == request.user.id
-        can_take_attendance = is_owner or has_permission(request.user, club, "lessons") or Member.objects.filter(
+        can_take_attendance = is_owner or has_permission(request.user, club, "lessons") or has_permission(request.user, club, "members") or Member.objects.filter(
             club=club,
             is_instructor=True,
         ).filter(
@@ -4925,6 +5026,148 @@ class ClubViewSet(viewsets.ModelViewSet):
         return Response(
             ExpenseReceiptSerializer(receipt, context={"request": request}).data
         )
+
+    @action(
+        detail=False,
+        methods=["get", "post"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/stock",
+    )
+    def stock(self, request, subdomain=None):
+        from .models import MerchOrder, StockItem
+        from .service_merch import MerchError, clean_item_fields, staff_item
+
+        club, error = _staff_club(request, subdomain, "stock")
+        if error:
+            return error
+        if request.method == "GET":
+            items = StockItem.objects.filter(club=club)
+            orders = MerchOrder.objects.filter(club=club, is_deleted=False).order_by("-created_at", "-id")[:80]
+            from .service_merch import _order_payload
+
+            return Response({
+                "show_merch": club.show_merch,
+                "merch_audience": club.merch_audience,
+                "merch_payment_options": club.merch_payment_options,
+                "stripe_connected": bool(club.stripe_account_id),
+                "items": [staff_item(item) for item in items],
+                "orders": [_order_payload(order) for order in orders],
+            })
+        if request.data.get("settings"):
+            audience = request.data.get("merch_audience") or "both"
+            payment = request.data.get("merch_payment_options") or "stripe"
+            if audience not in ("both", "members", "visitors") or payment not in ("stripe", "cash", "both"):
+                return Response({"detail": "設定が正しくありません。"}, status=status.HTTP_400_BAD_REQUEST)
+            if not club.stripe_account_id and payment != "cash":
+                payment = "cash"
+            club.show_merch = _form_flag(request.data.get("show_merch"))
+            club.merch_audience = audience
+            club.merch_payment_options = payment
+            club.save(update_fields=["show_merch", "merch_audience", "merch_payment_options"])
+            return Response({
+                "show_merch": club.show_merch,
+                "merch_audience": club.merch_audience,
+                "merch_payment_options": club.merch_payment_options,
+            })
+        try:
+            item = _save_stock_item(club, request, None)
+        except MerchError as exc:
+            return Response({"detail": exc.message}, status=exc.status)
+        return Response(staff_item(item), status=status.HTTP_201_CREATED)
+
+    @action(
+        detail=False,
+        methods=["patch", "delete"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/stock/(?P<item_id>\d+)",
+    )
+    def stock_item(self, request, subdomain=None, item_id=None):
+        from .models import StockItem
+        from .service_merch import MerchError, staff_item
+
+        club, error = _staff_club(request, subdomain, "stock")
+        if error:
+            return error
+        item = StockItem.objects.filter(club=club, id=item_id).first()
+        if item is None:
+            return Response({"detail": "商品が見つかりません。"}, status=status.HTTP_404_NOT_FOUND)
+        if request.method == "DELETE":
+            item.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        try:
+            item = _save_stock_item(club, request, item)
+        except MerchError as exc:
+            return Response({"detail": exc.message}, status=exc.status)
+        return Response(staff_item(item))
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/merch",
+    )
+    def merch_catalog(self, request, subdomain=None):
+        from .models import StockItem
+        from .service_merch import public_item
+
+        club = Club.objects.filter(is_deleted=False, subdomain=subdomain).first()
+        if club is None:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        items = []
+        if club.show_merch:
+            items = [
+                row for row in (
+                    public_item(item) for item in StockItem.objects.filter(club=club)
+                )
+                if row["for_sale"]
+            ]
+        return Response({"show_merch": club.show_merch, "items": items})
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/merch/buy",
+    )
+    def merch_buy(self, request, subdomain=None):
+        from .service_merch import MerchError, place_order
+
+        club = Club.objects.filter(is_deleted=False, subdomain=subdomain).first()
+        if club is None:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            payload = place_order(
+                club=club,
+                item_id=request.data.get("item_id"),
+                quantity=request.data.get("quantity") or 1,
+                method=(request.data.get("payment_method") or "stripe"),
+                user=request.user,
+                full_name=request.data.get("full_name") or "",
+                email=request.data.get("email") or "",
+                origin=request.data.get("origin") or "",
+            )
+        except MerchError as exc:
+            return Response({"detail": exc.message}, status=exc.status)
+        return Response(payload)
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path=r"by-subdomain/(?P<subdomain>[^/.]+)/merch/orders/(?P<order_id>\d+)",
+    )
+    def merch_order_action(self, request, subdomain=None, order_id=None):
+        from .service_merch import MerchError, refund_merch_order, void_cash_order
+
+        club, error = _staff_club(request, subdomain, "stock")
+        if error:
+            return error
+        action_name = (request.data.get("action") or "").strip()
+        try:
+            if action_name == "refund":
+                payload = refund_merch_order(order_id=order_id, user=request.user)
+            elif action_name == "void":
+                payload = void_cash_order(order_id=order_id, user=request.user)
+            else:
+                return Response({"detail": "操作を指定してください。"}, status=status.HTTP_400_BAD_REQUEST)
+        except MerchError as exc:
+            return Response({"detail": exc.message}, status=exc.status)
+        return Response(payload)
 
     @action(
         detail=False,

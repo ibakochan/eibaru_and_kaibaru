@@ -9,7 +9,7 @@ from django.db.models import Q, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
-from .models import EventReservation, Invoice, Reservation, ServiceReservation, Subscription
+from .models import EventReservation, Invoice, MerchOrder, Reservation, ServiceReservation, Subscription
 from .discounts import calculate_discounted_amount
 from .pricing import get_effective_subscription_price
 
@@ -127,7 +127,7 @@ def apply_cash_platform_fees_for_month(year, month):
         _unbilled_cash_invoices(Invoice.objects, start, end)
         .values_list("club_id", flat=True)
     )
-    for model in (Reservation, EventReservation, ServiceReservation):
+    for model in (Reservation, EventReservation, ServiceReservation, MerchOrder):
         club_ids.update(
             _billable_cash_reservations(
                 model,
@@ -452,7 +452,7 @@ def _cash_reservation_amounts_for_month(club_ids, year, month):
         return []
     start, end = month_bounds(year, month)
     amounts = []
-    for model in (Reservation, EventReservation, ServiceReservation):
+    for model in (Reservation, EventReservation, ServiceReservation, MerchOrder):
         amounts.extend(
             _billable_cash_reservations(
                 model,

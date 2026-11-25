@@ -77,6 +77,17 @@ def club_og_image_upload_to(instance, filename):
     club_subdomain = getattr(instance, "subdomain", "unknown_club")
     return f"{club_subdomain}/og/{filename}"
 
+def club_stock_upload_to(instance, filename):
+    import os
+    import uuid
+
+    ext = os.path.splitext(filename or "")[1].lower()
+    if ext not in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
+        ext = ""
+    club_subdomain = getattr(getattr(instance, "club", None), "subdomain", "unknown_club")
+    return f"{club_subdomain}/stock/{uuid.uuid4().hex}{ext}"
+
+
 def club_expense_receipt_upload_to(instance, filename):
     import os
     import uuid
@@ -352,6 +363,35 @@ class Club(models.Model):
 
 
     has_attendance = models.BooleanField(default=False)
+    attendance_qr_enabled = models.BooleanField(
+        default=False,
+        help_text="Members may check themselves in by scanning the club QR.",
+    )
+    attendance_qr_minutes_before = models.PositiveSmallIntegerField(
+        default=30,
+        help_text="How many minutes before the lesson start self check-in opens.",
+    )
+    attendance_qr_minutes_after = models.PositiveSmallIntegerField(
+        default=60,
+        help_text="How many minutes after the lesson start self check-in stays open.",
+    )
+    attendance_qr_token = models.CharField(max_length=64, blank=True, default="")
+    show_merch = models.BooleanField(
+        default=False,
+        help_text="When on, the shop section is visible to customers.",
+    )
+    merch_audience = models.CharField(
+        max_length=10,
+        choices=[("both", "Both"), ("members", "Members"), ("visitors", "Visitors")],
+        default="both",
+        help_text="Who may buy merch. An item can override this.",
+    )
+    merch_payment_options = models.CharField(
+        max_length=10,
+        choices=[("stripe", "Stripe"), ("cash", "Cash"), ("both", "Both")],
+        default="stripe",
+        help_text="How merch may be paid. An item can override this.",
+    )
 
     last_reset = models.DateField(null=True, blank=True)
 
@@ -1284,6 +1324,23 @@ class Lesson(models.Model):
     )
 
     reservation_only = models.BooleanField(default=False, help_text="If enabled, this lesson can only be booked through a reservation.")
+    occurs_on = models.DateField(
+        null=True,
+        blank=True,
+        help_text="When set, this lesson happens once on this date instead of every week.",
+    )
+    makeup_source = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="makeup_lessons",
+    )
+    expected_members = models.ManyToManyField(
+        "Member",
+        blank=True,
+        related_name="expected_lessons",
+    )
 
     # --------------------------------------------------------
     # Reservation settings
@@ -1441,6 +1498,36 @@ class LessonDateCancel(models.Model):
 
     def __str__(self):
         return f"{self.lesson_id} canceled {self.date}"
+
+
+class LessonAbsence(models.Model):
+    """A member is away from one lesson, or from every lesson on a date."""
+
+    member = models.ForeignKey(
+        "Member",
+        on_delete=models.CASCADE,
+        related_name="lesson_absences",
+    )
+    lesson = models.ForeignKey(
+        "Lesson",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="absences",
+    )
+    date = models.DateField()
+    reason = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["member", "date"]),
+            models.Index(fields=["lesson", "date"]),
+        ]
+
+    def __str__(self):
+        target = self.lesson_id or "day"
+        return f"{self.member_id} absent {self.date} {target}"
 
 
 class LessonDateStaff(models.Model):
@@ -3187,6 +3274,13 @@ class ExpenseReceipt(models.Model):
     image = models.ImageField(
         upload_to=club_expense_receipt_upload_to,
         storage=PrivateMediaStorage(),
+        null=True,
+        blank=True,
+    )
+    entry_kind = models.CharField(
+        max_length=10,
+        choices=[("expense", "Expense"), ("income", "Income")],
+        default="expense",
     )
     title = models.CharField(max_length=200, blank=True, default="")
     amount = models.PositiveIntegerField(
@@ -3207,6 +3301,102 @@ class ExpenseReceipt(models.Model):
     def __str__(self):
         label = self.title or "経費"
         return f"{self.club_id} {self.purchased_on} {label}"
+
+
+class StockItem(models.Model):
+    """One stored product. Quantity for sale is the shop listing of the same item."""
+
+    club = models.ForeignKey(
+        Club,
+        on_delete=models.CASCADE,
+        related_name="stock_items",
+    )
+    name = models.CharField(max_length=120)
+    description = models.TextField(blank=True, default="")
+    picture = models.ImageField(upload_to=club_stock_upload_to, null=True, blank=True)
+    category = models.CharField(max_length=40, blank=True, default="")
+    detail = models.CharField(
+        max_length=80,
+        blank=True,
+        default="",
+        help_text="Size, color, or other note.",
+    )
+    quantity = models.PositiveIntegerField(default=0)
+    quantity_for_sale = models.PositiveIntegerField(default=0)
+    price = models.PositiveIntegerField(null=True, blank=True)
+    audience = models.CharField(max_length=10, blank=True, default="")
+    payment_options = models.CharField(max_length=10, blank=True, default="")
+    position = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["position", "id"]
+
+    def __str__(self):
+        return self.name
+
+
+class MerchOrder(models.Model):
+    """A one-time purchase of a stock item. Not tied to a lesson or a date."""
+
+    class Status(models.TextChoices):
+        UNPAID = "unpaid", "Unpaid"
+        PAID = "paid", "Paid"
+
+    item = models.ForeignKey(
+        StockItem,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="orders",
+    )
+    club = models.ForeignKey(Club, on_delete=models.CASCADE, related_name="merch_orders")
+    member = models.ForeignKey(
+        "Member",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="merch_orders",
+    )
+    user = models.ForeignKey(
+        CustomUser,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="merch_orders",
+    )
+    item_name = models.CharField(max_length=120)
+    quantity = models.PositiveIntegerField(default=1)
+    unit_price = models.PositiveIntegerField(default=0)
+    amount = models.PositiveIntegerField(default=0)
+    full_name = models.CharField(max_length=200, blank=True, default="")
+    email = models.EmailField(blank=True, default="")
+    buyer_kind = models.CharField(max_length=10, default="visitor")
+    payment_method = models.CharField(max_length=20, blank=True, default="")
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.UNPAID)
+    stock_taken = models.BooleanField(default=False)
+    canceled = models.BooleanField(default=False)
+    no_show = models.BooleanField(default=False)
+    is_deleted = models.BooleanField(default=False)
+    platform_fee_applied = models.BooleanField(default=False)
+    net_yen = models.IntegerField(null=True, blank=True)
+    currency = models.CharField(max_length=10, default="jpy")
+    stripe_checkout_session_id = models.CharField(max_length=255, blank=True, default="")
+    stripe_payment_intent_id = models.CharField(max_length=255, blank=True, default="")
+    paid_at = models.DateTimeField(null=True, blank=True)
+    refunded_at = models.DateTimeField(null=True, blank=True)
+    refund_started_at = models.DateTimeField(null=True, blank=True)
+    stripe_refund_id = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["item", "status", "created_at"]),
+            models.Index(fields=["club", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.item_name} x{self.quantity}"
 
 
 class ClubMonthlyIncome(models.Model):
@@ -3270,6 +3460,7 @@ class ClubManager(models.Model):
     member_payments = models.BooleanField(default=False)
     expenses = models.BooleanField(default=False)
     income = models.BooleanField(default=False)
+    stock = models.BooleanField(default=False)
 
     def __str__(self):
         return f"{self.member_id}"

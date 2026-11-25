@@ -195,6 +195,23 @@ def stripe_connected_webhook(request):
             )
             return webhook_ok(event_record)
 
+        merch_order_id = metadata.get("merch_order_id")
+        if merch_order_id:
+            if session.get("payment_status") != "paid":
+                return webhook_ok(event_record)
+            try:
+                merch_order_id = int(merch_order_id)
+            except (TypeError, ValueError):
+                return webhook_ok(event_record)
+            from .service_merch import complete_paid_merch_checkout
+
+            complete_paid_merch_checkout(
+                order_id=merch_order_id,
+                session_id=session.get("id") or "",
+                payment_intent_id=session.get("payment_intent") or "",
+            )
+            return webhook_ok(event_record)
+
         # =========================================================
         # SERVICE (HAIR/NAIL) RESERVATION CHECKOUT
         # =========================================================

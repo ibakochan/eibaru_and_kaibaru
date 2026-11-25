@@ -48,6 +48,9 @@ def is_lesson_canceled(lesson, day: date) -> bool:
 
 def assert_lesson_date_open(lesson, day: date):
     """Raise ValueError when this occurrence was marked 休講."""
+    occurs_on = getattr(lesson, "occurs_on", None)
+    if occurs_on is not None and occurs_on != day:
+        raise ValueError("このレッスンはその日にはありません。")
     if is_lesson_canceled(lesson, day):
         raise ValueError("この日のレッスンは休講です。")
 

@@ -277,6 +277,7 @@ class ClubManagerAdmin(admin.ModelAdmin):
         "member_payments",
         "expenses",
         "income",
+        "stock",
     )
     raw_id_fields = ("member",)
 

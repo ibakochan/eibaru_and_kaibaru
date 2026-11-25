@@ -3,7 +3,7 @@ from django.views import View
 from allauth.socialaccount.models import SocialAccount
 from django.http import HttpResponseForbidden  
 from django.shortcuts import get_object_or_404
-from .models import Club, Participation, Member, Subscription
+from .models import Club, Participation, Member, Subscription, Lesson
 from django.shortcuts import redirect
 from urllib.parse import urlencode
 from urllib.parse import quote
@@ -378,4 +378,262 @@ def todo_checklist(request):
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         }
     )
+
+
+def _json_body(request):
+    if request.content_type and "application/json" in request.content_type:
+        try:
+            return json.loads(request.body.decode() or "{}")
+        except json.JSONDecodeError:
+            return {}
+    return request.POST
+
+
+@login_required
+@require_POST
+def generate_attendance_qr(request):
+    from .manager_permissions import has_permission
+    from .service_lesson_attendance import generate_qr_token
+
+    body = _json_body(request)
+    club = Club.objects.filter(
+        id=body.get("club_id") or request.POST.get("club_id"),
+        is_deleted=False,
+    ).first()
+    if club is None:
+        return JsonResponse({"detail": "クラブが見つかりません。"}, status=404)
+    if club.owner_id != request.user.id and not has_permission(request.user, club, "lessons"):
+        return JsonResponse({"detail": "許可なし"}, status=403)
+    token = generate_qr_token(club)
+    return JsonResponse({"attendance_qr_token": token})
+
+
+def attendance_qr_status(request):
+    from .service_lesson_attendance import _account_members, lesson_accepts_member, open_checkin_lessons
+
+    code = request.GET.get("code") or ""
+    club = Club.objects.filter(attendance_qr_token=code, is_deleted=False).first()
+    if club is None or not club.attendance_qr_enabled:
+        return JsonResponse({"detail": "このQRコードは使えません。"}, status=404)
+    lessons = []
+    members = []
+    if request.user.is_authenticated:
+        mine = list(_account_members(request.user, club))
+        members = [{"id": member.id, "full_name": member.full_name} for member in mine]
+        for lesson in open_checkin_lessons(club):
+            if any(lesson_accepts_member(lesson, member) for member in mine):
+                lessons.append({
+                    "id": lesson.id,
+                    "title": lesson.title,
+                    "start_time": lesson.start_time.strftime("%H:%M"),
+                    "end_time": lesson.end_time.strftime("%H:%M"),
+                })
+    return JsonResponse({
+        "club_name": club.name,
+        "enabled": True,
+        "logged_in": request.user.is_authenticated,
+        "lessons": lessons,
+        "members": members,
+    })
+
+
+@login_required
+@require_POST
+def attendance_qr_checkin(request):
+    from .service_lesson_attendance import (
+        _account_members,
+        check_in_member,
+        lesson_is_open_for_checkin,
+    )
+
+    body = _json_body(request)
+    club = Club.objects.filter(attendance_qr_token=body.get("code") or "", is_deleted=False).first()
+    if club is None or not club.attendance_qr_enabled:
+        return JsonResponse({"detail": "このQRコードは使えません。"}, status=404)
+    member = _account_members(request.user, club).filter(id=body.get("member_id")).first()
+    lesson = Lesson.objects.filter(id=body.get("lesson_id"), club=club).first()
+    if member is None or lesson is None:
+        return JsonResponse({"detail": "出席できません。"}, status=400)
+    if not lesson_is_open_for_checkin(lesson, timezone.localtime()):
+        return JsonResponse({"detail": "今はこのレッスンの出席時間ではありません。"}, status=400)
+    try:
+        _participation, created = check_in_member(lesson, member)
+    except ValueError as exc:
+        return JsonResponse({"detail": str(exc)}, status=400)
+    return JsonResponse({"ok": True, "already": not created, "member_name": member.full_name})
+
+
+@login_required
+def my_lesson_schedule(request):
+    from .service_lesson_attendance import _account_members
+
+    club = Club.objects.filter(subdomain=request.GET.get("subdomain"), is_deleted=False).first()
+    if club is None:
+        return JsonResponse({"detail": "クラブが見つかりません。"}, status=404)
+    today = timezone.localdate()
+    members = []
+    for member in _account_members(request.user, club).prefetch_related("expected_lessons", "lesson_absences"):
+        lessons = []
+        for lesson in member.expected_lessons.all().order_by("weekday", "start_time"):
+            lessons.append({
+                "id": lesson.id,
+                "title": lesson.title,
+                "weekday": lesson.weekday,
+                "start_time": lesson.start_time.strftime("%H:%M"),
+                "end_time": lesson.end_time.strftime("%H:%M"),
+                "occurs_on": lesson.occurs_on.isoformat() if lesson.occurs_on else None,
+            })
+        absences = [
+            {
+                "id": row.id,
+                "date": row.date.isoformat(),
+                "lesson_id": row.lesson_id,
+                "reason": row.reason,
+            }
+            for row in member.lesson_absences.filter(date__gte=today).order_by("date", "id")
+        ]
+        if lessons or absences:
+            members.append({
+                "id": member.id,
+                "full_name": member.full_name,
+                "lessons": lessons,
+                "absences": absences,
+            })
+    return JsonResponse({"members": members})
+
+
+@login_required
+@require_POST
+def save_lesson_absence(request):
+    from datetime import date as date_cls
+
+    from .service_lesson_attendance import member_can_manage, save_absences
+
+    body = _json_body(request)
+    member = Member.objects.filter(id=body.get("member_id")).select_related("club").first()
+    if member is None or not member_can_manage(request.user, member):
+        return JsonResponse({"detail": "許可なし"}, status=403)
+    lesson = None
+    if not body.get("whole_day"):
+        lesson = Lesson.objects.filter(id=body.get("lesson_id"), club_id=member.club_id).first()
+        if lesson is None:
+            return JsonResponse({"detail": "レッスンが見つかりません。"}, status=404)
+    try:
+        dates = [date_cls.fromisoformat(value) for value in body.get("dates") or []]
+    except ValueError:
+        return JsonResponse({"detail": "日付が正しくありません。"}, status=400)
+    if not dates:
+        return JsonResponse({"detail": "日を選んでください。"}, status=400)
+    try:
+        rows = save_absences(member=member, dates=dates, lesson=lesson, reason=body.get("reason") or "")
+    except ValueError as exc:
+        return JsonResponse({"detail": str(exc)}, status=400)
+    return JsonResponse({"ids": [row.id for row in rows]})
+
+
+@login_required
+@require_POST
+def delete_lesson_absence(request):
+    from .models import LessonAbsence
+    from .service_lesson_attendance import member_can_manage
+
+    body = _json_body(request)
+    row = LessonAbsence.objects.filter(id=body.get("absence_id")).select_related("member").first()
+    if row is None or not member_can_manage(request.user, row.member):
+        return JsonResponse({"detail": "許可なし"}, status=403)
+    if row.date < timezone.localdate():
+        return JsonResponse({"detail": "過去の欠席は取り消せません。"}, status=400)
+    row.delete()
+    return JsonResponse({"ok": True})
+
+
+@login_required
+@require_POST
+def lesson_day_off(request):
+    from datetime import date as date_cls
+
+    from .manager_permissions import has_permission
+    from .service_lesson_attendance import cancel_club_day, uncancel_club_day
+
+    body = _json_body(request)
+    club = Club.objects.filter(subdomain=body.get("subdomain"), is_deleted=False).first()
+    if club is None:
+        return JsonResponse({"detail": "クラブが見つかりません。"}, status=404)
+    if club.owner_id != request.user.id and not has_permission(request.user, club, "lessons"):
+        return JsonResponse({"detail": "許可なし"}, status=403)
+    try:
+        day = date_cls.fromisoformat(body.get("date") or "")
+    except ValueError:
+        return JsonResponse({"detail": "日付が正しくありません。"}, status=400)
+    if body.get("action") == "uncancel":
+        removed = uncancel_club_day(club, day)
+        return JsonResponse({"removed": removed})
+    count = cancel_club_day(club, day, body.get("note") or "")
+    return JsonResponse({"canceled": count})
+
+
+def lesson_absences_today(request, lesson_id):
+    from .manager_permissions import has_permission
+    from .models import LessonAbsence
+
+    lesson = Lesson.objects.filter(id=lesson_id).select_related("club").first()
+    if lesson is None:
+        return JsonResponse({"detail": "レッスンが見つかりません。"}, status=404)
+    user = request.user
+    if not user.is_authenticated:
+        return JsonResponse({"detail": "許可なし"}, status=403)
+    instructor_here = Member.objects.filter(club=lesson.club, is_instructor=True).filter(
+        models_user_or_owner(user)
+    ).exists()
+    if lesson.club.owner_id != user.id and not has_permission(user, lesson.club, "lessons") and not instructor_here:
+        return JsonResponse({"detail": "許可なし"}, status=403)
+    day = timezone.localdate()
+    rows = LessonAbsence.objects.filter(date=day).filter(
+        models_absence_q(lesson)
+    ).select_related("member")
+    return JsonResponse({
+        "absences": [
+            {
+                "member_id": row.member_id,
+                "full_name": row.member.full_name,
+                "whole_day": row.lesson_id is None,
+                "reason": row.reason,
+            }
+            for row in rows
+        ]
+    })
+
+
+@login_required
+def member_absence_history(request):
+    from .manager_permissions import has_permission
+    from .service_lesson_attendance import absence_history
+
+    member = Member.objects.filter(id=request.GET.get("member_id")).select_related("club").first()
+    if member is None:
+        return JsonResponse({"detail": "会員が見つかりません。"}, status=404)
+    user = request.user
+    instructor_here = Member.objects.filter(club=member.club, is_instructor=True).filter(
+        models_user_or_owner(user)
+    ).exists()
+    if (
+        member.club.owner_id != user.id
+        and not has_permission(user, member.club, "lessons")
+        and not has_permission(user, member.club, "members")
+        and not instructor_here
+    ):
+        return JsonResponse({"detail": "許可なし"}, status=403)
+    return JsonResponse(absence_history(member))
+
+
+def models_user_or_owner(user):
+    from django.db.models import Q
+
+    return Q(user=user) | Q(owner=user)
+
+
+def models_absence_q(lesson):
+    from django.db.models import Q
+
+    return Q(lesson=lesson) | Q(lesson__isnull=True, member__expected_lessons=lesson)
 

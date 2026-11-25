@@ -2309,6 +2309,7 @@ class LessonSerializer(serializers.ModelSerializer):
     monthly_participation = serializers.SerializerMethodField()
     monthly_average = serializers.SerializerMethodField()
     reservation_menu = serializers.SerializerMethodField()
+    expected_member_ids = serializers.SerializerMethodField()
     reservation_catalog = serializers.SerializerMethodField()
 
 
@@ -2358,9 +2359,21 @@ class LessonSerializer(serializers.ModelSerializer):
             "age_min",
             "age_max",
             "allowed_gender",
-            
+            "occurs_on",
+            "makeup_source",
+            "expected_member_ids",
         ]
-        read_only_fields = ["id", "reservation_menu", "reservation_catalog", "instructors"]
+        read_only_fields = [
+            "id",
+            "reservation_menu",
+            "reservation_catalog",
+            "instructors",
+            "expected_member_ids",
+            "makeup_source",
+        ]
+
+    def get_expected_member_ids(self, obj):
+        return list(obj.expected_members.values_list("id", flat=True))
 
     def get_reservation_menu(self, obj):
         from .service_reservation_catalog import lesson_menu
@@ -3331,6 +3344,13 @@ class ClubSerializer(serializers.ModelSerializer):
             "home_images",
             "search_description",
             "has_attendance",
+            "show_merch",
+            "merch_audience",
+            "merch_payment_options",
+            "attendance_qr_enabled",
+            "attendance_qr_minutes_before",
+            "attendance_qr_minutes_after",
+            "attendance_qr_token",
             "level_systems",
             "trial_start_date",
             "expiration_date",
@@ -3404,6 +3424,7 @@ class ClubSerializer(serializers.ModelSerializer):
             "subscription_current_period_end",
             "stripe_account_id",
             "stripe_subscription_id",
+            "attendance_qr_token",
         ]
 
     reservation_catalog = serializers.SerializerMethodField()
@@ -4192,6 +4213,7 @@ class ExpenseReceiptSerializer(serializers.ModelSerializer):
             "id",
             "title",
             "amount",
+            "entry_kind",
             "description",
             "purchased_on",
             "image_url",

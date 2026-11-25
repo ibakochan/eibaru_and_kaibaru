@@ -9,7 +9,7 @@ from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from .charge_amounts import platform_fee_yen
-from .models import EventReservation, Reservation
+from .models import EventReservation, MerchOrder, Reservation
 from .service_cash_platform_fee import month_bounds
 
 
@@ -78,7 +78,7 @@ def paid_reservation_counts_by_month(club_ids):
     if not club_ids:
         return {}
     counts = {}
-    for model in (Reservation, EventReservation):
+    for model in (Reservation, EventReservation, MerchOrder):
         stamps = (
             model.objects.filter(
                 club_id__in=list(club_ids),
@@ -103,6 +103,43 @@ def paid_reservation_counts_by_month(club_ids):
     return counts
 
 
+def _merch_rows(club_ids, start, end):
+    if not club_ids:
+        return []
+    queryset = (
+        MerchOrder.objects.filter(
+            club_id__in=list(club_ids),
+            status="paid",
+            is_deleted=False,
+            refunded_at__isnull=True,
+            canceled=False,
+            no_show=False,
+            amount__gt=0,
+        )
+        .exclude(payment_method="cash", paid_at__isnull=True)
+        .annotate(income_at=Coalesce("paid_at", "created_at"))
+    )
+    if start is not None and end is not None:
+        queryset = queryset.filter(income_at__gte=start, income_at__lt=end)
+    rows = []
+    for order in queryset:
+        income_at = order.income_at
+        local = timezone.localtime(income_at) if income_at else None
+        rows.append({
+            "id": f"merch-{order.id}",
+            "kind": "merch",
+            "title": order.item_name,
+            "full_name": order.full_name,
+            "amount": int(order.amount or 0),
+            "net_yen": order.net_yen,
+            "paid_on": local.date().isoformat() if local else None,
+            "income_at": income_at,
+            "payment_intent_id": order.stripe_payment_intent_id or "",
+            "payment_method": order.payment_method or "",
+        })
+    return rows
+
+
 def paid_reservations_for_clubs(club_ids, year=None, month=None):
     start = end = None
     if year and month:
@@ -110,6 +147,7 @@ def paid_reservations_for_clubs(club_ids, year=None, month=None):
     return (
         _rows(Reservation, club_ids, start=start, end=end, kind_for=_lesson_kind)
         + _rows(EventReservation, club_ids, start=start, end=end, kind_for=_event_kind)
+        + _merch_rows(club_ids, start=start, end=end)
     )
 
 
