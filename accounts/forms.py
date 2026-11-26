@@ -156,6 +156,10 @@ class SaaSSignUpForm(forms.ModelForm):
         widget=forms.PasswordInput(attrs={'class': 'form-control'})
     )
 
+    def __init__(self, *args, english=False, **kwargs):
+        self.english = english
+        super().__init__(*args, **kwargs)
+
     class Meta:
         model = CustomUser
         fields = ("username", "email", "password")
@@ -164,14 +168,22 @@ class SaaSSignUpForm(forms.ModelForm):
         email = self.cleaned_data["email"].lower()
 
         if CustomUser.objects.filter(email=email).exists():
-            raise forms.ValidationError("このメールアドレスは既に登録されています。")
+            raise forms.ValidationError(
+                "That email is already registered."
+                if self.english
+                else "このメールアドレスは既に登録されています。"
+            )
 
         return email
 
     def clean_password(self):
         password = self.cleaned_data.get("password") or ""
         if len(password) < 8:
-            raise forms.ValidationError("パスワードは8文字以上にしてください。")
+            raise forms.ValidationError(
+                "Use at least 8 characters."
+                if self.english
+                else "パスワードは8文字以上にしてください。"
+            )
         return password
 
     def clean_username(self):

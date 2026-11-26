@@ -338,6 +338,16 @@ class Club(models.Model):
         default="default",
         help_text="Public page look. Default uses the standard layout.",
     )
+    LANGUAGE_CHOICES = [
+        ("ja", "日本語"),
+        ("en", "English"),
+    ]
+    language = models.CharField(
+        max_length=2,
+        choices=LANGUAGE_CHOICES,
+        default="ja",
+        help_text="Language of the public site, its messages, and its emails.",
+    )
 
     default_background_color = models.CharField(
         max_length=7,

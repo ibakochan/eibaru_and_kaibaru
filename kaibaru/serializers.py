@@ -3410,6 +3410,7 @@ class ClubSerializer(serializers.ModelSerializer):
             "ticket_types",
             "ticket_packages",
             "layout",
+            "language",
             "default_background_color",
         ]
         read_only_fields = [

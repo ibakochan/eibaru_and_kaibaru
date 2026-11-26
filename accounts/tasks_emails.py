@@ -9,7 +9,7 @@ from .models import CustomUser
 from .tokens import email_verification_token, password_reset_token
 
 @shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=60, retry_kwargs={"max_retries": 5})
-def send_verification_email(self, user_id):
+def send_verification_email(self, user_id, language="ja"):
     user = CustomUser.objects.get(id=user_id)
 
     uid = urlsafe_base64_encode(force_bytes(user.pk))
@@ -17,23 +17,36 @@ def send_verification_email(self, user_id):
 
     verification_url = f"https://kaibaru.jp/accounts/verify/{uid}/{token}/"
 
-    send_mail(
-        subject="【Kaibaru】メールアドレス確認のお願い",
-        message=(
+    if language == "en":
+        subject = "Confirm your email for Kaibaru"
+        message = (
+            f"Hi {user.username},\n\n"
+            f"Thanks for signing up.\n\n"
+            f"Open this link to turn the account on:\n\n"
+            f"{verification_url}\n\n"
+            f"The link stops working after a while.\n\n"
+            f"Kaibaru"
+        )
+    else:
+        subject = "【Kaibaru】メールアドレス確認のお願い"
+        message = (
             f"{user.username} 様\n\n"
             f"Kaibaru へご登録ありがとうございます。\n\n"
             f"以下のリンクをクリックしてアカウントを有効化してください。\n\n"
             f"{verification_url}\n\n"
             f"このリンクは一定時間で無効になります。\n\n"
             f"Kaibaru 運営チーム"
-        ),
+        )
+    send_mail(
+        subject=subject,
+        message=message,
         from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=[user.email],
     )
 
 
 @shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=60, retry_kwargs={"max_retries": 5})
-def send_password_reset_email(self, user_id):
+def send_password_reset_email(self, user_id, language="ja"):
     user = CustomUser.objects.get(id=user_id)
     if not user.email or not user.has_usable_password():
         return
@@ -41,10 +54,21 @@ def send_password_reset_email(self, user_id):
     uid = urlsafe_base64_encode(force_bytes(user.pk))
     token = password_reset_token.make_token(user)
     reset_url = f"https://kaibaru.jp/accounts/password/reset/{uid}/{token}/"
-
-    send_mail(
-        subject="【Kaibaru】パスワード再設定",
-        message=(
+    if language == "en":
+        reset_url = f"{reset_url}?lang=en"
+        subject = "Reset your Kaibaru password"
+        message = (
+            f"Hi {user.username},\n\n"
+            f"We got a request to reset your password.\n\n"
+            f"Open this page and choose a new one:\n\n"
+            f"{reset_url}\n\n"
+            f"The link lasts 3 days. It stops working once you change the password.\n"
+            f"If you didn't ask for this, ignore the email. Your password stays the same.\n\n"
+            f"Kaibaru"
+        )
+    else:
+        subject = "【Kaibaru】パスワード再設定"
+        message = (
             f"{user.username} 様\n\n"
             f"パスワード再設定のリクエストを受け付けました。\n\n"
             f"次のページを開き、新しいパスワードを入力してください。\n\n"
@@ -52,7 +76,10 @@ def send_password_reset_email(self, user_id):
             f"このリンクは3日で無効になります。パスワードを変更すると、このリンクは使えなくなります。\n"
             f"身に覚えがない場合は、このメールを無視してください。パスワードは変わりません。\n\n"
             f"Kaibaru 運営チーム"
-        ),
+        )
+    send_mail(
+        subject=subject,
+        message=message,
         from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=[user.email],
     )

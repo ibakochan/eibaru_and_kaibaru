@@ -184,11 +184,12 @@ class SaaSSignUpView(View):
                 status=400
             )
 
-        form = SaaSSignUpForm(data)
+        language = data.get("language") if data.get("language") in ("ja", "en") else "ja"
+        form = SaaSSignUpForm(data, english=language == "en")
 
         if form.is_valid():
             user = form.save()
-            send_verification_email.delay(user.id)
+            send_verification_email.delay(user.id, language)
 
             return JsonResponse(
                 {"detail": "Verification email sent."},
@@ -237,23 +238,64 @@ class PasswordResetRequestView(View):
         except json.JSONDecodeError:
             return JsonResponse({"detail": "無効なリクエストです。"}, status=400)
 
+        language = data.get("language") if data.get("language") in ("ja", "en") else "ja"
+        english = language == "en"
         email = (data.get("email") or "").strip().lower()
         if not email or "@" not in email:
             return JsonResponse(
-                {"detail": "メールアドレスを入力してください。"},
+                {"detail": "Enter an email address." if english else "メールアドレスを入力してください。"},
                 status=400,
             )
 
         user = CustomUser.objects.filter(email__iexact=email).first()
         if user and user.has_usable_password() and user.email:
-            send_password_reset_email.delay(user.id)
+            send_password_reset_email.delay(user.id, language)
 
         return JsonResponse({
             "detail": (
-                "ご入力のメールアドレスにアカウントがある場合、"
-                "パスワード再設定のご案内を送信しました。"
+                "If that email has an account, we sent a link to choose a new password."
+                if english
+                else (
+                    "ご入力のメールアドレスにアカウントがある場合、"
+                    "パスワード再設定のご案内を送信しました。"
+                )
             ),
         })
+
+
+def _password_reset_copy(request):
+    english = request.GET.get("lang") == "en" or request.POST.get("lang") == "en"
+    if english:
+        return {
+            "lang": "en",
+            "title_done": "Password changed",
+            "title_invalid": "This link has expired",
+            "title_form": "New password",
+            "heading_done": "Password changed",
+            "body_done": "Sign in on your club page with the new password. You can close this page.",
+            "heading_invalid": "This link can't be used",
+            "body_invalid": "It has expired, or the password was already changed. Send yourself a new email from the sign-in form.",
+            "heading_form": "New password",
+            "body_form": "Use at least 8 characters. Once you change it, the link in the email stops working.",
+            "label_password": "New password",
+            "label_confirm": "Type it again",
+            "submit_label": "Change password",
+        }
+    return {
+        "lang": "ja",
+        "title_done": "パスワードを変更しました",
+        "title_invalid": "リンクの有効期限が切れています",
+        "title_form": "新しいパスワード",
+        "heading_done": "パスワードを変更しました",
+        "body_done": "新しいパスワードで、クラブのページからログインしてください。このページは閉じて大丈夫です。",
+        "heading_invalid": "このリンクは使えません",
+        "body_invalid": "有効期限が切れているか、すでにパスワードを変更済みです。ログイン画面の「パスワードを忘れた方」から、もう一度メールを送ってください。",
+        "heading_form": "新しいパスワード",
+        "body_form": "8文字以上で入力してください。変更すると、メールのリンクは使えなくなります。",
+        "label_password": "新しいパスワード",
+        "label_confirm": "確認のためもう一度",
+        "submit_label": "パスワードを変更する",
+    }
 
 
 class PasswordResetConfirmView(View):
@@ -265,29 +307,34 @@ class PasswordResetConfirmView(View):
         return render(request, self.template_name, {
             "valid": valid,
             "done": False,
+            **_password_reset_copy(request),
         })
 
     def post(self, request, uidb64, token):
         user = _user_from_uid(uidb64)
+        copy = _password_reset_copy(request)
         if not user or not password_reset_token.check_token(user, token):
             return render(request, self.template_name, {
                 "valid": False,
                 "done": False,
+                **copy,
             })
 
         password = request.POST.get("password") or ""
         confirm = request.POST.get("confirm") or ""
         error = None
+        english = copy["lang"] == "en"
         if len(password) < 8:
-            error = "パスワードは8文字以上にしてください。"
+            error = "Use at least 8 characters." if english else "パスワードは8文字以上にしてください。"
         elif password != confirm:
-            error = "確認用のパスワードが一致しません。"
+            error = "The two passwords don't match." if english else "確認用のパスワードが一致しません。"
 
         if error:
             return render(request, self.template_name, {
                 "valid": True,
                 "done": False,
                 "error": error,
+                **copy,
             })
 
         user.set_password(password)
@@ -296,6 +343,7 @@ class PasswordResetConfirmView(View):
         return render(request, self.template_name, {
             "valid": True,
             "done": True,
+            **copy,
         })
 
 

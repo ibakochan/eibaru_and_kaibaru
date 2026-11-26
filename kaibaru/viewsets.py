@@ -6737,6 +6737,13 @@ class ClubViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["post"], url_path="create-trial")
     def create_trial(self, request):
         subdomain = request.data.get("subdomain")
+        language = str(request.data.get("language") or "ja").strip().lower()
+        if language not in {"ja", "en"}:
+            language = "ja"
+
+        def say(ja, en):
+            return en if language == "en" else ja
+
         accepted = request.data.get("terms_accepted")
         if accepted is not True and str(accepted or "").strip().lower() not in {
             "1",
@@ -6745,12 +6752,18 @@ class ClubViewSet(viewsets.ModelViewSet):
             "yes",
         }:
             return Response(
-                {"error": "利用規約への同意が必要です。"},
+                {"error": say(
+                    "利用規約への同意が必要です。",
+                    "You need to agree to the terms of use.",
+                )},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         if not request.user.is_authenticated:
-            return Response({"error": "ログインしてください。"}, status=status.HTTP_401_UNAUTHORIZED)
+            return Response(
+                {"error": say("ログインしてください。", "Sign in first.")},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
 
         unpaid = (
             Club.objects.filter(owner=request.user)
@@ -6763,10 +6776,12 @@ class ClubViewSet(viewsets.ModelViewSet):
             return Response(
                 {
                     "code": "unpaid_club",
-                    "error": (
+                    "error": say(
                         "サブスクリプション未加入のクラブがすでにあります。"
                         "まずはそちらを整えてください。"
-                        "クラブを増やしたい場合は、先にそのクラブでサブスクリプションに登録してください。"
+                        "クラブを増やしたい場合は、先にそのクラブでサブスクリプションに登録してください。",
+                        "You already have a club that is not on a subscription. "
+                        "Finish that one first. To add another club, subscribe on the existing one.",
                     ),
                     "subdomain": unpaid.subdomain,
                 },
@@ -6774,23 +6789,35 @@ class ClubViewSet(viewsets.ModelViewSet):
             )
 
         if not subdomain:
-            return Response({"error": "サブドメインは必須項目です。"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": say("サブドメインは必須項目です。", "The web address is required.")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         if not VALID_SUBDOMAIN_RE.match(subdomain):
             return Response(
-                {"error": "サブドメインは英数字とハイフンのみ使用可能です。"},
+                {"error": say(
+                    "サブドメインは英数字とハイフンのみ使用可能です。",
+                    "Use only letters, numbers, and hyphens.",
+                )},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         if subdomain.startswith("-") or subdomain.endswith("-"):
             return Response(
-                {"error": "サブドメインはハイフンで始めたり終えたりできません。"},
+                {"error": say(
+                    "サブドメインはハイフンで始めたり終えたりできません。",
+                    "Don't start or end the web address with a hyphen.",
+                )},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         if Club.objects.filter(subdomain=subdomain, is_deleted=False).exists():
             return Response(
-                {"error": "このサブドメインはすでに使用されています。"},
+                {"error": say(
+                    "このサブドメインはすでに使用されています。",
+                    "That web address is already taken.",
+                )},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -6798,7 +6825,10 @@ class ClubViewSet(viewsets.ModelViewSet):
 
         if subdomain.lower() in FORBIDDEN_SUBDOMAINS:
             return Response(
-                {"error": f"サブドメイン '{subdomain}' は使用できません。"},
+                {"error": say(
+                    f"サブドメイン '{subdomain}' は使用できません。",
+                    f"'{subdomain}' can't be used.",
+                )},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -6812,23 +6842,34 @@ class ClubViewSet(viewsets.ModelViewSet):
         if template:
             if not is_template_key(template):
                 return Response(
-                    {"error": "選択されたテンプレートは使用できません。"},
+                    {"error": say(
+                        "選択されたテンプレートは使用できません。",
+                        "That template can't be used.",
+                    )},
                     status=status.HTTP_400_BAD_REQUEST
                 )
             if not is_hero_choice(hero):
                 return Response(
-                    {"error": "ページの最初に置くものが正しくありません。"},
+                    {"error": say(
+                        "ページの最初に置くものが正しくありません。",
+                        "That choice for the top of the page isn't valid.",
+                    )},
                     status=status.HTTP_400_BAD_REQUEST
                 )
+            page = page_content_for_club(template, hero)
+            if language == "en":
+                from .layout_english import english_page
+                page = english_page(page)
             extra = {
                 "layout": template,
-                "page_content": page_content_for_club(template, hero),
+                "page_content": page,
             }
 
         club = Club.objects.create(
             subdomain=subdomain,
             owner=request.user,
             expiration_date=timezone.now(),
+            language=language,
             **extra,
         )
 

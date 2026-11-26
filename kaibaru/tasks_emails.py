@@ -561,14 +561,26 @@ def send_club_created_emails(self, club_id):
         recipient_list=[settings.SERVER_EMAIL],
     )
 
-    send_mail(
-        subject="【Kaibaru】クラブ作成が完了しました",
-        message=(
+    if club.language == "en":
+        owner_subject = "Your Kaibaru site is ready"
+        owner_message = (
+            f"Hi {owner.get_full_name()},\n\n"
+            f"Your site {club.subdomain} is ready.\n"
+            f"It is set to English, so anyone who visits it sees it in English too. "
+            f"You can switch it back to Japanese in Settings.\n\n"
+            f"Kaibaru"
+        )
+    else:
+        owner_subject = "【Kaibaru】クラブ作成が完了しました"
+        owner_message = (
             f"{owner.get_full_name()} 様\n\n"
             f"Kaibaru にご登録いただきありがとうございます。\n"
             f"クラブ「{club.subdomain}」が作成されました。\n\n"
             f"Kaibaru 運営チーム"
-        ),
+        )
+    send_mail(
+        subject=owner_subject,
+        message=owner_message,
         from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=[owner.email],
     )
@@ -1387,11 +1399,12 @@ def send_visitor_reservation_confirmation_email(
 
     club = reservation.club
     lesson = reservation.lesson
+    english = club.language == "en"
 
     club_name = (
         club.title
         or club.subdomain
-        or "クラブ"
+        or ("the club" if english else "クラブ")
     )
 
     recipient_name = (
@@ -1399,24 +1412,26 @@ def send_visitor_reservation_confirmation_email(
         or reservation.email
     )
 
-    weekday_names = [
-        "月曜日",
-        "火曜日",
-        "水曜日",
-        "木曜日",
-        "金曜日",
-        "土曜日",
-        "日曜日",
-    ]
+    weekday_names = (
+        ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        if english
+        else [
+            "月曜日",
+            "火曜日",
+            "水曜日",
+            "木曜日",
+            "金曜日",
+            "土曜日",
+            "日曜日",
+        ]
+    )
 
     weekday = weekday_names[
         reservation.reservation_date.weekday()
     ]
 
     reservation_date = (
-        reservation.reservation_date.strftime(
-            "%Y年%m月%d日"
-        )
+        reservation.reservation_date.strftime("%B %d, %Y" if english else "%Y年%m月%d日")
     )
 
     start_time = reservation.lesson.start_time.strftime(
@@ -1437,75 +1452,126 @@ def send_visitor_reservation_confirmation_email(
         == Reservation.ReservationType.TRIAL
     )
 
-    if is_free and is_trial:
-        subject = f"【{club_name}】体験予約確定のお知らせ"
-        intro = (
-            f"{club_name}の体験予約ありがとうございます。\n"
-            f"体験予約が確定しました。\n\n"
-        )
-        payment_section = (
-            "■ 料金\n"
-            "無料\n\n"
-        )
-    elif is_free:
-        subject = f"【{club_name}】ご予約確定のお知らせ"
-        intro = (
-            f"{club_name}へのご予約ありがとうございます。\n"
-            f"ご予約が確定しました。\n\n"
-        )
-        payment_section = (
-            "■ 料金\n"
-            "無料\n\n"
-        )
-    elif reservation.payment_method == "ticket":
-        subject = f"【{club_name}】ご予約確定のお知らせ"
-        intro = (
-            f"{club_name}へのご予約ありがとうございます。\n"
-            f"チケットを使用して、ご予約が確定しました。\n\n"
-        )
-        payment_section = (
-            "■ お支払い\n"
-            "チケットを1枚使用\n\n"
+    if english:
+        if is_free and is_trial:
+            subject = f"{club_name}: your intro class is booked"
+            intro = (
+                f"Thanks for booking an intro class at {club_name}.\n"
+                f"You're booked in.\n\n"
+            )
+            payment_section = "Fee\nFree\n\n"
+        elif is_free:
+            subject = f"{club_name}: your booking is confirmed"
+            intro = (
+                f"Thanks for booking at {club_name}.\n"
+                f"Your booking is confirmed.\n\n"
+            )
+            payment_section = "Fee\nFree\n\n"
+        elif reservation.payment_method == "ticket":
+            subject = f"{club_name}: your booking is confirmed"
+            intro = (
+                f"Thanks for booking at {club_name}.\n"
+                f"Your booking is confirmed, and one class credit was used.\n\n"
+            )
+            payment_section = "Payment\n1 class credit\n\n"
+        else:
+            subject = f"{club_name}: booking and payment confirmed"
+            intro = (
+                f"Thanks for booking at {club_name}.\n"
+                f"Your payment went through and the booking is confirmed.\n\n"
+            )
+            payment_section = (
+                f"Payment\n"
+                f"Amount: {amount_text}\n"
+                f"Card\n\n"
+            )
+        message = (
+            f"Hi {recipient_name},\n\n"
+            f"{intro}"
+            f"Booking\n"
+            f"Class: {lesson.title}\n"
+            f"Date: {reservation_date} ({weekday})\n"
+            f"Time: {start_time}–{end_time}\n\n"
+            f"{payment_section}"
+            f"Booking number\n"
+            f"{reservation.id}\n\n"
+            f"Cancel:\n"
+            f"{_cancel_link(club, 'lesson', reservation.id)}\n"
+            f"{_cancel_notice(reservation, language='en')}\n\n"
+            f"See you there.\n"
+            f"If you have a question about this booking, contact {club_name}.\n\n"
+            f"{club_name}"
         )
     else:
-        subject = (
-            f"【{club_name}】ご予約・お支払い完了のお知らせ"
+        if is_free and is_trial:
+            subject = f"【{club_name}】体験予約確定のお知らせ"
+            intro = (
+                f"{club_name}の体験予約ありがとうございます。\n"
+                f"体験予約が確定しました。\n\n"
+            )
+            payment_section = (
+                "■ 料金\n"
+                "無料\n\n"
+            )
+        elif is_free:
+            subject = f"【{club_name}】ご予約確定のお知らせ"
+            intro = (
+                f"{club_name}へのご予約ありがとうございます。\n"
+                f"ご予約が確定しました。\n\n"
+            )
+            payment_section = (
+                "■ 料金\n"
+                "無料\n\n"
+            )
+        elif reservation.payment_method == "ticket":
+            subject = f"【{club_name}】ご予約確定のお知らせ"
+            intro = (
+                f"{club_name}へのご予約ありがとうございます。\n"
+                f"チケットを使用して、ご予約が確定しました。\n\n"
+            )
+            payment_section = (
+                "■ お支払い\n"
+                "チケットを1枚使用\n\n"
+            )
+        else:
+            subject = (
+                f"【{club_name}】ご予約・お支払い完了のお知らせ"
+            )
+            intro = (
+                f"{club_name}へのご予約ありがとうございます。\n"
+                f"お支払いが完了し、ご予約が確定しました。\n\n"
+            )
+            payment_section = (
+                f"■ お支払い\n"
+                f"金額：{amount_text}\n"
+                f"お支払い方法：クレジットカード\n\n"
+            )
+
+        message = (
+            f"{recipient_name} 様\n\n"
+
+            f"{intro}"
+
+            f"■ ご予約内容\n"
+            f"レッスン：{lesson.title}\n"
+            f"日時：{reservation_date}（{weekday}）\n"
+            f"時間：{start_time}〜{end_time}\n\n"
+
+            f"{payment_section}"
+
+            f"■ ご予約番号\n"
+            f"{reservation.id}\n\n"
+
+            f"予約のキャンセル：\n"
+            f"{_cancel_link(club, 'lesson', reservation.id)}\n"
+            f"{_cancel_notice(reservation)}\n\n"
+
+            f"当日はお気をつけてお越しください。\n"
+            f"ご予約内容についてご不明な点がございましたら、"
+            f"{club_name}までお問い合わせください。\n\n"
+
+            f"{club_name}"
         )
-        intro = (
-            f"{club_name}へのご予約ありがとうございます。\n"
-            f"お支払いが完了し、ご予約が確定しました。\n\n"
-        )
-        payment_section = (
-            f"■ お支払い\n"
-            f"金額：{amount_text}\n"
-            f"お支払い方法：クレジットカード\n\n"
-        )
-
-    message = (
-        f"{recipient_name} 様\n\n"
-
-        f"{intro}"
-
-        f"■ ご予約内容\n"
-        f"レッスン：{lesson.title}\n"
-        f"日時：{reservation_date}（{weekday}）\n"
-        f"時間：{start_time}〜{end_time}\n\n"
-
-        f"{payment_section}"
-
-        f"■ ご予約番号\n"
-        f"{reservation.id}\n\n"
-
-        f"予約のキャンセル：\n"
-        f"{_cancel_link(club, 'lesson', reservation.id)}\n"
-        f"{_cancel_notice(reservation)}\n\n"
-
-        f"当日はお気をつけてお越しください。\n"
-        f"ご予約内容についてご不明な点がございましたら、"
-        f"{club_name}までお問い合わせください。\n\n"
-
-        f"{club_name}"
-    )
 
     headers = {}
 
@@ -1612,25 +1678,68 @@ def send_reservation_start_email(self, start_token):
         f"start_reservation/{start_token}/"
     )
 
-    subject = f"【{club_name}】{kind}手続きのご案内"
-    message = (
-        f"{greeting} 様\n\n"
-        f"{club_name}の{kind}をお申し込みいただきありがとうございます。\n"
-        f"まだ予約は確定していません。\n"
-        f"以下のリンクを開き、手続きを完了してください。\n\n"
-        f"■ お申し込み内容\n"
-        f"レッスン：{lesson.title}\n"
-        f"日時：{reservation_date}（{weekday}）\n"
-        f"時間：{start_time}〜{end_time}\n"
-        f"予約者：\n"
-        f"{people_text}\n\n"
-        f"料金：{price_text}\n\n"
-        f"手続きを続ける：\n"
-        f"{link}\n\n"
-        f"このリンクの有効期限は{START_LINK_HOURS}時間です。\n"
-        f"リンクを開いて手続きを始めるまで、レッスンの枠は確保されません。\n\n"
-        f"{club_name}"
-    )
+    if club.language == "en":
+        weekday_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        weekday = weekday_names[reservation.reservation_date.weekday()]
+        reservation_date = reservation.reservation_date.strftime("%B %d, %Y")
+        people = []
+        for person in reservations:
+            if person.age is None:
+                people.append(f"- {person.full_name}")
+            else:
+                people.append(f"- {person.full_name} (age {person.age})")
+        people_text = "\n".join(people)
+        if total == 0:
+            price_text = "Free"
+        elif len(reservations) == 1:
+            price_text = f"¥{total:,}"
+        else:
+            price_text = f"¥{total:,} ({len(reservations)} people)"
+        greeting = reservation.full_name if len(reservations) == 1 else "there"
+        kind_en = (
+            "intro class"
+            if reservation.reservation_type == Reservation.ReservationType.TRIAL
+            else "visit"
+        )
+        subject = f"{club_name}: finish your {kind_en} booking"
+        message = (
+            f"Hi {greeting},\n\n"
+            f"Thanks for requesting a {kind_en} at {club_name}.\n"
+            f"It is not booked yet.\n"
+            f"Open the link below to finish.\n\n"
+            f"Request\n"
+            f"Class: {lesson.title}\n"
+            f"Date: {reservation_date} ({weekday})\n"
+            f"Time: {start_time}–{end_time}\n"
+            f"Who is coming:\n"
+            f"{people_text}\n\n"
+            f"Fee: {price_text}\n\n"
+            f"Continue:\n"
+            f"{link}\n\n"
+            f"This link lasts {START_LINK_HOURS} hours.\n"
+            f"The spot is not held until you open the link and start.\n\n"
+            f"{club_name}"
+        )
+    else:
+        subject = f"【{club_name}】{kind}手続きのご案内"
+        message = (
+            f"{greeting} 様\n\n"
+            f"{club_name}の{kind}をお申し込みいただきありがとうございます。\n"
+            f"まだ予約は確定していません。\n"
+            f"以下のリンクを開き、手続きを完了してください。\n\n"
+            f"■ お申し込み内容\n"
+            f"レッスン：{lesson.title}\n"
+            f"日時：{reservation_date}（{weekday}）\n"
+            f"時間：{start_time}〜{end_time}\n"
+            f"予約者：\n"
+            f"{people_text}\n\n"
+            f"料金：{price_text}\n\n"
+            f"手続きを続ける：\n"
+            f"{link}\n\n"
+            f"このリンクの有効期限は{START_LINK_HOURS}時間です。\n"
+            f"リンクを開いて手続きを始めるまで、レッスンの枠は確保されません。\n\n"
+            f"{club_name}"
+        )
 
     reply_to = None
     if (
@@ -1883,7 +1992,13 @@ def _restore_link(club, kind, reservation_id):
     return restore_url(club, kind, reservation_id)
 
 
-def _cancel_notice(reservation):
+def _cancel_notice(reservation, language="ja"):
+    if language == "en":
+        if getattr(reservation, "payment_method", "") == "ticket":
+            return "Cancelling here does not put the class credit back."
+        if reservation.amount > 0:
+            return "Cancelling a paid booking here does not refund it."
+        return "You can cancel a free booking from here too."
     if getattr(reservation, "payment_method", "") == "ticket":
         return (
             "こちらからキャンセルしても、使用したチケットは戻りません。"
