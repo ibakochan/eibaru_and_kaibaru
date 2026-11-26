@@ -51,6 +51,7 @@ from .layout_templates import (
     apply_hero,
     clean_sticky_nav,
     is_hero_choice,
+    english_template_path,
     is_template_key,
     load_page_content,
     merge_carried_sections,
@@ -6856,8 +6857,8 @@ class ClubViewSet(viewsets.ModelViewSet):
                     )},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            page = page_content_for_club(template, hero)
-            if language == "en":
+            page = page_content_for_club(template, hero, language)
+            if language == "en" and english_template_path(template) is None:
                 from .layout_english import english_page
                 page = english_page(page)
             extra = {
@@ -6898,7 +6899,10 @@ class ClubViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        template_page = apply_hero(load_page_content(template), hero)
+        template_page = apply_hero(
+            load_page_content(template, getattr(club, "language", None) or "ja"),
+            hero,
+        )
         new_schedule_ids = section_ids_of_type(template_page, "schedule")
         old_schedule_ids = section_ids_of_type(club.page_content, "schedule")
         merged_page, event_section_remap = merge_carried_sections(

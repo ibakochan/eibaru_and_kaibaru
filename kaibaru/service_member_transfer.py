@@ -9,17 +9,22 @@ from django.utils import timezone
 
 from accounts.models import CustomUser
 
+from .club_language import is_english, pick
 from .models import Member, MemberTransfer, Subscription
 
 logger = logging.getLogger(__name__)
 
 
-def _plan_name(item):
-    return item.plan.visible_name() if item.plan_id else "プラン"
+def _plan_name(item, language="ja"):
+    if item.plan_id:
+        return item.plan.visible_name()
+    return "Plan" if language == "en" else "プラン"
 
 
-def _local_date(value):
+def _local_date(value, language="ja"):
     local = timezone.localtime(value)
+    if language == "en":
+        return f"{local.strftime('%B')} {local.day}, {local.year}"
     return f"{local.year}年{local.month}月{local.day}日"
 
 
@@ -39,13 +44,20 @@ def _live_plan_items(member):
     )
 
 
-def _plan_lines(items):
+def _plan_lines(items, language="ja"):
     lines = []
     for item in items:
         if item.deleted_at and item.access_until:
-            lines.append(
-                f"・{_plan_name(item)}（{_local_date(item.access_until)}まで）"
-            )
+            if language == "en":
+                lines.append(
+                    f"· {_plan_name(item, language)} (until {_local_date(item.access_until, language)})"
+                )
+            else:
+                lines.append(
+                    f"・{_plan_name(item)}（{_local_date(item.access_until)}まで）"
+                )
+        elif language == "en":
+            lines.append(f"· {_plan_name(item, language)}")
         else:
             lines.append(f"・{_plan_name(item)}")
     return lines
@@ -65,8 +77,16 @@ def transfer_block_detail(member, to_user):
     if not items:
         return None
 
-    lines = "\n".join(_plan_lines(items))
+    english = is_english(member.club)
+    lines = "\n".join(_plan_lines(items, "en" if english else "ja"))
     if any(_is_stripe_subscription(item.subscription) for item in items):
+        if english:
+            return (
+                "This member still has a plan.\n"
+                "A member with a plan can't be moved off a card-billing account.\n"
+                "Cancel the plan first.\n"
+                + lines
+            )
         return (
             "この会員にはプランが残っています。\n"
             "クレジットカード決済のアカウントからは、プラン付きで移せません。\n"
@@ -79,6 +99,12 @@ def transfer_block_detail(member, to_user):
         club_id=member.club_id,
     ).first()
     if _is_stripe_subscription(destination):
+        if english:
+            return (
+                "The account that would receive this member pays by card.\n"
+                "A member who still has a plan can move only when neither account pays by card.\n"
+                + lines
+            )
         return (
             "受け取るアカウントはクレジットカード決済です。\n"
             "プランが残っている会員を移せるのは、移す側と受け取る側の両方が"
@@ -95,32 +121,32 @@ def member_plans_will_move(member):
 
 def request_member_transfer(*, member, requester, email):
     if member.club_id is None or member.owner_id != requester.id:
-        return {"ok": False, "status": 403, "detail": "許可なし"}
+        return {"ok": False, "status": 403, "detail": pick(member.club, "許可なし", "You don't have permission to do that.")}
 
     if member.user_id is not None:
         return {
             "ok": False,
             "status": 400,
-            "detail": "アカウントに紐づいている会員は移せません。",
+            "detail": pick(member.club, "アカウントに紐づいている会員は移せません。", "A member who already has their own login can't be moved."),
         }
 
     cleaned = (email or "").strip()
     if not cleaned:
-        return {"ok": False, "status": 400, "detail": "メールアドレスを入力してください。"}
+        return {"ok": False, "status": 400, "detail": pick(member.club, "メールアドレスを入力してください。", "Enter an email address.")}
 
     to_user = CustomUser.objects.filter(email__iexact=cleaned).first()
     if to_user is None:
         return {
             "ok": False,
             "status": 400,
-            "detail": "このメールアドレスのアカウントが見つかりません。",
+            "detail": pick(member.club, "このメールアドレスのアカウントが見つかりません。", "No account uses that email address."),
         }
 
     if to_user.id == requester.id:
         return {
             "ok": False,
             "status": 400,
-            "detail": "自分のアカウントには移せません。",
+            "detail": pick(member.club, "自分のアカウントには移せません。", "You can't move a member to your own account."),
         }
 
     blocked = transfer_block_detail(member, to_user)
@@ -149,9 +175,9 @@ def request_member_transfer(*, member, requester, email):
         return {
             "ok": False,
             "status": 400,
-            "detail": "メールを送信できませんでした。しばらくしてから再度お試しください。",
+            "detail": pick(member.club, "メールを送信できませんでした。しばらくしてから再度お試しください。", "The email could not be sent. Try again in a little while."),
         }
-    return {"ok": True, "status": 200, "detail": "移管の依頼を送信しました。"}
+    return {"ok": True, "status": 200, "detail": pick(member.club, "移管の依頼を送信しました。", "The transfer request was sent.")}
 
 
 def _send_transfer_email(transfer):
@@ -163,23 +189,37 @@ def _send_transfer_email(transfer):
         f"https://{club.subdomain}.kaibaru.jp/"
         f"accept_member_transfer/{transfer.token}/"
     )
+    english = is_english(club)
     if member_plans_will_move(member):
         plan_note = (
+            "Accepting moves this member and the plans they still have onto your account. Nothing is billed for the move."
+            if english else
             "受け入れると、この会員と残っているプランがあなたのアカウントに移ります。"
             "今の請求は発生しません。"
         )
     else:
         plan_note = (
+            "Their plan does not come with them. If they should stay on a plan, add one after you accept."
+            if english else
             "プランは引き継がれません。続ける場合は、受け入れたあと改めて加入してください。"
         )
-    subject = f"【{club_name}】会員をあなたのアカウントへ移す依頼"
-    message = (
-        f"{requester_name}さんから、{club_name}の会員"
-        f"「{member.full_name}」をあなたのアカウントへ移す依頼が届きました。\n\n"
-        "受け入れると、この会員はあなたのアカウントに加わります。\n"
-        f"{plan_note}\n\n"
-        f"受け入れる：\n{link}\n"
-    )
+    if english:
+        subject = f"[{club_name}] Move a member to your account"
+        message = (
+            f"{requester_name} asked to move {member.full_name} at {club_name} onto your account.\n\n"
+            "If you accept, this member is added to your account.\n"
+            f"{plan_note}\n\n"
+            f"Accept:\n{link}\n"
+        )
+    else:
+        subject = f"【{club_name}】会員をあなたのアカウントへ移す依頼"
+        message = (
+            f"{requester_name}さんから、{club_name}の会員"
+            f"「{member.full_name}」をあなたのアカウントへ移す依頼が届きました。\n\n"
+            "受け入れると、この会員はあなたのアカウントに加わります。\n"
+            f"{plan_note}\n\n"
+            f"受け入れる：\n{link}\n"
+        )
     EmailMessage(
         subject=subject,
         body=message,
@@ -200,16 +240,28 @@ def accept_member_transfer(*, token, user):
         if transfer is None:
             return {"ok": False, "mode": "invalid", "message": "この依頼は見つかりません。"}
 
+        club = transfer.member.club
         if transfer.status != MemberTransfer.Status.PENDING:
-            return {"ok": False, "mode": "invalid", "message": "この依頼はすでに完了しているか、取り消されています。"}
+            return {
+                "ok": False,
+                "mode": "invalid",
+                "message": pick(
+                    club,
+                    "この依頼はすでに完了しているか、取り消されています。",
+                    "This request is already finished or has been cancelled.",
+                ),
+                "transfer": transfer,
+            }
 
         if not user.is_authenticated or user.id != transfer.to_user_id:
             return {
                 "ok": False,
                 "mode": "wrong_user",
-                "message": (
+                "message": pick(
+                    club,
                     "この依頼は別のアカウント宛です。"
-                    f"{transfer.to_user.email} でログインしてください。"
+                    f"{transfer.to_user.email} でログインしてください。",
+                    f"This request was sent to a different account. Log in as {transfer.to_user.email}.",
                 ),
                 "transfer": transfer,
             }
@@ -221,7 +273,7 @@ def accept_member_transfer(*, token, user):
             return {
                 "ok": False,
                 "mode": "invalid",
-                "message": "この会員はもう移せません。",
+                "message": pick(member.club, "この会員はもう移せません。", "This member can't be moved anymore."),
             }
 
         blocked = transfer_block_detail(member, user)
@@ -249,7 +301,11 @@ def accept_member_transfer(*, token, user):
             return {
                 "ok": False,
                 "mode": "blocked",
-                "message": "同じ名前と生年月日の会員が、すでにあなたのアカウントにいます。",
+                "message": pick(
+                    member.club,
+                    "同じ名前と生年月日の会員が、すでにあなたのアカウントにいます。",
+                    "Your account already has a member with the same name and date of birth.",
+                ),
                 "transfer": transfer,
             }
 
@@ -260,7 +316,11 @@ def accept_member_transfer(*, token, user):
             except (IntegrityError, TransferMoveError) as exc:
                 transaction.set_rollback(True)
                 if isinstance(exc, IntegrityError):
-                    message = "受け取るアカウントに、同じ会員の同じプランがすでにあります。"
+                    message = pick(
+                        member.club,
+                        "受け取るアカウントに、同じ会員の同じプランがすでにあります。",
+                        "The receiving account already has this member on that plan.",
+                    )
                 else:
                     message = exc.message
                 return {
@@ -280,14 +340,18 @@ def accept_member_transfer(*, token, user):
         ).exclude(pk=transfer.pk).update(status=MemberTransfer.Status.CANCELED)
 
         if plans_move:
-            success = (
+            success = pick(
+                member.club,
                 f"{member.full_name}さんをあなたのアカウントに移しました。"
-                "残っているプランも一緒に移しています。"
+                "残っているプランも一緒に移しています。",
+                f"{member.full_name} is now on your account, including the plans they still had.",
             )
         else:
-            success = (
+            success = pick(
+                member.club,
                 f"{member.full_name}さんをあなたのアカウントに移しました。"
-                "プランは引き継がれていないので、続ける場合は改めて加入してください。"
+                "プランは引き継がれていないので、続ける場合は改めて加入してください。",
+                f"{member.full_name} is now on your account. Their plan did not come with them, so add one if they should stay enrolled.",
             )
         return {
             "ok": True,
@@ -317,9 +381,15 @@ def _move_live_plans(member, to_user):
     )
     if _is_stripe_subscription(source):
         raise TransferMoveError(
-            "この会員にはプランが残っています。\n"
-            "クレジットカード決済のアカウントからは、プラン付きで移せません。\n"
-            "先にプランを解約してください。"
+            pick(
+                member.club,
+                "この会員にはプランが残っています。\n"
+                "クレジットカード決済のアカウントからは、プラン付きで移せません。\n"
+                "先にプランを解約してください。",
+                "This member still has a plan.\n"
+                "A member with a plan can't be moved off a card-billing account.\n"
+                "Cancel the plan first.",
+            )
         )
 
     billing_method = (
@@ -345,9 +415,14 @@ def _move_live_plans(member, to_user):
         destination = Subscription.objects.select_for_update().get(pk=destination.pk)
         if _is_stripe_subscription(destination):
             raise TransferMoveError(
-                "受け取るアカウントはクレジットカード決済です。\n"
-                "プランが残っている会員を移せるのは、移す側と受け取る側の両方が"
-                "クレジットカード決済ではないときだけです。"
+                pick(
+                    member.club,
+                    "受け取るアカウントはクレジットカード決済です。\n"
+                    "プランが残っている会員を移せるのは、移す側と受け取る側の両方が"
+                    "クレジットカード決済ではないときだけです。",
+                    "The account that would receive this member pays by card.\n"
+                    "A member who still has a plan can move only when neither account pays by card.",
+                )
             )
         if destination.status not in ("active", "trialing", "past_due", "pending"):
             destination.status = "active"

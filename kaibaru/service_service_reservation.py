@@ -800,28 +800,43 @@ def _load_start(token):
 
 
 def _start_page(reservation):
+    from .club_language import is_english
+
     club = reservation.club
     course = reservation.course
+    english = is_english(club)
     is_free = (reservation.amount or 0) == 0
     is_cash = not is_free and reservation.payment_method == "cash"
-    weekday = WEEKDAY_NAMES[reservation.reservation_date.weekday()]
-    date_text = reservation.reservation_date.strftime("%Y年%m月%d日")
     start_text = reservation.start_time.strftime("%H:%M")
     end_text = reservation.end_time.strftime("%H:%M")
     course_name = (
-        course.name if course is not None else (reservation.price_name or "コース")
+        course.name if course is not None else (reservation.price_name or ("Course" if english else "コース"))
     )
+    if english:
+        weekday = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][
+            reservation.reservation_date.weekday()
+        ]
+        day = reservation.reservation_date
+        date_text = f"{day.strftime('%B')} {day.day}, {day.year}"
+        when_text = f"{date_text} ({weekday}) {start_text}–{end_text}"
+    else:
+        weekday = WEEKDAY_NAMES[reservation.reservation_date.weekday()]
+        date_text = reservation.reservation_date.strftime("%Y年%m月%d日")
+        when_text = f"{date_text}（{weekday}） {start_text}〜{end_text}"
     return {
-        "club_name": club.title or club.subdomain or "サロン",
+        "english": english,
+        "club_name": club.title or club.subdomain or ("the studio" if english else "サロン"),
         "course_name": course_name,
-        "when_text": f"{date_text}（{weekday}） {start_text}〜{end_text}",
+        "when_text": when_text,
         "person_name": reservation.full_name,
         "total_amount": reservation.amount,
         "is_free": is_free,
         "is_cash": is_cash,
         "home_url": f"https://{club.subdomain}.kaibaru.jp/",
         "continue_label": (
-            "予約を確定する" if is_free or is_cash else "支払いへ進む"
+            ("Confirm booking" if is_free or is_cash else "Continue to payment")
+            if english
+            else ("予約を確定する" if is_free or is_cash else "支払いへ進む")
         ),
     }
 

@@ -10,12 +10,32 @@ from django.db import transaction
  
 from datetime import datetime, timedelta
 
-def format_date(dt):
+def format_date(dt, language="ja"):
     if not dt:
         return "---"
     if isinstance(dt, str):
         dt = datetime.fromisoformat(dt)
+    if language == "en":
+        return f"{dt.strftime('%B')} {dt.day}, {dt.year}"
     return dt.strftime("%Y年%m月%d日")
+
+
+def club_is_english(club):
+    return getattr(club, "language", "ja") == "en"
+
+
+def account_is_english(user):
+    """Platform mail is for the account, not one club.
+
+    English only when every club on the account is English, so a
+    Japanese club never starts receiving English platform mail.
+    """
+    if user is None:
+        return False
+    languages = set(
+        Club.objects.filter(owner=user, is_deleted=False).values_list("language", flat=True)
+    )
+    return bool(languages) and languages == {"en"}
 
 
 @shared_task(
@@ -67,7 +87,8 @@ def send_invoice_created_email(self, invoice_id):
 
     club = invoice.subscription.club if invoice.subscription else invoice.club
 
-    club_name = club.subdomain or "クラブ"
+    english = club_is_english(club)
+    club_name = club.subdomain or ("the club" if english else "クラブ")
 
     # ---------------------------------------------------------
     # Recipient name
@@ -119,7 +140,7 @@ def send_invoice_created_email(self, invoice_id):
         if item.member:
             member_name = item.member.full_name
         else:
-            member_name = "ご利用料金"
+            member_name = "Charge" if english else "ご利用料金"
 
         item_texts.append(
             f"{member_name} - {item.description} ¥{item.amount:,}"
@@ -128,16 +149,31 @@ def send_invoice_created_email(self, invoice_id):
     item_text = (
         "\n".join(item_texts)
         if item_texts
-        else "ご利用料金"
+        else ("Charge" if english else "ご利用料金")
     )
 
     # ---------------------------------------------------------
     # Email
     # ---------------------------------------------------------
 
-    send_mail(
-        subject=f"【{club_name}】お支払いについてのお知らせ",
-        message=(
+    if english:
+        subject = f"[{club_name}] Payment due"
+        message = (
+            f"Hi {recipient_name},\n\n"
+            f"{club_name} has a payment due.\n\n"
+            f"What it's for\n"
+            f"{item_text}\n\n"
+            f"Amount due\n"
+            f"¥{invoice.amount_due:,}\n\n"
+            f"Due\n"
+            f"{format_date(invoice.due_date, 'en')}\n\n"
+            f"This period is not extended until the payment is received.\n\n"
+            f"Questions about how to pay go to {club_name}.\n\n"
+            f"{club_name}"
+        )
+    else:
+        subject = f"【{club_name}】お支払いについてのお知らせ"
+        message = (
             f"{recipient_name} 様\n\n"
             f"{club_name}より、今月のお支払いについてご案内いたします。\n\n"
 
@@ -157,7 +193,10 @@ def send_invoice_created_email(self, invoice_id):
             f"{club_name}までお問い合わせください。\n\n"
 
             f"{club_name}"
-        ),
+        )
+    send_mail(
+        subject=subject,
+        message=message,
         from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=[owner_email],
     )
@@ -186,20 +225,32 @@ def send_plan_deletion_emails(self, owner_map):
         members = data["members"]
         plans = data["plans"]
         access_until = data["access_until"]
+        english = data.get("language") == "en"
 
-        member_text = "、".join(members)
-        plan_text = "、".join(plans)
+        member_text = (", " if english else "、").join(members)
+        plan_text = (", " if english else "、").join(plans)
 
-        message = (
-            f"{owner.get_full_name() or owner.email} 様\n\n"
-            f"ご利用中のプラン「{plan_text}」が削除スケジュールに入りました。\n\n"
-            f"■ 対象メンバー\n"
-            f"{member_text}\n\n"
-            f"■ ご利用可能期限\n"
-            f"{format_date(access_until)} まで\n\n"
-            f"この日付までは引き続きご利用いただけます。\n\n"
-            f"削除スケジュールはログイン後にプラン変更へ切り替えることが可能です。\n\n"
-        )
+        if english:
+            message = (
+                f"Hi {owner.get_full_name() or owner.email},\n\n"
+                f"The plan \"{plan_text}\" is now scheduled to end.\n\n"
+                f"Members\n"
+                f"{member_text}\n\n"
+                f"You can keep using it until\n"
+                f"{format_date(access_until, 'en')}\n\n"
+                f"After you log in, you can switch this scheduled removal to a plan change.\n\n"
+            )
+        else:
+            message = (
+                f"{owner.get_full_name() or owner.email} 様\n\n"
+                f"ご利用中のプラン「{plan_text}」が削除スケジュールに入りました。\n\n"
+                f"■ 対象メンバー\n"
+                f"{member_text}\n\n"
+                f"■ ご利用可能期限\n"
+                f"{format_date(access_until)} まで\n\n"
+                f"この日付までは引き続きご利用いただけます。\n\n"
+                f"削除スケジュールはログイン後にプラン変更へ切り替えることが可能です。\n\n"
+            )
 
         has_active = SubscriptionItem.objects.filter(
             member__owner_id=owner.id,
@@ -207,15 +258,22 @@ def send_plan_deletion_emails(self, owner_map):
         ).exists()
 
         if not has_active:
-            message += (
-                "\n現在すべてのご契約プランが削除予約状態となっています。\n"
-                "次回の請求サイクルまでにいずれかのメンバーに対して新しいプラン設定が行われない場合、\n"
-                "サブスクリプションは停止されます。\n"
-                "継続をご希望の場合は、ログインの上、プラン変更を行ってください。\n"
-            )
+            if english:
+                message += (
+                    "\nEvery plan on this account is now scheduled to end.\n"
+                    "If nobody is put on a new plan before the next billing cycle, the subscription stops.\n"
+                    "Log in and change the plan if you want to keep going.\n"
+                )
+            else:
+                message += (
+                    "\n現在すべてのご契約プランが削除予約状態となっています。\n"
+                    "次回の請求サイクルまでにいずれかのメンバーに対して新しいプラン設定が行われない場合、\n"
+                    "サブスクリプションは停止されます。\n"
+                    "継続をご希望の場合は、ログインの上、プラン変更を行ってください。\n"
+                )
 
         send_mail(
-            subject="【Kaibaru】プラン削除スケジュールのお知らせ",
+            subject="[Kaibaru] A plan is scheduled to end" if english else "【Kaibaru】プラン削除スケジュールのお知らせ",
             message=message,
             from_email=settings.DEFAULT_FROM_EMAIL,
             recipient_list=[owner.email],
@@ -226,18 +284,30 @@ def send_plan_deletion_emails(self, owner_map):
 def send_invoice_paid_email(self, member_id, amount, items, period_end, plan_name):
     from .models import Member  # import inside to avoid circular imports
 
-    member = Member.objects.select_related("owner").filter(id=member_id).first()
+    member = Member.objects.select_related("owner", "club").filter(id=member_id).first()
     if not member:
         return
 
     owner_email = member.owner.email
     owner_name = member.owner.get_full_name() or member.owner.email
+    english = club_is_english(member.club)
 
-    item_text = "、".join(items) if items else "お支払い"
+    item_text = (", " if english else "、").join(items) if items else ("Payment" if english else "お支払い")
 
-    send_mail(
-        subject="【Kaibaru】お支払いが完了しました",
-        message=(
+    if english:
+        subject = "[Kaibaru] Payment received"
+        message = (
+            f"Hi {owner_name},\n\n"
+            f"This payment has gone through.\n\n"
+            f"Plan: {plan_name}\n"
+            f"Details: {item_text}\n"
+            f"Amount: ¥{amount}\n"
+            f"Access until: {format_date(period_end, 'en')}\n\n"
+            f"Each payment extends this plan by one month.\n"
+        )
+    else:
+        subject = "【Kaibaru】お支払いが完了しました"
+        message = (
             f"{owner_name} 様\n\n"
             f"以下のお支払いが完了しました。\n\n"
             f"プラン: {plan_name}\n"
@@ -246,7 +316,10 @@ def send_invoice_paid_email(self, member_id, amount, items, period_end, plan_nam
             f"ご利用可能期限: {format_date(period_end)}\n\n"
             f"本プランはお支払いごとに1ヶ月分ずつご利用期間が延長されます。\n"
             f"今後ともよろしくお願いいたします。\n"
-        ),
+        )
+    send_mail(
+        subject=subject,
+        message=message,
         from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=[owner_email],
     )
@@ -279,16 +352,27 @@ def send_club_deleted_emails(self, club_data):
         recipient_list=[settings.SERVER_EMAIL],
     )
 
-    # Owner (Japanese)
-    send_mail(
-        subject="【Kaibaru】クラブが削除されました",
-        message=(
+    if club_data.get("language") == "en":
+        owner_subject = "Your Kaibaru club was deleted"
+        owner_message = (
+            f"Hi {owner_name},\n\n"
+            f"The club {subdomain} was deleted for this reason:\n\n"
+            f"{reason}\n\n"
+            f"If something looks wrong, contact Kaibaru support.\n\n"
+            f"Kaibaru"
+        )
+    else:
+        owner_subject = "【Kaibaru】クラブが削除されました"
+        owner_message = (
             f"{owner_name} 様\n\n"
             f"クラブ「{subdomain}」は以下の理由により削除されました。\n\n"
             f"{reason}\n\n"
             f"ご不明な点がございましたら、Kaibaru サポートまでご連絡ください。\n\n"
             f"Kaibaru 運営チーム"
-        ),
+        )
+    send_mail(
+        subject=owner_subject,
+        message=owner_message,
         from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=[owner_email],
     )
@@ -316,15 +400,27 @@ def send_subscription_canceled_emails(self, club_data):
         recipient_list=[settings.SERVER_EMAIL],
     )
  
-    send_mail(
-        subject="【Kaibaru】ご利用プランの解約が完了しました",
-        message=(
+    if club_data.get("language") == "en":
+        owner_subject = "Your Kaibaru subscription is cancelled"
+        owner_message = (
+            f"Hi {owner_name},\n\n"
+            f"Thanks for using Kaibaru.\n"
+            f"The subscription for {subdomain} is cancelled.\n\n"
+            f"You're welcome back any time.\n\n"
+            f"Kaibaru"
+        )
+    else:
+        owner_subject = "【Kaibaru】ご利用プランの解約が完了しました"
+        owner_message = (
             f"{owner_name} 様\n\n"
             f"Kaibaru をご利用いただき、ありがとうございました。\n"
             f"クラブ「{subdomain}」のご利用プランは解約されました。\n\n"
             f"またのご利用をお待ちしております。\n\n"
             f"Kaibaru 運営チーム"
-        ),
+        )
+    send_mail(
+        subject=owner_subject,
+        message=owner_message,
         from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=[owner_email],
     )
@@ -381,20 +477,39 @@ def send_platform_cycle_paid_email(self, platform_subscription_id, invoice_id):
         _owner_club_ids(platform_sub.user_id),
         include_stripe_processing=False,
     )
-    receipt = format_platform_cycle_receipt(entry)
+    english = account_is_english(owner)
+    receipt = format_platform_cycle_receipt(entry, "en" if english else "ja")
     pay_month = ""
     if entry.get("payment_year") and entry.get("payment_month"):
-        pay_month = f"{entry['payment_year']}年{entry['payment_month']}月"
+        if english:
+            months = [
+                "", "January", "February", "March", "April", "May", "June",
+                "July", "August", "September", "October", "November", "December",
+            ]
+            pay_month = f"{months[int(entry['payment_month'])]} {entry['payment_year']}"
+        else:
+            pay_month = f"{entry['payment_year']}年{entry['payment_month']}月"
     owner_name = owner.get_full_name() or owner.email
 
-    send_mail(
-        subject=f"【Kaibaru】{pay_month}のプラットフォーム利用料" if pay_month else "【Kaibaru】プラットフォーム利用料",
-        message=(
+    if english:
+        subject = f"[Kaibaru] Platform fee for {pay_month}" if pay_month else "[Kaibaru] Platform fee"
+        message = (
+            f"Hi {owner_name},\n\n"
+            f"We received your Kaibaru platform fee.\n\n"
+            f"{receipt}\n\n"
+            f"Kaibaru"
+        )
+    else:
+        subject = f"【Kaibaru】{pay_month}のプラットフォーム利用料" if pay_month else "【Kaibaru】プラットフォーム利用料"
+        message = (
             f"{owner_name} 様\n\n"
             f"Kaibaru プラットフォーム利用料のお支払いを確認しました。\n\n"
             f"{receipt}\n\n"
             f"Kaibaru 運営チーム"
-        ),
+        )
+    send_mail(
+        subject=subject,
+        message=message,
         from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=[owner.email],
     )
@@ -428,16 +543,28 @@ def send_subscription_activated_emails(self, club_id, invoice_id):
         recipient_list=[settings.SERVER_EMAIL],
     )
 
-    send_mail(
-        subject="【Kaibaru】ご利用プランの有効化が完了しました",
-        message=(
+    if club_is_english(club):
+        owner_subject = "Your Kaibaru plan is active"
+        owner_message = (
+            f"Hi {owner.get_full_name() or owner.email},\n\n"
+            f"Thanks for using Kaibaru.\n"
+            f"The plan for {club.subdomain} is now active.\n\n"
+            f"Upcoming charges are on the club page under Next bill.\n\n"
+            f"Kaibaru"
+        )
+    else:
+        owner_subject = "【Kaibaru】ご利用プランの有効化が完了しました"
+        owner_message = (
             f"{owner.get_full_name() or owner.email} 様\n\n"
             f"Kaibaru をご利用いただきありがとうございます。\n"
             f"クラブ「{club.subdomain}」のご利用プランが有効になりました。\n\n"
             f"次回以降の請求内容は、クラブページの「次回請求」から確認できます。\n\n"
             f"今後も Kaibaru をよろしくお願いいたします。\n\n"
             f"Kaibaru 運営チーム"
-        ),
+        )
+    send_mail(
+        subject=owner_subject,
+        message=owner_message,
         from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=[owner.email],
     )
@@ -466,28 +593,50 @@ def send_platform_club_added_email(self, club_id, prorated_yen=0):
     except (TypeError, ValueError):
         prorated_yen = 0
 
+    english = club_is_english(club)
     club_name = club.title or club.subdomain
     owner_name = owner.get_full_name() or owner.email
     if prorated_yen > 0:
         fee_line = (
-            f"今回の追加に伴う日割り料金は ¥{prorated_yen:,} です。"
-            f"次回の請求に加算されます。\n"
+            (
+                f"The prorated charge for adding it is ¥{prorated_yen:,}. "
+                f"It is added to the next bill.\n"
+            )
+            if english else
+            (
+                f"今回の追加に伴う日割り料金は ¥{prorated_yen:,} です。"
+                f"次回の請求に加算されます。\n"
+            )
         )
     else:
         fee_line = (
+            "Nothing extra is added to the current bill for this club.\n"
+            if english else
             "今回の追加について、いま請求に載る日割り料金はありません。\n"
         )
 
-    send_mail(
-        subject=f"【Kaibaru】クラブ「{club.subdomain}」を契約に追加しました",
-        message=(
+    if english:
+        subject = f"[Kaibaru] {club.subdomain} was added to your plan"
+        message = (
+            f"Hi {owner_name},\n\n"
+            f"{club_name} ({club.subdomain}) was added to your Kaibaru plan.\n\n"
+            f"{fee_line}"
+            f"The updated next bill is on the club page under Next bill.\n\n"
+            f"Kaibaru"
+        )
+    else:
+        subject = f"【Kaibaru】クラブ「{club.subdomain}」を契約に追加しました"
+        message = (
             f"{owner_name} 様\n\n"
             f"クラブ「{club_name}」（{club.subdomain}）を"
             f"Kaibaru の契約に追加しました。\n\n"
             f"{fee_line}"
             f"更新後の次回請求額は、クラブページの「次回請求」から確認できます。\n\n"
             f"Kaibaru 運営チーム"
-        ),
+        )
+    send_mail(
+        subject=subject,
+        message=message,
         from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=[owner.email],
     )
@@ -516,29 +665,52 @@ def send_platform_domain_added_email(self, club_id, domain, prorated_yen=0):
     except (TypeError, ValueError):
         prorated_yen = 0
 
+    english = club_is_english(club)
     domain = (domain or club.custom_domain or "").strip()
     club_name = club.title or club.subdomain
     owner_name = owner.get_full_name() or owner.email
     if prorated_yen > 0:
         fee_line = (
-            f"独自ドメイン追加に伴う日割り料金は ¥{prorated_yen:,} です。"
-            f"次回の請求に加算されます。\n"
+            (
+                f"The prorated charge for the domain is ¥{prorated_yen:,}. "
+                f"It is added to the next bill.\n"
+            )
+            if english else
+            (
+                f"独自ドメイン追加に伴う日割り料金は ¥{prorated_yen:,} です。"
+                f"次回の請求に加算されます。\n"
+            )
         )
     else:
         fee_line = (
+            "Nothing extra is added to the current bill for this domain.\n"
+            if english else
             "今回のドメイン追加について、いま請求に載る日割り料金はありません。\n"
         )
 
-    send_mail(
-        subject=f"【{club_name}】独自ドメインの準備ができました",
-        message=(
+    if english:
+        subject = f"[{club_name}] Your domain is ready"
+        message = (
+            f"Hi {owner_name},\n\n"
+            f"{domain} is now the public address for {club_name}.\n\n"
+            f"https://{domain}\n\n"
+            f"{fee_line}"
+            f"The updated next bill is on the club page under Next bill.\n\n"
+            f"Kaibaru"
+        )
+    else:
+        subject = f"【{club_name}】独自ドメインの準備ができました"
+        message = (
             f"{owner_name} 様\n\n"
             f"{domain} を{club_name}のアドレスとして公開しました。\n\n"
             f"https://{domain}\n\n"
             f"{fee_line}"
             f"更新後の次回請求額は、クラブページの「次回請求」から確認できます。\n\n"
             f"Kaibaru 運営チーム"
-        ),
+        )
+    send_mail(
+        subject=subject,
+        message=message,
         from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=[owner.email],
     )
@@ -667,7 +839,7 @@ def send_stripe_cash_transition_email(self, invoice_id):
         "subscription_cycle",
     ]
 
-    club_name = club.subdomain or "クラブ"
+    club_name = club.subdomain or ("the club" if club_is_english(club) else "クラブ")
     
 
     member = (
@@ -690,13 +862,13 @@ def send_stripe_cash_transition_email(self, invoice_id):
         ) or (
             invoice.payer_name
             or invoice.payer_email
-            or "お客様"
+            or ("there" if club_is_english(club) else "お客様")
         )
 
     owner_name = (
         club_owner.get_full_name()
         if club_owner
-        else "クラブ管理者"
+        else ("the club manager" if club_is_english(club) else "クラブ管理者")
     )
 
     amount_text = f"¥{invoice.amount_due:,}"
@@ -822,6 +994,39 @@ def send_stripe_cash_transition_email(self, invoice_id):
                     f"{club_name}"
                 )
 
+            if club_is_english(club):
+                member_subject = f"[{club_name}] How you pay has changed"
+                if is_subscription_level:
+                    member_message = (
+                        f"Hi {member_name},\n\n"
+                        f"The card payment for {club_name} did not go through, "
+                        f"so this bill and future bills are now pay-at-the-club.\n\n"
+                        f"What changed\n"
+                        f"This bill: card → pay at the club\n"
+                        f"From now on: pay at the club\n\n"
+                        f"This bill\n"
+                        f"{amount_text}\n\n"
+                        f"Pay {club_name} directly for this bill.\n\n"
+                        f"Once every unpaid bill is settled, you can log in and switch "
+                        f"the member plan back to card (Stripe).\n\n"
+                        f"You can't switch back while an unpaid bill is still open.\n\n"
+                        f"Questions about the amount go to {club_name}.\n\n"
+                        f"{club_name}"
+                    )
+                else:
+                    member_message = (
+                        f"Hi {member_name},\n\n"
+                        f"The card payment for this {club_name} bill did not go through, "
+                        f"so this bill is now pay-at-the-club.\n\n"
+                        f"What changed\n"
+                        f"Card → pay at the club\n\n"
+                        f"This bill\n"
+                        f"{amount_text}\n\n"
+                        f"Pay {club_name} directly for this one.\n\n"
+                        f"Your regular subscription still bills the card.\n\n"
+                        f"Questions about the amount go to {club_name}.\n\n"
+                        f"{club_name}"
+                    )
             send_mail(
                 subject=member_subject,
                 message=member_message,
@@ -993,6 +1198,40 @@ def send_stripe_cash_transition_email(self, invoice_id):
                 f"{club_name}"
             )
 
+        if club_is_english(club):
+            if is_subscription_level:
+                owner_subject = f"[{club_name}] A member's billing moved to pay-at-the-club"
+                owner_message = (
+                    f"Hi {owner_name},\n\n"
+                    f"The card for {member_name} did not go through for a while, "
+                    f"so that bill and the whole subscription now collect at the club.\n\n"
+                    f"Member\n{member_name}\n\n"
+                    f"Invoice\n{invoice.number or invoice.id}\n\n"
+                    f"Amount\n{amount_text}\n\n"
+                    f"Reason\n{invoice.billing_reason or '---'}\n\n"
+                    f"What changed\n"
+                    f"Card → pay at the club\n"
+                    f"The whole subscription now collects at the club\n\n"
+                    f"When they pay you in person, mark that invoice paid in the admin.\n\n"
+                    f"After every unpaid invoice is paid, they can log in and switch the subscription back to card (Stripe).\n"
+                    f"They can't switch back while an unpaid invoice is still open.\n\n"
+                    f"{club_name}"
+                )
+            else:
+                owner_subject = f"[{club_name}] One member bill is now pay-at-the-club"
+                owner_message = (
+                    f"Hi {owner_name},\n\n"
+                    f"The card for {member_name} did not go through for a while, "
+                    f"so that invoice now collects at the club.\n\n"
+                    f"Member\n{member_name}\n\n"
+                    f"Invoice\n{invoice.number or invoice.id}\n\n"
+                    f"Amount\n{amount_text}\n\n"
+                    f"Reason\n{invoice.billing_reason or '---'}\n\n"
+                    f"What changed\nCard → pay at the club\n\n"
+                    f"Only this invoice changed. Their regular subscription still bills the card.\n\n"
+                    f"When they pay you in person, mark that invoice paid in the admin.\n\n"
+                    f"{club_name}"
+                )
         send_mail(
             subject=owner_subject,
             message=owner_message,
@@ -1148,7 +1387,7 @@ def send_stripe_payment_failure_warning_email(self, invoice_id):
         or member_email
     )
 
-    club_name = club.subdomain or "クラブ"
+    club_name = club.subdomain or ("the club" if club_is_english(club) else "クラブ")
 
     # ---------------------------------------------------------
     # TRANSITION TYPE
@@ -1298,6 +1537,41 @@ def send_stripe_payment_failure_warning_email(self, invoice_id):
     # =========================================================
     # SEND
     # =========================================================
+
+    if club_is_english(club):
+        fallback_date_text = format_date(fallback_at, "en")
+        if is_subscription_level:
+            subject = f"[{club_name}] Your card payment needs attention"
+            message = (
+                f"Hi {member_name},\n\n"
+                f"The card payment for {club_name} did not go through.\n\n"
+                f"We'll retry for the next 10 days. Check the card, and update it if you need to.\n\n"
+                f"This bill\n{amount_text}\n\n"
+                f"How it's billed\nCard\n\n"
+                f"If it still hasn't been paid 10 days after the first failure, "
+                f"this bill and future membership bills become pay-at-the-club.\n\n"
+                f"You would then pay {club_name} directly for this bill.\n\n"
+                f"Switch to pay-at-the-club on\n{fallback_date_text}\n\n"
+                f"If the card payment succeeds before then, nothing changes.\n\n"
+                f"Questions about the card go to {club_name}.\n\n"
+                f"{club_name}"
+            )
+        else:
+            subject = f"[{club_name}] A card payment did not go through"
+            message = (
+                f"Hi {member_name},\n\n"
+                f"The card payment for this {club_name} bill did not go through.\n\n"
+                f"We'll retry for the next 10 days. Check the card, and update it if you need to.\n\n"
+                f"This bill\n{amount_text}\n\n"
+                f"How it's billed\nCard\n\n"
+                f"If it still hasn't been paid 10 days after the first failure, "
+                f"this bill becomes pay-at-the-club.\n\n"
+                f"You would then pay {club_name} directly.\n\n"
+                f"Switch to pay-at-the-club on\n{fallback_date_text}\n\n"
+                f"If the card payment succeeds before then, nothing changes.\n\n"
+                f"Questions about the card go to {club_name}.\n\n"
+                f"{club_name}"
+            )
 
     send_mail(
         subject=subject,
@@ -1630,7 +1904,7 @@ def send_reservation_start_email(self, start_token):
     club = reservation.club
     lesson = reservation.lesson
 
-    club_name = club.title or club.subdomain or "クラブ"
+    club_name = club.title or club.subdomain or ("the club" if club_is_english(club) else "クラブ")
     kind = (
         "体験予約"
         if reservation.reservation_type == Reservation.ReservationType.TRIAL
@@ -1881,7 +2155,7 @@ def send_trial_staff_email(self, reservation_id):
     reservation = group[0]
     club = reservation.club
     lesson = reservation.lesson
-    club_name = club.title or club.subdomain or "クラブ"
+    club_name = club.title or club.subdomain or ("the club" if club_is_english(club) else "クラブ")
 
     recipients = []
     owner_email = (
@@ -1954,8 +2228,42 @@ def send_trial_staff_email(self, reservation_id):
         )
 
     people_text = "\n".join(people)
-    subject = f"【{club_name}】体験予約が確定しました"
-    message = (
+    if club_is_english(club):
+        weekday = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][
+            reservation.reservation_date.weekday()
+        ]
+        day = reservation.reservation_date
+        date_text = f"{day.strftime('%B')} {day.day}, {day.year}"
+        people = []
+        for person in group:
+            age_text = f"age {person.age}" if person.age is not None else "not given"
+            gender_text = {"male": "male", "female": "female"}.get(person.gender, "not given")
+            phone_text = person.phone_number or "not given"
+            amount_text = "Free" if person.amount == 0 else f"¥{person.amount:,}"
+            people.append(
+                f"· {person.full_name}\n"
+                f"  Age: {age_text}\n"
+                f"  Gender: {gender_text}\n"
+                f"  Phone: {phone_text}\n"
+                f"  Email: {person.email}\n"
+                f"  Price: {amount_text}\n"
+                f"  Booking number: {person.id}"
+            )
+        people_text = "\n".join(people)
+        subject = f"[{club_name}] An intro class is booked"
+        message = (
+            f"An intro class at {club_name} is confirmed.\n\n"
+            f"Class\n"
+            f"{lesson.title}\n"
+            f"When: {date_text} ({weekday})\n"
+            f"Time: {start_time}–{end_time}\n\n"
+            f"Who's coming\n"
+            f"{people_text}\n\n"
+            f"{club_name}"
+        )
+    else:
+        subject = f"【{club_name}】体験予約が確定しました"
+        message = (
         f"{club_name}の体験予約が確定しました。\n\n"
         f"■ レッスン\n"
         f"{lesson.title}\n"
@@ -2056,7 +2364,7 @@ def send_event_reservation_start_email(self, start_token):
 
     club = reservation.club
     event = reservation.event
-    club_name = club.title or club.subdomain or "クラブ"
+    club_name = club.title or club.subdomain or ("the club" if club_is_english(club) else "クラブ")
     price_text = "無料" if reservation.amount == 0 else f"¥{reservation.amount:,}"
     if reservation.price_name:
         price_text = f"{reservation.price_name} {price_text}"
@@ -2080,6 +2388,28 @@ def send_event_reservation_start_email(self, start_token):
         f"リンクを開いて手続きを始めるまで、イベントの枠は確保されません。\n\n"
         f"{club_name}"
     )
+    if club_is_english(club):
+        from .service_event import format_event_when as _format_event_when
+
+        price_text = "Free" if reservation.amount == 0 else f"¥{reservation.amount:,}"
+        if reservation.price_name:
+            price_text = f"{reservation.price_name} {price_text}"
+        subject = f"[{club_name}] Finish your event booking"
+        message = (
+            f"Hi {reservation.full_name},\n\n"
+            f"Thanks for signing up for an event at {club_name}.\n"
+            f"It isn't confirmed yet.\n"
+            f"Open this link and finish the booking.\n\n"
+            f"What you signed up for\n"
+            f"Event: {event.title}\n"
+            f"When: {_format_event_when(event, 'en')}\n"
+            f"Price: {price_text}\n\n"
+            f"Continue:\n"
+            f"{link}\n\n"
+            f"This link lasts {START_LINK_HOURS} hours.\n"
+            f"Your spot is not held until you open the link and start.\n\n"
+            f"{club_name}"
+        )
     _send_event_email(
         club=club,
         recipient=reservation.email,
@@ -2129,7 +2459,7 @@ def send_event_reservation_confirmation_email(self, reservation_id):
 
     club = reservation.club
     event = reservation.event
-    club_name = club.title or club.subdomain or "クラブ"
+    club_name = club.title or club.subdomain or ("the club" if club_is_english(club) else "クラブ")
     is_free = reservation.amount == 0
     if is_free:
         subject = f"【{club_name}】イベント予約確定のお知らせ"
@@ -2178,6 +2508,49 @@ def send_event_reservation_confirmation_email(self, reservation_id):
         f"{club_name}"
         f"{terms_section}"
     )
+    if club_is_english(club):
+        from .service_event import format_event_when as _format_event_when
+
+        if is_free:
+            subject = f"[{club_name}] Your event booking is confirmed"
+            intro = (
+                f"Thanks for booking an event at {club_name}.\n"
+                f"You're confirmed.\n\n"
+            )
+            payment_section = (
+                f"Price\n"
+                f"{(reservation.price_name + ' ') if reservation.price_name else ''}Free\n\n"
+            )
+        else:
+            subject = f"[{club_name}] Event booking paid"
+            intro = (
+                f"Thanks for booking an event at {club_name}.\n"
+                f"Payment is complete and you're confirmed.\n\n"
+            )
+            payment_section = (
+                f"Payment\n"
+                f"Price: {(reservation.price_name + ' ') if reservation.price_name else ''}¥{reservation.amount:,}\n"
+                f"Paid by card\n\n"
+            )
+        terms_section = ""
+        if terms:
+            terms_section = f"\n\nTerms you agreed to\n{terms}"
+        message = (
+            f"Hi {reservation.full_name},\n\n"
+            f"{intro}"
+            f"Your booking\n"
+            f"Event: {event.title}\n"
+            f"When: {_format_event_when(event, 'en')}\n\n"
+            f"{payment_section}"
+            f"Booking number\n"
+            f"{reservation.id}\n\n"
+            f"Cancel:\n"
+            f"{_cancel_link(club, 'event', reservation.id)}\n"
+            f"{_cancel_notice(reservation, 'en')}\n\n"
+            f"See you there.\n"
+            f"{club_name}"
+            f"{terms_section}"
+        )
     _send_event_email(
         club=club,
         recipient=reservation.email,
@@ -2227,7 +2600,7 @@ def send_reservation_canceled_email(self, kind, reservation_id):
         return
 
     club = reservation.club
-    club_name = club.title or club.subdomain or "クラブ"
+    club_name = club.title or club.subdomain or ("the club" if club_is_english(club) else "クラブ")
     if kind == "lesson":
         title = reservation.lesson.title
         when_text = reservation.reservation_date.strftime("%Y年%m月%d日")
@@ -2271,6 +2644,42 @@ def send_reservation_canceled_email(self, kind, reservation_id):
         f"{link}\n\n"
         f"{club_name}"
     )
+    if club_is_english(club):
+        if reservation.payment_method == "ticket":
+            kept = "The class credit is not returned."
+        elif reservation.amount > 0:
+            kept = "This is not refunded."
+        else:
+            kept = "This booking had no charge."
+        if kind == "lesson":
+            day = reservation.reservation_date
+            when_text = f"{day.strftime('%B')} {day.day}, {day.year}"
+            label = "Class"
+        elif kind == "service":
+            weekday = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][
+                reservation.reservation_date.weekday()
+            ]
+            day = reservation.reservation_date
+            when_text = (
+                f"{day.strftime('%B')} {day.day}, {day.year} ({weekday}) "
+                f"{reservation.start_time.strftime('%H:%M')}–{reservation.end_time.strftime('%H:%M')}"
+            )
+            label = "Service"
+        else:
+            when_text = format_event_when(reservation.event, "en")
+            label = "Event"
+        subject = f"[{club_name}] Booking cancelled"
+        message = (
+            f"Hi {reservation.full_name},\n\n"
+            f"Your booking at {club_name} is cancelled.\n"
+            f"{kept}\n\n"
+            f"What was cancelled\n"
+            f"{label}: {title}\n"
+            f"When: {when_text}\n\n"
+            f"If the time hasn't passed and there's still room, you can undo it here:\n"
+            f"{link}\n\n"
+            f"{club_name}"
+        )
     _send_event_email(
         club=club,
         recipient=reservation.email,
@@ -2301,17 +2710,29 @@ def send_inquiry_email(self, club_id, name, furigana, phone_number, email, heade
         logger.warning("[EMAIL] Inquiry for club %s has no owner email.", club_id)
         return
 
-    club_name = club.title or club.subdomain or "クラブ"
-    subject = f"【{club_name}】お問い合わせ：{header}"
-    body = (
-        f"{club_name}のサイトからお問い合わせがありました。\n\n"
-        f"お名前：{name}\n"
-        f"ふりがな：{furigana}\n"
-        f"電話番号：{phone_number}\n"
-        f"メールアドレス：{email}\n"
-        f"件名：{header}\n\n"
-        f"問い合わせ内容：\n{message}\n"
-    )
+    club_name = club.title or club.subdomain or ("the club" if club_is_english(club) else "クラブ")
+    if club_is_english(club):
+        subject = f"[{club_name}] Inquiry: {header}"
+        body = (
+            f"Someone wrote in from the {club_name} site.\n\n"
+            f"Name: {name}\n"
+            f"Pronunciation: {furigana}\n"
+            f"Phone: {phone_number}\n"
+            f"Email: {email}\n"
+            f"Subject: {header}\n\n"
+            f"Message:\n{message}\n"
+        )
+    else:
+        subject = f"【{club_name}】お問い合わせ：{header}"
+        body = (
+            f"{club_name}のサイトからお問い合わせがありました。\n\n"
+            f"お名前：{name}\n"
+            f"ふりがな：{furigana}\n"
+            f"電話番号：{phone_number}\n"
+            f"メールアドレス：{email}\n"
+            f"件名：{header}\n\n"
+            f"問い合わせ内容：\n{message}\n"
+        )
     mail = EmailMessage(
         subject=subject,
         body=body,
@@ -2346,7 +2767,7 @@ def send_service_reservation_start_email(self, start_token):
 
     club = reservation.club
     course = reservation.course
-    club_name = club.title or club.subdomain or "サロン"
+    club_name = club.title or club.subdomain or ("the studio" if club_is_english(club) else "サロン")
     course_name = course.name if course else (reservation.price_name or "コース")
     weekday = WEEKDAY_NAMES[reservation.reservation_date.weekday()]
     date_text = reservation.reservation_date.strftime("%Y年%m月%d日")
@@ -2376,6 +2797,32 @@ def send_service_reservation_start_email(self, start_token):
         f"リンクを開いて手続きを始めるまで、枠は確保されません。\n\n"
         f"{club_name}"
     )
+    if club_is_english(club):
+        weekday = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][
+            reservation.reservation_date.weekday()
+        ]
+        day = reservation.reservation_date
+        date_text = f"{day.strftime('%B')} {day.day}, {day.year}"
+        price_text = "Free" if reservation.amount == 0 else f"¥{reservation.amount:,}"
+        if reservation.payment_method == "cash" and reservation.amount > 0:
+            price_text = f"{price_text} (pay at the studio)"
+        subject = f"[{club_name}] Finish your booking"
+        message = (
+            f"Hi {reservation.full_name},\n\n"
+            f"Thanks for requesting a booking at {club_name}.\n"
+            f"It isn't confirmed yet.\n"
+            f"Open this link and finish it.\n\n"
+            f"What you requested\n"
+            f"Service: {course_name}\n"
+            f"When: {date_text} ({weekday})\n"
+            f"Time: {start_text}–{end_text}\n"
+            f"Price: {price_text}\n\n"
+            f"Continue:\n"
+            f"{link}\n\n"
+            f"This link lasts {START_LINK_HOURS} hours.\n"
+            f"Your spot is not held until you open the link and start.\n\n"
+            f"{club_name}"
+        )
     _send_event_email(
         club=club,
         recipient=reservation.email,
@@ -2423,7 +2870,7 @@ def send_service_reservation_confirmation_email(self, reservation_id):
 
     club = reservation.club
     course = reservation.course
-    club_name = club.title or club.subdomain or "サロン"
+    club_name = club.title or club.subdomain or ("the studio" if club_is_english(club) else "サロン")
     course_name = course.name if course else (reservation.price_name or "コース")
     weekday = WEEKDAY_NAMES[reservation.reservation_date.weekday()]
     date_text = reservation.reservation_date.strftime("%Y年%m月%d日")
@@ -2481,6 +2928,58 @@ def send_service_reservation_confirmation_email(self, reservation_id):
         f"当日はお気をつけてお越しください。\n"
         f"{club_name}"
     )
+    if club_is_english(club):
+        weekday = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][
+            reservation.reservation_date.weekday()
+        ]
+        day = reservation.reservation_date
+        date_text = f"{day.strftime('%B')} {day.day}, {day.year}"
+        worker_name = reservation.worker.full_name if reservation.worker_id else "a staff member"
+        if is_free:
+            subject = f"[{club_name}] Your booking is confirmed"
+            intro = (
+                f"Thanks for booking at {club_name}.\n"
+                f"You're confirmed.\n\n"
+            )
+            payment_section = "Price\nFree\n\n"
+        elif is_cash:
+            subject = f"[{club_name}] Your booking is confirmed"
+            intro = (
+                f"Thanks for booking at {club_name}.\n"
+                f"You're confirmed. Pay at the studio on the day.\n\n"
+            )
+            payment_section = (
+                f"Payment\n"
+                f"Price: ¥{reservation.amount:,}\n"
+                f"Pay at the studio\n\n"
+            )
+        else:
+            subject = f"[{club_name}] Booking paid"
+            intro = (
+                f"Thanks for booking at {club_name}.\n"
+                f"Payment is complete and you're confirmed.\n\n"
+            )
+            payment_section = (
+                f"Payment\n"
+                f"Price: ¥{reservation.amount:,}\n"
+                f"Paid by card\n\n"
+            )
+        message = (
+            f"Hi {reservation.full_name},\n\n"
+            f"{intro}"
+            f"Your booking\n"
+            f"Service: {course_name}\n"
+            f"When: {date_text} ({weekday})\n"
+            f"Time: {start_text}–{end_text}\n"
+            f"With: {worker_name}\n\n"
+            f"{payment_section}"
+            f"Booking number\n"
+            f"{reservation.id}\n\n"
+            f"To cancel, open this link:\n"
+            f"{_cancel_link(club, 'service', reservation.id)}\n\n"
+            f"See you there.\n"
+            f"{club_name}"
+        )
     _send_event_email(
         club=club,
         recipient=reservation.email,

@@ -10,6 +10,7 @@ from .reservation_cancel import (
     read_cancel_token,
     restore_url,
 )
+from .shown import shown
 
 
 def _cash_cancel_block(request, reservation):
@@ -268,31 +269,49 @@ def _restore_block_reason(kind, reservation):
 
 
 def _page_context(kind, reservation):
+    from .club_language import is_english
+
     club = reservation.club
+    english = is_english(club)
     if kind == "lesson":
         title = reservation.lesson.title
-        when_text = reservation.reservation_date.strftime("%Y年%m月%d日")
+        if english:
+            day = reservation.reservation_date
+            when_text = f"{day.strftime('%B')} {day.day}, {day.year}"
+        else:
+            when_text = reservation.reservation_date.strftime("%Y年%m月%d日")
     elif kind == "service":
         from .service_service_reservation import WEEKDAY_NAMES
 
         course = reservation.course
         title = (
-            course.name if course is not None else (reservation.price_name or "コース")
+            course.name if course is not None else (reservation.price_name or ("Course" if english else "コース"))
         )
-        weekday = WEEKDAY_NAMES[reservation.reservation_date.weekday()]
-        date_text = reservation.reservation_date.strftime("%Y年%m月%d日")
-        start_text = reservation.start_time.strftime("%H:%M")
-        end_text = reservation.end_time.strftime("%H:%M")
-        when_text = f"{date_text}（{weekday}） {start_text}〜{end_text}"
+        if english:
+            weekday = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][
+                reservation.reservation_date.weekday()
+            ]
+            day = reservation.reservation_date
+            date_text = f"{day.strftime('%B')} {day.day}, {day.year}"
+            start_text = reservation.start_time.strftime("%H:%M")
+            end_text = reservation.end_time.strftime("%H:%M")
+            when_text = f"{date_text} ({weekday}) {start_text}–{end_text}"
+        else:
+            weekday = WEEKDAY_NAMES[reservation.reservation_date.weekday()]
+            date_text = reservation.reservation_date.strftime("%Y年%m月%d日")
+            start_text = reservation.start_time.strftime("%H:%M")
+            end_text = reservation.end_time.strftime("%H:%M")
+            when_text = f"{date_text}（{weekday}） {start_text}〜{end_text}"
     else:
         from .service_event import format_event_when
 
         title = reservation.event.title
-        when_text = format_event_when(reservation.event)
+        when_text = format_event_when(reservation.event, "en" if english else "ja")
 
     uses_ticket = getattr(reservation, "payment_method", "") == "ticket"
     return {
-        "club_name": club.title or club.subdomain or "クラブ",
+        "english": english,
+        "club_name": club.title or club.subdomain or ("the club" if english else "クラブ"),
         "title": title,
         "when_text": when_text,
         "person_name": reservation.full_name,
@@ -316,6 +335,9 @@ def _render(request, context, status=200):
             },
             status=status,
         )
+    if context.get("english") and context.get("message"):
+        context = dict(context)
+        context["message"] = shown(True, context["message"])
     response = render(
         request,
         "kaibaru/reservation_cancel.html",

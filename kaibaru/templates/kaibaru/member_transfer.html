@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="{% if english %}en{% else %}ja{% endif %}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>会員の受け入れ</title>
+  <title>{% if english %}Accept a member{% else %}会員の受け入れ{% endif %}</title>
   <style>
     body {
       margin: 0;
@@ -69,26 +69,26 @@
 <body>
   <main>
     {% if mode == "success" %}
-      <h1>移しました</h1>
+      <h1>{% if english %}Moved{% else %}移しました{% endif %}</h1>
       <p class="success">{{ message }}</p>
-      <a class="home" href="{{ home_url }}">クラブへ戻る</a>
+      <a class="home" href="{{ home_url }}">{% if english %}Back to the club{% else %}クラブへ戻る{% endif %}</a>
     {% elif mode == "ready" %}
-      <h1>会員を受け入れる</h1>
-      <p>{{ club_name }}の「{{ member_name }}」さんを、あなたのアカウントに移します。</p>
+      <h1>{% if english %}Accept this member{% else %}会員を受け入れる{% endif %}</h1>
+      <p>{% if english %}{{ member_name }} at {{ club_name }} will move onto your account.{% else %}{{ club_name }}の「{{ member_name }}」さんを、あなたのアカウントに移します。{% endif %}</p>
       {% if plans_follow %}
-        <p>残っているプランも一緒に移ります。今の請求は発生しません。</p>
+        <p>{% if english %}The plans they still have move with them. Nothing is billed for this.{% else %}残っているプランも一緒に移ります。今の請求は発生しません。{% endif %}</p>
       {% else %}
-        <p>プランは引き継がれません。続ける場合は、受け入れたあと改めて加入してください。</p>
+        <p>{% if english %}Their plan does not come with them. Add one after you accept if they should stay enrolled.{% else %}プランは引き継がれません。続ける場合は、受け入れたあと改めて加入してください。{% endif %}</p>
       {% endif %}
       <form method="post">
         {% csrf_token %}
-        <button type="submit">受け入れる</button>
+        <button type="submit">{% if english %}Accept{% else %}受け入れる{% endif %}</button>
       </form>
     {% else %}
-      <h1>手続きできません</h1>
+      <h1>{% if english %}This can't be completed{% else %}手続きできません{% endif %}</h1>
       <p class="message">{{ message }}</p>
       {% if home_url %}
-        <a class="home" href="{{ home_url }}">クラブへ戻る</a>
+        <a class="home" href="{{ home_url }}">{% if english %}Back to the club{% else %}クラブへ戻る{% endif %}</a>
       {% endif %}
     {% endif %}
   </main>

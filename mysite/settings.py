@@ -94,6 +94,7 @@ MIDDLEWARE = [
     'accounts.middleware.DomainRedirectMiddleware',
     
     'django_hosts.middleware.HostsResponseMiddleware',
+    'kaibaru.english_message_middleware.EnglishClubMessageMiddleware',
 ]
 
 

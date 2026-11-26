@@ -1,11 +1,11 @@
 {% load humanize %}
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="{% if english %}en{% else %}ja{% endif %}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>{% if club_name %}{{ club_name }}の予約手続き{% else %}予約手続き{% endif %}</title>
+  <title>{% if english %}{% if club_name %}Finish your booking at {{ club_name }}{% else %}Finish your booking{% endif %}{% else %}{% if club_name %}{{ club_name }}の予約手続き{% else %}予約手続き{% endif %}{% endif %}</title>
   <style>
     body {
       margin: 0;
@@ -96,35 +96,35 @@
 <body>
   <main>
     {% if mode == "invalid" %}
-      <h1>リンクを確認できません</h1>
+      <h1>{% if english %}This link can't be opened{% else %}リンクを確認できません{% endif %}</h1>
       <p class="message">{{ message|default:"このリンクは無効です。" }}</p>
     {% else %}
       <h1>{{ club_name }}</h1>
       <p class="kind">{{ kind }}</p>
 
       <dl>
-        <dt>レッスン</dt>
+        <dt>{% if english %}Class{% else %}レッスン{% endif %}</dt>
         <dd>{{ lesson_title }}</dd>
-        <dt>日時</dt>
+        <dt>{% if english %}When{% else %}日時{% endif %}</dt>
         <dd>{{ when_text }}</dd>
-        <dt>予約者</dt>
+        <dt>{% if english %}Name{% else %}予約者{% endif %}</dt>
         <dd>
           <ul class="people">
             {% for person in people %}
               <li>
                 {{ person.name }}
-                {% if person.age is not None %}（{{ person.age }}歳）{% endif %}
+                {% if person.age is not None %}{% if english %} (age {{ person.age }}){% else %}（{{ person.age }}歳）{% endif %}{% endif %}
               </li>
             {% endfor %}
           </ul>
         </dd>
-        <dt>料金</dt>
+        <dt>{% if english %}Price{% else %}料金{% endif %}</dt>
         <dd>
           {% if is_free %}
-            無料
+            {% if english %}Free{% else %}無料{% endif %}
           {% else %}
             ¥{{ total_amount|intcomma }}
-            {% if is_cash %}（当日、会場でお支払い）{% endif %}
+            {% if is_cash %}{% if english %} (pay at the club){% else %}（当日、会場でお支払い）{% endif %}{% endif %}
           {% endif %}
         </dd>
       </dl>
@@ -135,7 +135,7 @@
 
       {% if mode == "done" %}
         <p class="success">
-          予約が確定しました。確認メールをお送りしました。
+          {% if english %}Your booking is confirmed. A confirmation email is on its way.{% else %}予約が確定しました。確認メールをお送りしました。{% endif %}
         </p>
       {% elif mode == "ready" %}
         <form method="post">
@@ -143,18 +143,28 @@
           <button type="submit">{{ continue_label }}</button>
         </form>
         <p class="note">
-          {% if is_free %}
-            ボタンを押すと予約が確定し、レッスンの枠が確保されます。
-          {% elif is_cash %}
-            ボタンを押すと予約が確定し、レッスンの枠が確保されます。料金は当日、会場でお支払いください。
+          {% if english %}
+            {% if is_free %}
+              Pressing the button confirms the booking and holds your spot.
+            {% elif is_cash %}
+              Pressing the button confirms the booking and holds your spot. Pay at the club on the day.
+            {% else %}
+              Pressing the button starts payment, and your spot is held while you pay.
+            {% endif %}
           {% else %}
-            ボタンを押すとお支払いが始まり、その間レッスンの枠が確保されます。
+            {% if is_free %}
+              ボタンを押すと予約が確定し、レッスンの枠が確保されます。
+            {% elif is_cash %}
+              ボタンを押すと予約が確定し、レッスンの枠が確保されます。料金は当日、会場でお支払いください。
+            {% else %}
+              ボタンを押すとお支払いが始まり、その間レッスンの枠が確保されます。
+            {% endif %}
           {% endif %}
         </p>
       {% endif %}
 
       {% if home_url %}
-        <a class="home" href="{{ home_url }}">クラブのページへ</a>
+        <a class="home" href="{{ home_url }}">{% if english %}Back to the club{% else %}クラブのページへ{% endif %}</a>
       {% endif %}
     {% endif %}
   </main>

@@ -105,6 +105,7 @@ MIDDLEWARE = [
     
     'django_hosts.middleware.HostsResponseMiddleware',
     "csp.middleware.CSPMiddleware",
+    "kaibaru.english_message_middleware.EnglishClubMessageMiddleware",
 ]
 
 

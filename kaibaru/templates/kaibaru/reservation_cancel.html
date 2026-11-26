@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="{% if english %}en{% else %}ja{% endif %}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>予約のキャンセル</title>
+  <title>{% if english %}Cancel a booking{% else %}予約のキャンセル{% endif %}</title>
   <style>
     body {
       margin: 0;
@@ -75,80 +75,101 @@
 <body>
   <main>
     {% if mode == "invalid" or mode == "closed" %}
-      <h1>手続きできません</h1>
+      <h1>{% if english %}This can't be completed{% else %}手続きできません{% endif %}</h1>
       <p class="message">{{ message }}</p>
       {% if home_url %}
-        <a class="home" href="{{ home_url }}">ホームページに戻る</a>
+        <a class="home" href="{{ home_url }}">{% if english %}Back to the club{% else %}ホームページに戻る{% endif %}</a>
       {% endif %}
     {% elif mode == "already" %}
-      <h1>キャンセル済みです</h1>
+      <h1>{% if english %}Already cancelled{% else %}キャンセル済みです{% endif %}</h1>
       <p class="message">{{ message }}</p>
-      <a class="home" href="{{ restore_url }}">キャンセルを取り消す</a>
-      <a class="home" href="{{ home_url }}">ホームページに戻る</a>
+      <a class="home" href="{{ restore_url }}">{% if english %}Undo the cancellation{% else %}キャンセルを取り消す{% endif %}</a>
+      <a class="home" href="{{ home_url }}">{% if english %}Back to the club{% else %}ホームページに戻る{% endif %}</a>
     {% elif mode == "done" %}
-      <h1>キャンセルしました</h1>
+      <h1>{% if english %}Cancelled{% else %}キャンセルしました{% endif %}</h1>
       {% if uses_ticket %}
-        <p class="success">予約をキャンセルしました。使用したチケットは戻りません。</p>
+        <p class="success">{% if english %}The booking is cancelled. The class credit is not returned.{% else %}予約をキャンセルしました。使用したチケットは戻りません。{% endif %}</p>
       {% elif is_paid_amount %}
-        <p class="success">予約をキャンセルしました。返金は行われていません。</p>
+        <p class="success">{% if english %}The booking is cancelled. It has not been refunded.{% else %}予約をキャンセルしました。返金は行われていません。{% endif %}</p>
       {% else %}
-        <p class="success">予約をキャンセルしました。</p>
+        <p class="success">{% if english %}The booking is cancelled.{% else %}予約をキャンセルしました。{% endif %}</p>
       {% endif %}
-      <p>キャンセルを取り消すリンクを、予約時のメールアドレスへ送りました。</p>
-      <a class="home" href="{{ home_url }}">ホームページに戻る</a>
+      <p>{% if english %}A link to undo this was sent to the email address on the booking.{% else %}キャンセルを取り消すリンクを、予約時のメールアドレスへ送りました。{% endif %}</p>
+      <a class="home" href="{{ home_url }}">{% if english %}Back to the club{% else %}ホームページに戻る{% endif %}</a>
     {% elif mode == "restored" %}
-      <h1>キャンセルを取り消しました</h1>
-      <p class="success">予約を元に戻しました。</p>
-      <a class="home" href="{{ home_url }}">ホームページに戻る</a>
+      <h1>{% if english %}Cancellation undone{% else %}キャンセルを取り消しました{% endif %}</h1>
+      <p class="success">{% if english %}The booking is active again.{% else %}予約を元に戻しました。{% endif %}</p>
+      <a class="home" href="{{ home_url }}">{% if english %}Back to the club{% else %}ホームページに戻る{% endif %}</a>
     {% elif mode == "restore_confirm" %}
       <h1>{{ club_name }}</h1>
       <dl>
-        <dt>予約</dt>
+        <dt>{% if english %}Booking{% else %}予約{% endif %}</dt>
         <dd>{{ title }}</dd>
-        <dt>日時</dt>
+        <dt>{% if english %}When{% else %}日時{% endif %}</dt>
         <dd>{{ when_text }}</dd>
-        <dt>予約者</dt>
+        <dt>{% if english %}Name{% else %}予約者{% endif %}</dt>
         <dd>{{ person_name }}</dd>
       </dl>
-      <p>この予約のキャンセルを取り消して、もう一度有効にしますか？</p>
+      <p>{% if english %}Put this booking back, if there's still room?{% else %}この予約のキャンセルを取り消して、もう一度有効にしますか？{% endif %}</p>
       <form method="post">
         {% csrf_token %}
-        <button class="restore" type="submit">キャンセルを取り消す</button>
+        <button class="restore" type="submit">{% if english %}Undo the cancellation{% else %}キャンセルを取り消す{% endif %}</button>
       </form>
-      <a class="home" href="{{ home_url }}">ホームページに戻る</a>
+      <a class="home" href="{{ home_url }}">{% if english %}Back to the club{% else %}ホームページに戻る{% endif %}</a>
     {% else %}
       <h1>{{ club_name }}</h1>
       <dl>
-        <dt>予約</dt>
+        <dt>{% if english %}Booking{% else %}予約{% endif %}</dt>
         <dd>{{ title }}</dd>
-        <dt>日時</dt>
+        <dt>{% if english %}When{% else %}日時{% endif %}</dt>
         <dd>{{ when_text }}</dd>
-        <dt>予約者</dt>
+        <dt>{% if english %}Name{% else %}予約者{% endif %}</dt>
         <dd>{{ person_name }}</dd>
       </dl>
-      {% if uses_ticket %}
-        <p>
-          この予約はチケットで行われています。
-          キャンセルしても、使用したチケットは戻りません。
-          キャンセルを続けますか？それともホームページに戻りますか？
-        </p>
-      {% elif is_paid_amount %}
-        <p>
-          この予約をキャンセルしても返金は行われません。
-          返金を希望する場合は、クラブのオーナーに返金付きのキャンセルを依頼してください。
-          キャンセルを続けますか？それともホームページに戻りますか？
-        </p>
+      {% if english %}
+        {% if uses_ticket %}
+          <p>
+            This booking used a class credit.
+            Cancelling does not put that credit back.
+            Cancel anyway, or go back to the club?
+          </p>
+        {% elif is_paid_amount %}
+          <p>
+            Cancelling this booking does not refund it.
+            If you want a refund, ask the club owner to cancel it with a refund.
+            Cancel anyway, or go back to the club?
+          </p>
+        {% else %}
+          <p>
+            This will cancel the booking.
+            You can cancel it, or go back to the club.
+          </p>
+        {% endif %}
       {% else %}
-        <p>
-          この予約をキャンセルします。
-          キャンセルを続けるか、ホームページに戻ってください。
-        </p>
+        {% if uses_ticket %}
+          <p>
+            この予約はチケットで行われています。
+            キャンセルしても、使用したチケットは戻りません。
+            キャンセルを続けますか？それともホームページに戻りますか？
+          </p>
+        {% elif is_paid_amount %}
+          <p>
+            この予約をキャンセルしても返金は行われません。
+            返金を希望する場合は、クラブのオーナーに返金付きのキャンセルを依頼してください。
+            キャンセルを続けますか？それともホームページに戻りますか？
+          </p>
+        {% else %}
+          <p>
+            この予約をキャンセルします。
+            キャンセルを続けるか、ホームページに戻ってください。
+          </p>
+        {% endif %}
       {% endif %}
       <form method="post">
         {% csrf_token %}
-        <button type="submit">キャンセルする</button>
+        <button type="submit">{% if english %}Cancel booking{% else %}キャンセルする{% endif %}</button>
       </form>
-      <a class="home" href="{{ home_url }}">ホームページに戻る</a>
+      <a class="home" href="{{ home_url }}">{% if english %}Back to the club{% else %}ホームページに戻る{% endif %}</a>
     {% endif %}
   </main>
 </body>

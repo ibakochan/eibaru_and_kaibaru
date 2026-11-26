@@ -2,6 +2,7 @@ from django.shortcuts import redirect, render
 from django.views.decorators.http import require_http_methods
 
 from .service_event import EventStartError, EventStartService
+from .shown import shown
 
 
 @require_http_methods(["GET", "POST"])
@@ -26,6 +27,9 @@ def start_event_reservation(request, token):
 
 
 def _render(request, context, status=200):
+    if context.get("english") and context.get("message"):
+        context = dict(context)
+        context["message"] = shown(True, context["message"])
     response = render(
         request,
         "kaibaru/event_start.html",

@@ -153,8 +153,11 @@ def assert_event_has_spots(*, event, hold_cutoff, needed=1, exclude_ids=None):
         raise ValueError("このイベントは満員です。")
 
 
-def format_event_when(event):
+def format_event_when(event, language="ja"):
     local = timezone.localtime(event.starts_at)
+    if language == "en":
+        weekday = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][local.weekday()]
+        return f"{local.strftime('%B')} {local.day}, {local.year} ({weekday}) {local.strftime('%H:%M')}"
     weekday = WEEKDAY_NAMES[local.weekday()]
     return local.strftime(f"%Y年%m月%d日（{weekday}） %H:%M")
 
@@ -1371,21 +1374,27 @@ def _load_start(token):
 
 
 def _start_page(reservation):
+    from .club_language import is_english
+
     event = reservation.event
     club = reservation.club
+    english = is_english(club)
     is_free = reservation.amount == 0
     is_cash = not is_free and reservation.payment_method == "cash"
     return {
-        "club_name": club.title or club.subdomain or "クラブ",
+        "english": english,
+        "club_name": club.title or club.subdomain or ("the club" if english else "クラブ"),
         "event_title": event.title,
-        "when_text": format_event_when(event),
+        "when_text": format_event_when(event, "en" if english else "ja"),
         "person_name": reservation.full_name,
         "total_amount": reservation.amount,
         "is_free": is_free,
         "is_cash": is_cash,
         "home_url": f"https://{club.subdomain}.kaibaru.jp/",
         "continue_label": (
-            "予約を確定する" if is_free or is_cash else "支払いへ進む"
+            ("Confirm booking" if is_free or is_cash else "Continue to payment")
+            if english
+            else ("予約を確定する" if is_free or is_cash else "支払いへ進む")
         ),
     }
 

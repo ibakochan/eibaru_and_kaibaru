@@ -592,12 +592,116 @@ def _month_label(year, month):
     return f"{year}年{month}月"
 
 
-def format_platform_cycle_receipt(entry):
+_EN_MONTHS = [
+    "",
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+]
+
+
+def _month_label_en(year, month):
+    if not year or not month:
+        return ""
+    try:
+        name = _EN_MONTHS[int(month)]
+    except (TypeError, ValueError, IndexError):
+        return ""
+    return f"{name} {year}"
+
+
+def _format_platform_cycle_receipt_en(entry):
+    pay_month = _month_label_en(entry.get("payment_year"), entry.get("payment_month"))
+    fee_month = _month_label_en(entry.get("fee_source_year"), entry.get("fee_source_month"))
+    paid_on = entry.get("paid_on") or ""
+    lines = []
+    lines.append(f"Bill for {pay_month}" if pay_month else "Bill")
+    total_line = f"Total {_yen(entry.get('total_yen'))}"
+    if paid_on:
+        total_line += f" · Paid {paid_on}"
+    lines.append(total_line)
+    lines.append("")
+    lines.append("Kaibaru platform fee")
+    pay_line = f"Billing month: {pay_month}" if pay_month else "Billing month:"
+    if paid_on:
+        pay_line += f" (paid {paid_on})"
+    lines.append(pay_line)
+    if entry.get("invoice_number"):
+        lines.append(f"Invoice number: {entry['invoice_number']}")
+    lines.append("")
+
+    full_members, reduced_members, full_yen, reduced_yen = present_member_tiers(
+        entry.get("full_price_members"),
+        entry.get("reduced_members"),
+        entry.get("member_full_yen"),
+        entry.get("member_reduced_yen"),
+    )
+
+    lines.append("Club base fee")
+    lines.append(_yen(entry.get("club_base_yen")))
+    if (entry.get("extra_clubs") or 0) > 0:
+        lines.append("")
+        lines.append(f"Extra clubs × {entry['extra_clubs']}")
+        lines.append(_yen(entry.get("club_extra_yen")))
+    if (entry.get("domain_yen") or 0) > 0:
+        lines.append("")
+        lines.append("Custom domain")
+        lines.append(_yen(entry.get("domain_yen")))
+    if (entry.get("extra_domains") or 0) > 0:
+        lines.append("")
+        lines.append(f"Extra domains × {entry['extra_domains']}")
+        lines.append(_yen(entry.get("domain_extra_yen")))
+    if full_members > 0:
+        lines.append("")
+        lines.append(f"Members {full_members} × ¥{MEMBER_FULL_YEN}")
+        lines.append(_yen(full_yen))
+    if reduced_members > 0:
+        lines.append("")
+        lines.append(f"Members {reduced_members} × ¥{MEMBER_REDUCED_YEN}")
+        lines.append(_yen(reduced_yen))
+    if (entry.get("cash_fee_yen") or 0) > 0 or (entry.get("cash_invoice_base_yen") or 0) > 0:
+        lines.append("")
+        lines.append(f"1% fee on cash and bank transfer ({fee_month})")
+        lines.append(_yen(entry.get("cash_fee_yen")))
+    if (entry.get("other_yen") or 0) > 0:
+        lines.append("")
+        lines.append("Other")
+        lines.append(_yen(entry.get("other_yen")))
+
+    lines.append("")
+    lines.append("Kaibaru total")
+    lines.append(_yen(entry.get("total_yen")))
+    lines.append("")
+    note = (
+        "The 1% on cash and bank transfer covers charges from the month before "
+        f"the platform bill ({fee_month})."
+    )
+    if (entry.get("cash_invoice_base_yen") or 0) > 0:
+        note += f" Covered total {_yen(entry.get('cash_invoice_base_yen'))}"
+        if entry.get("cash_invoice_count"):
+            note += f" ({entry['cash_invoice_count']})"
+        note += "."
+    lines.append(note)
+    return "\n".join(lines)
+
+
+def format_platform_cycle_receipt(entry, language="ja"):
     """Owner email body for a paid platform cycle. Invoice lines only.
 
     The Kaibaru 1% on member Stripe charges is not part of this invoice,
     so it is left out.
     """
+    if language == "en":
+        return _format_platform_cycle_receipt_en(entry)
     pay_month = _month_label(entry.get("payment_year"), entry.get("payment_month"))
     fee_month = _month_label(entry.get("fee_source_year"), entry.get("fee_source_month"))
     paid_on = entry.get("paid_on") or ""

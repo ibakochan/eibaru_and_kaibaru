@@ -30,6 +30,7 @@ def format_restriction_message(
     age_min,
     age_max,
     allowed_gender,
+    language="ja",
 ):
     gender_label, age_part = describe_age_gender_restriction(
         age_min=age_min,
@@ -39,6 +40,23 @@ def format_restriction_message(
 
     if not gender_label and not age_part:
         return None
+
+    if language == "en":
+        who = {"男性": "men", "女性": "women"}.get(gender_label, gender_label)
+        thing = {"プラン": "plan", "レッスン": "class"}.get(noun, noun)
+        if age_min is not None and age_max is not None:
+            ages = f"ages {age_min}–{age_max}"
+        elif age_min is not None:
+            ages = f"age {age_min} and up"
+        elif age_max is not None:
+            ages = f"age {age_max} and under"
+        else:
+            ages = None
+        if who and ages:
+            return f"This {thing} is only for {who}, {ages}."
+        if who:
+            return f"This {thing} is only for {who}."
+        return f"This {thing} is only for {ages}."
 
     if gender_label and age_part:
         return (
@@ -61,6 +79,7 @@ def age_gender_block_reason(
     noun,
     action,
     require_missing_fields=False,
+    language="ja",
 ):
     """
     Return a Japanese error message if the person is not eligible,
@@ -73,6 +92,7 @@ def age_gender_block_reason(
         age_min=age_min,
         age_max=age_max,
         allowed_gender=allowed_gender,
+        language=language,
     )
 
     if restriction_message is None:
@@ -83,9 +103,13 @@ def age_gender_block_reason(
 
     if require_missing_fields:
         if has_age_restriction and age is None:
+            if language == "en":
+                return f"{restriction_message} Enter the age."
             return f"{restriction_message}年齢を入力してください。"
 
         if has_gender_restriction and not gender:
+            if language == "en":
+                return f"{restriction_message} Choose male or female."
             return f"{restriction_message}性別を入力してください。"
 
     if has_gender_restriction:
@@ -116,6 +140,7 @@ def assert_age_gender_eligible(
     action,
     exception_class=ValidationError,
     require_missing_fields=False,
+    language="ja",
 ):
     reason = age_gender_block_reason(
         age=age,
@@ -126,6 +151,7 @@ def assert_age_gender_eligible(
         noun=noun,
         action=action,
         require_missing_fields=require_missing_fields,
+        language=language,
     )
 
     if reason:
@@ -144,6 +170,7 @@ def assert_member_eligible_for_plan(member, plan):
         allowed_gender=plan.allowed_gender,
         noun="プラン",
         action="加入",
+        language=getattr(getattr(plan, "club", None), "language", "ja"),
     )
 
 
@@ -160,6 +187,7 @@ def assert_member_eligible_for_lesson(member, lesson):
         noun="レッスン",
         action="予約",
         exception_class=ValueError,
+        language=getattr(getattr(lesson, "club", None), "language", "ja"),
     )
 
 
@@ -177,4 +205,5 @@ def assert_visitor_eligible_for_lesson(*, age, gender, lesson):
         action="予約",
         exception_class=ValueError,
         require_missing_fields=True,
+        language=getattr(getattr(lesson, "club", None), "language", "ja"),
     )

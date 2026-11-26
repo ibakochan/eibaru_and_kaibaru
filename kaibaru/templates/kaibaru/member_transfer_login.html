@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="{% if english %}en{% else %}ja{% endif %}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>ログイン</title>
+  <title>{% if english %}Log in{% else %}ログイン{% endif %}</title>
   <style>
     body {
       margin: 0;
@@ -123,51 +123,58 @@
 </head>
 <body>
   <main>
-    <h1>ログインしてください</h1>
+    <h1>{% if english %}Log in first{% else %}ログインしてください{% endif %}</h1>
     <p class="lead">
-      会員を受け入れる前に、先にログインしてください。<br>
-      ここでログインしたあと、メールのリンクをもう一度開くと移管が完了します。
+      {% if english %}
+        Log in before you accept this member.<br>
+        After you log in, open the link in the email again to finish the move.
+      {% else %}
+        会員を受け入れる前に、先にログインしてください。<br>
+        ここでログインしたあと、メールのリンクをもう一度開くと移管が完了します。
+      {% endif %}
     </p>
 
     <div id="login-panel">
       <a class="google" href="{{ google_login_url }}">
         <img src="https://developers.google.com/identity/images/g-logo.png" alt="Google logo">
-        <span>Googleでログイン</span>
+        <span>{% if english %}Continue with Google{% else %}Googleでログイン{% endif %}</span>
       </a>
 
-      <h2>通常ログイン</h2>
+      <h2>{% if english %}Email and password{% else %}通常ログイン{% endif %}</h2>
       <form id="login-form">
         {% csrf_token %}
         <p id="login-error" class="error" hidden></p>
         <label>
-          メールアドレス
+          {% if english %}Email{% else %}メールアドレス{% endif %}
           <input id="login-email" type="email" autocomplete="email" required>
         </label>
         <label>
-          パスワード
+          {% if english %}Password{% else %}パスワード{% endif %}
           <input id="login-password" type="password" autocomplete="current-password" required>
         </label>
-        <button class="primary" id="login-submit" type="submit">ログイン</button>
+        <button class="primary" id="login-submit" type="submit">{% if english %}Log in{% else %}ログイン{% endif %}</button>
       </form>
-      <button class="forgot" id="forgot-open" type="button">パスワードを忘れた方</button>
+      <button class="forgot" id="forgot-open" type="button">{% if english %}Forgot your password?{% else %}パスワードを忘れた方{% endif %}</button>
 
       <div id="reset-panel" class="reset" hidden>
-        <p>登録したメールアドレスを入力してください。アカウントがある場合、新しいパスワードを決めるページを送ります。</p>
+        <p>{% if english %}Enter the email on the account. If there is an account, we'll send a page where you can choose a new password.{% else %}登録したメールアドレスを入力してください。アカウントがある場合、新しいパスワードを決めるページを送ります。{% endif %}</p>
         <p id="reset-error" class="error" hidden></p>
         <p id="reset-done" hidden></p>
         <label>
-          メールアドレス
+          {% if english %}Email{% else %}メールアドレス{% endif %}
           <input id="reset-email" type="email" autocomplete="email">
         </label>
-        <button class="primary" id="reset-submit" type="button">再設定メールを送る</button>
+        <button class="primary" id="reset-submit" type="button">{% if english %}Send reset email{% else %}再設定メールを送る{% endif %}</button>
       </div>
     </div>
 
     <p id="logged-in" class="done" hidden>
-      ログインしました。メールのリンクをもう一度開いて、移管を完了してください。
+      {% if english %}You're logged in. Open the link in the email again to finish the move.{% else %}ログインしました。メールのリンクをもう一度開いて、移管を完了してください。{% endif %}
     </p>
   </main>
   <script>
+    const pageEnglish = {% if english %}true{% else %}false{% endif %};
+
     function csrfToken() {
       const input = document.querySelector("#login-form input[name=csrfmiddlewaretoken]");
       return input ? input.value : "";
@@ -204,14 +211,14 @@
         });
         const data = await response.json().catch(function () { return null; });
         if (!response.ok) {
-          showError("login-error", (data && data.detail) || "ログインに失敗しました");
+          showError("login-error", (data && data.detail) || (pageEnglish ? "Could not log in." : "ログインに失敗しました"));
           button.disabled = false;
           return;
         }
         document.getElementById("login-panel").hidden = true;
         document.getElementById("logged-in").hidden = false;
       } catch (err) {
-        showError("login-error", "ログインに失敗しました");
+        showError("login-error", pageEnglish ? "Could not log in." : "ログインに失敗しました");
         button.disabled = false;
       }
     });
@@ -221,7 +228,7 @@
       const button = this;
       showError("reset-error", "");
       if (!email || email.indexOf("@") === -1) {
-        showError("reset-error", "メールアドレスを入力してください。");
+        showError("reset-error", pageEnglish ? "Enter an email address." : "メールアドレスを入力してください。");
         return;
       }
       button.disabled = true;
@@ -233,20 +240,20 @@
             "Content-Type": "application/json",
             "X-CSRFToken": csrfToken(),
           },
-          body: JSON.stringify({ email: email }),
+          body: JSON.stringify({ email: email, language: pageEnglish ? "en" : "ja" }),
         });
         const data = await response.json().catch(function () { return null; });
         if (!response.ok) {
-          showError("reset-error", (data && data.detail) || "送信できませんでした。");
+          showError("reset-error", (data && data.detail) || (pageEnglish ? "Couldn't send that." : "送信できませんでした。"));
           button.disabled = false;
           return;
         }
         const done = document.getElementById("reset-done");
         done.hidden = false;
-        done.textContent = (data && data.detail) || "ご入力のメールアドレスにアカウントがある場合、パスワード再設定のご案内を送信しました。";
+        done.textContent = (data && data.detail) || (pageEnglish ? "If an account uses that email, a password reset email is on its way." : "ご入力のメールアドレスにアカウントがある場合、パスワード再設定のご案内を送信しました。");
         button.hidden = true;
       } catch (err) {
-        showError("reset-error", "送信できませんでした。");
+        showError("reset-error", pageEnglish ? "Couldn't send that." : "送信できませんでした。");
         button.disabled = false;
       }
     });

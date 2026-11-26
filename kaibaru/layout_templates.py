@@ -28,15 +28,35 @@ def template_path(layout):
     return LAYOUT_DIR / f"{layout.replace('/', '_')}.json"
 
 
+def english_template_path(layout):
+    """English starter for a membership template, when one exists.
+
+    Salon templates have no English file. Japanese files stay in layout/.
+    """
+    path = LAYOUT_DIR / "en" / template_path(layout).name
+    return path if path.is_file() else None
+
+
 @lru_cache(maxsize=None)
-def _load(layout):
-    with template_path(layout).open(encoding="utf-8") as handle:
+def _load(layout, language="ja"):
+    path = template_path(layout)
+    if language == "en":
+        english = english_template_path(layout)
+        if english is not None:
+            path = english
+    with path.open(encoding="utf-8") as handle:
         return json.load(handle)
 
 
-def load_page_content(layout):
-    """Return a fresh page_content dict for the layout template."""
-    return json.loads(json.dumps(_load(layout)))
+def load_page_content(layout, language="ja"):
+    """Return a fresh page_content dict for the layout template.
+
+    language defaults to Japanese, which is the file in layout/. English
+    membership templates live in layout/en/ and are used only when asked.
+    """
+    if language != "en":
+        language = "ja"
+    return json.loads(json.dumps(_load(layout, language)))
 
 
 def club_has_member_section(page_content):
@@ -214,14 +234,14 @@ def apply_hero(page_content, hero):
     return page
 
 
-def page_content_for_club(layout, hero=HERO_SLIDESHOW):
+def page_content_for_club(layout, hero=HERO_SLIDESHOW, language="ja"):
     """Return page_content in the format stored on Club.page_content.
 
     The site editor stores the document as a JSON *string* inside the
     JSONField and json.loads() it again when sections are edited, so the
     template is serialised the same way.
     """
-    page = apply_hero(load_page_content(layout), hero)
+    page = apply_hero(load_page_content(layout, language), hero)
     return json.dumps(page, ensure_ascii=False)
 
 

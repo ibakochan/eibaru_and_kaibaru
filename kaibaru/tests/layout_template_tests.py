@@ -52,6 +52,38 @@ class LayoutTemplateFileTests(SimpleTestCase):
         actual = {path.name for path in LAYOUT_DIR.glob("*.json")}
         self.assertEqual(expected, actual)
 
+    def test_english_membership_templates_keep_the_same_media(self):
+        def urls(node, found):
+            if isinstance(node, dict):
+                for value in node.values():
+                    urls(value, found)
+            elif isinstance(node, list):
+                for value in node:
+                    urls(value, found)
+            elif isinstance(node, str) and node.startswith("http"):
+                found.append(node)
+
+        for key in TEMPLATE_KEYS:
+            with self.subTest(layout=key):
+                japanese = load_page_content(key)
+                english = load_page_content(key, "en")
+                if key in RESERVATION_TEMPLATE_KEYS:
+                    self.assertEqual(english, japanese)
+                    continue
+                self.assertNotEqual(
+                    english["sections"]["1"]["header"]["title"],
+                    japanese["sections"]["1"]["header"]["title"],
+                )
+                ja_urls, en_urls = [], []
+                urls(japanese, ja_urls)
+                urls(english, en_urls)
+                self.assertEqual(en_urls, ja_urls)
+                raw = json.dumps(english, ensure_ascii=False)
+                self.assertFalse(any(
+                    "\u3040" <= ch <= "\u30ff" or "\u4e00" <= ch <= "\u9fff" or ch == "\u3007"
+                    for ch in raw
+                ))
+
     def test_structure_of_every_template(self):
         for key in TEMPLATE_KEYS:
             with self.subTest(layout=key):

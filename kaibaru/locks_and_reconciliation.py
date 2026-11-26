@@ -1006,6 +1006,7 @@ class MembershipPlanDeletionReconciler:
                 group["members"].add(item.member.full_name)
                 group["plans"].add(plan.visible_name())
                 group["access_until"] = subscription.access_until
+                group["language"] = getattr(getattr(plan, "club", None), "language", "ja")
 
         # -----------------------------------------------------------
         # Only mark the plan actually deleted once a fresh DB query
@@ -1051,6 +1052,7 @@ class MembershipPlanDeletionReconciler:
                         if data["access_until"]
                         else None
                     ),
+                    "language": data.get("language") or "ja",
                 }
                 for owner_id, data in cancelled_owner_map.items()
             }

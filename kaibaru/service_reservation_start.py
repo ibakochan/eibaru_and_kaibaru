@@ -576,22 +576,36 @@ def _reusable_checkout_url(*, club, session_id):
 
 
 def _page_context(reservations, lesson, club):
+    from .club_language import is_english
+
     total = sum(reservation.amount for reservation in reservations)
     is_free = total == 0
     is_cash = _pays_at_venue(reservations)
-    kind = (
-        "体験予約"
-        if reservations[0].reservation_type
-        == Reservation.ReservationType.TRIAL
-        else "ビジター予約"
-    )
+    english = is_english(club)
+    if english:
+        reservation_type = reservations[0].reservation_type
+        if reservation_type == Reservation.ReservationType.TRIAL:
+            kind = "Intro class"
+        elif reservation_type == Reservation.ReservationType.MEMBER:
+            kind = "Member booking"
+        else:
+            kind = "Drop-in"
+    else:
+        kind = (
+            "体験予約"
+            if reservations[0].reservation_type
+            == Reservation.ReservationType.TRIAL
+            else "ビジター予約"
+        )
 
     return {
-        "club_name": club.title or club.subdomain or "クラブ",
+        "english": english,
+        "club_name": club.title or club.subdomain or ("the club" if english else "クラブ"),
         "lesson_title": lesson.title,
         "when_text": _format_when(
             lesson,
             reservations[0].reservation_date,
+            "en" if english else "ja",
         ),
         "people": [
             {
@@ -606,16 +620,24 @@ def _page_context(reservations, lesson, club):
         "kind": kind,
         "home_url": f"https://{club.subdomain}.kaibaru.jp/",
         "continue_label": (
-            "予約を確定する" if is_free or is_cash else "支払いへ進む"
+            ("Confirm booking" if is_free or is_cash else "Continue to payment")
+            if english
+            else ("予約を確定する" if is_free or is_cash else "支払いへ進む")
         ),
     }
 
 
-def _format_when(lesson, reservation_date):
-    weekday = WEEKDAY_NAMES[reservation_date.weekday()]
-    date_text = reservation_date.strftime("%Y年%m月%d日")
+def _format_when(lesson, reservation_date, language="ja"):
     start = lesson.start_time.strftime("%H:%M")
     end = lesson.end_time.strftime("%H:%M")
+    if language == "en":
+        weekday = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][
+            reservation_date.weekday()
+        ]
+        date_text = f"{reservation_date.strftime('%B')} {reservation_date.day}, {reservation_date.year}"
+        return f"{date_text} ({weekday}) {start}–{end}"
+    weekday = WEEKDAY_NAMES[reservation_date.weekday()]
+    date_text = reservation_date.strftime("%Y年%m月%d日")
     return f"{date_text}（{weekday}） {start}〜{end}"
 
 

@@ -1830,5 +1830,10 @@ def delete_overdue_platform_subscriptions(today):
                 "subdomain": club.subdomain,
                 "owner_name": owner.get_full_name() if owner else "",
                 "owner_email": owner.email if owner else settings.SERVER_EMAIL,
-                "reason": "お支払いが確認できず、一定期間が経過したため",
+                "language": getattr(club, "language", "ja"),
+                "reason": (
+                    "We did not receive payment, and the grace period has ended."
+                    if getattr(club, "language", "ja") == "en"
+                    else "お支払いが確認できず、一定期間が経過したため"
+                ),
             })
