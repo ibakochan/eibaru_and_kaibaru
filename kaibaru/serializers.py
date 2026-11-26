@@ -17,6 +17,7 @@ from django.db.models import Sum
 from datetime import date
 
 from .club_access import UNSUBSCRIBED_DELETE_DAYS, unsubscribed_open_days
+from .club_language import pick
 
 
 
@@ -3604,18 +3605,35 @@ class ClubSerializer(serializers.ModelSerializer):
 
             if days_after_exp < open_days:
                 days_left = open_days - days_after_exp
-                return (
-                    "このクラブはまだサブスクリプションに登録されていません。"
-                    f"あと {days_left} 日以内に登録しないとクラブは凍結されます。"
-                    "登録がないまま30日が過ぎると、クラブは削除されます。"
+                return pick(
+                    club,
+                    (
+                        "このクラブはまだサブスクリプションに登録されていません。"
+                        f"あと {days_left} 日以内に登録しないとクラブは凍結されます。"
+                        "登録がないまま30日が過ぎると、クラブは削除されます。"
+                    ),
+                    (
+                        "This club is not on a subscription yet. "
+                        f"Subscribe within {days_left} days or it will be frozen. "
+                        "If it is still not subscribed after 30 days, the club is deleted."
+                    ),
                 )
 
             days_left = UNSUBSCRIBED_DELETE_DAYS - days_after_exp
-            return (
-                "このクラブは現在凍結されています。"
-                "サブスクリプションが未登録のため、編集および表示が制限されています。"
-                f"あと {days_left} 日以内に登録が完了しない場合、"
-                "クラブと所属メンバーのデータは完全に削除されます。"
+            return pick(
+                club,
+                (
+                    "このクラブは現在凍結されています。"
+                    "サブスクリプションが未登録のため、編集および表示が制限されています。"
+                    f"あと {days_left} 日以内に登録が完了しない場合、"
+                    "クラブと所属メンバーのデータは完全に削除されます。"
+                ),
+                (
+                    "This club is frozen. "
+                    "It is not subscribed, so editing and public display are limited. "
+                    f"If it is still not subscribed within {days_left} days, "
+                    "the club and its members are deleted."
+                ),
             )
 
         if days_after_exp > 28:
@@ -3625,21 +3643,36 @@ class ClubSerializer(serializers.ModelSerializer):
             if request.user != club.owner:
                 return None
             days_left = 28 - days_after_exp
-            return (
-                f"このクラブは現在凍結されています。編集はできず、"
-                f"オーナー以外のユーザーには表示されません。"
-                f"あと {days_left} 日以内に支払いが完了しない場合、"
-                f"クラブとその所属メンバーのデータは完全に削除されます。"
+            return pick(
+                club,
+                (
+                    f"このクラブは現在凍結されています。編集はできず、"
+                    f"オーナー以外のユーザーには表示されません。"
+                    f"あと {days_left} 日以内に支払いが完了しない場合、"
+                    f"クラブとその所属メンバーのデータは完全に削除されます。"
+                ),
+                (
+                    "This club is frozen. It can't be edited, and nobody but the owner can see it. "
+                    f"If it is not paid within {days_left} days, the club and its members are deleted."
+                ),
             )
  
         if 1 <= days_after_exp <= 7:
             if request.user == club.owner:
                 days_left = 7 - days_after_exp
                 days_left_till_delete = 28 - days_after_exp
-                return (
-                    f"クラブの有効期限が切れています。このまま支払いがない場合、"
-                    f"あと {days_left} 日で編集できなくなり、他の人からも見えなくなります。"
-                    f"その後 {days_left_till_delete} 日以内に支払いがない場合、クラブと所属メンバーの情報は完全に削除されます。"
+                return pick(
+                    club,
+                    (
+                        f"クラブの有効期限が切れています。このまま支払いがない場合、"
+                        f"あと {days_left} 日で編集できなくなり、他の人からも見えなくなります。"
+                        f"その後 {days_left_till_delete} 日以内に支払いがない場合、クラブと所属メンバーの情報は完全に削除されます。"
+                    ),
+                    (
+                        "This club's subscription has expired. "
+                        f"Without a payment, editing stops in {days_left} days and other people will no longer see it. "
+                        f"If it is still unpaid {days_left_till_delete} days after that, the club and its members are deleted."
+                    ),
                 )
 
         return None
