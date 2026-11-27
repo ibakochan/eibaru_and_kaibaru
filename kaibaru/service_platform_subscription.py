@@ -864,21 +864,8 @@ def _create_mutation(platform_sub, mutation_type, club):
 def _checkout_line_items(platform_sub, extra_club):
     quantities = _desired_quantities(platform_sub)
     if not quantities:
-        member_count = billable_member_count([extra_club])
-        worker_count = billable_worker_count([extra_club])
-        quantities = {settings.STRIPE_BASE_PRICE_ID: 1}
-        full_price_members = min(member_count, 100)
-        reduced_members = max(member_count - 100, 0)
-        if full_price_members:
-            quantities[settings.STRIPE_MEMBER_PRICE_ID] = full_price_members
-        if reduced_members:
-            quantities[settings.STRIPE_MEMBER_PRICE_ID_REDUCED] = reduced_members
-        if worker_count:
-            quantities[worker_price_id()] = worker_count
-    return [
-        {"price": price_id, "quantity": quantity}
-        for price_id, quantity in quantities.items()
-    ]
+        quantities = _quantities_for_clubs([extra_club])
+    return _line_items_from_quantities(quantities)
 
 
 def _apply_local(mutation):
@@ -1264,6 +1251,152 @@ def _subscription_payload(platform_sub, club):
     }
 
 
+def _quantities_for_clubs(clubs):
+    member_count = billable_member_count(clubs)
+    worker_count = billable_worker_count(clubs)
+    quantities = {settings.STRIPE_BASE_PRICE_ID: 1}
+    full_price_members = min(member_count, 100)
+    reduced_members = max(member_count - 100, 0)
+    if full_price_members:
+        quantities[settings.STRIPE_MEMBER_PRICE_ID] = full_price_members
+    if reduced_members:
+        quantities[settings.STRIPE_MEMBER_PRICE_ID_REDUCED] = reduced_members
+    if worker_count:
+        quantities[worker_price_id()] = worker_count
+    return quantities
+
+
+def _line_items_from_quantities(quantities):
+    return [
+        {"price": price_id, "quantity": quantity}
+        for price_id, quantity in quantities.items()
+    ]
+
+
+def _drop_unpaid_platform_checkout(user):
+    """Clear a checkout that was saved before payment existed.
+
+    An already paid session is finished instead of deleted. An open
+    session is expired so that page can no longer be paid. A paid
+    subscription is never touched. Nothing is written when there is
+    no leftover row.
+    """
+    platform_sub = PlatformSubscription.objects.filter(user_id=user.id).first()
+    if not platform_sub or platform_sub.stripe_subscription_id:
+        return None
+    open_mutations = list(
+        ClubSubscriptionMutation.objects.filter(
+            platform_subscription=platform_sub,
+            status__in=OPEN_STATUSES,
+        )
+    )
+    for mutation in open_mutations:
+        session_id = (mutation.payload or {}).get("checkout_session_id")
+        if not session_id:
+            continue
+        try:
+            session = stripe.checkout.Session.retrieve(session_id)
+        except Exception:
+            logger.exception(
+                "[PLATFORM SUB] leftover checkout retrieve failed session=%s",
+                session_id,
+            )
+            continue
+        if session.get("status") == "complete":
+            _checkout_completed_locked(session)
+            platform_sub.refresh_from_db()
+            return platform_sub
+        if session.get("status") == "open":
+            try:
+                stripe.checkout.Session.expire(session_id)
+            except Exception:
+                logger.exception(
+                    "[PLATFORM SUB] leftover checkout expire failed session=%s",
+                    session_id,
+                )
+    if open_mutations:
+        ClubSubscriptionMutation.objects.filter(
+            id__in=[mutation.id for mutation in open_mutations],
+        ).update(
+            status=ClubSubscriptionMutation.Status.FAILED,
+            processed_at=timezone.now(),
+        )
+    PlatformClub.objects.filter(
+        platform_subscription=platform_sub,
+        awaiting_checkout=True,
+    ).delete()
+    platform_sub.refresh_from_db()
+    if platform_sub.stripe_subscription_id:
+        return platform_sub
+    if not platform_sub.clubs.exists():
+        platform_sub.delete()
+    return None
+
+
+def _stripe_subscription_for_user(user):
+    """A Stripe subscription already started for this owner, if Checkout finished."""
+    try:
+        result = stripe.Subscription.search(
+            query=f"metadata['user_id']:'{user.id}'",
+            limit=10,
+        )
+    except Exception:
+        logger.exception("[PLATFORM SUB] subscription search failed user=%s", user.id)
+        return None
+    open_statuses = {"active", "trialing", "past_due", "unpaid", "incomplete"}
+    for stripe_sub in result.data:
+        if stripe_sub.get("status") in open_statuses:
+            return stripe_sub
+    return None
+
+
+def _start_first_club_checkout(club, user):
+    """Open Checkout for an owner who is not subscribed yet.
+
+    No local subscription, club link, or mutation is written. Those are
+    created when checkout.session.completed confirms the payment.
+    """
+    existing = _stripe_subscription_for_user(user)
+    if existing:
+        if existing.get("status") == "incomplete":
+            raise PlatformActionError(IN_PROGRESS)
+        raise PlatformActionError("すでに契約済みです。")
+
+    finished = _drop_unpaid_platform_checkout(user)
+    if finished and finished.stripe_subscription_id:
+        return _subscription_payload(finished, club)
+
+    session_kwargs = {
+        "mode": "subscription",
+        "payment_method_types": ["card"],
+        "line_items": _line_items_from_quantities(_quantities_for_clubs([club])),
+        "metadata": {
+            "type": "platform_first_checkout",
+            "club_id": str(club.id),
+            "user_id": str(user.id),
+        },
+        "subscription_data": {
+            "metadata": {
+                "type": "platform_first_checkout",
+                "user_id": str(user.id),
+                "club_id": str(club.id),
+            }
+        },
+        "success_url": f"https://{club.subdomain}.kaibaru.jp/?payment=success",
+        "cancel_url": f"https://{club.subdomain}.kaibaru.jp/?payment=cancel",
+    }
+    email = (getattr(user, "email", "") or "").strip()
+    if email:
+        session_kwargs["customer_email"] = email
+    session = stripe.checkout.Session.create(**session_kwargs)
+    return {"id": session.id}
+
+
+def _subscription_has_ended(platform_sub):
+    """A canceled platform subscription is finished. A new checkout replaces it."""
+    return bool(platform_sub) and platform_sub.status == "canceled"
+
+
 def start_club_subscription(club, user):
     if club.owner_id != user.id:
         raise PlatformActionError("許可なし")
@@ -1271,7 +1404,14 @@ def start_club_subscription(club, user):
         raise PlatformActionError(FIRST_OF_MONTH_BLOCKED)
 
     _stripe()
-    platform_sub = ensure_platform_subscription(user) or _get_or_create_platform_sub(user)
+    platform_sub = ensure_platform_subscription(user)
+    if (
+        not platform_sub
+        or not platform_sub.stripe_subscription_id
+        or _subscription_has_ended(platform_sub)
+    ):
+        return _start_first_club_checkout(club, user)
+
     existing_link = PlatformClub.objects.filter(club=club).first()
     if existing_link and existing_link.platform_subscription_id != platform_sub.id:
         raise PlatformActionError("このクラブは別の契約に入っています。")
@@ -1321,36 +1461,10 @@ def start_club_subscription(club, user):
         with transaction.atomic():
             _apply_local(mutation)
 
-        if platform_sub.stripe_subscription_id:
-            _apply_stripe(mutation)
-            _mark_succeeded(mutation)
-            platform_sub.refresh_from_db()
-            return _subscription_payload(platform_sub, club)
-
-        customer_id = _ensure_customer(platform_sub, user, club)
-        session = stripe.checkout.Session.create(
-            customer=customer_id,
-            mode="subscription",
-            payment_method_types=["card"],
-            line_items=_checkout_line_items(platform_sub, club),
-            metadata={
-                "club_id": str(club.id),
-                "platform_subscription_id": str(platform_sub.id),
-                "mutation_id": str(mutation.id),
-            },
-            subscription_data={
-                "metadata": {
-                    "user_id": str(user.id),
-                    "platform_subscription_id": str(platform_sub.id),
-                }
-            },
-            success_url=f"https://{club.subdomain}.kaibaru.jp/?payment=success",
-            cancel_url=f"https://{club.subdomain}.kaibaru.jp/?payment=cancel",
-            idempotency_key=f"platform_mut_{mutation.id}_checkout",
-        )
-        mutation.payload = {"checkout_session_id": session.id}
-        mutation.save(update_fields=["payload"])
-        return {"id": session.id}
+        _apply_stripe(mutation)
+        _mark_succeeded(mutation)
+        platform_sub.refresh_from_db()
+        return _subscription_payload(platform_sub, club)
 
 
 def _run_inside_lock(platform_sub):
@@ -1556,8 +1670,85 @@ def reconcile_open_mutations_of_type(types):
             )
 
 
+def _platform_sub_for_user(user_id):
+    platform_sub = PlatformSubscription.objects.filter(user_id=user_id).first()
+    if platform_sub:
+        return platform_sub
+    try:
+        return PlatformSubscription.objects.create(user_id=user_id)
+    except Exception:
+        platform_sub = PlatformSubscription.objects.filter(user_id=user_id).first()
+        if platform_sub:
+            return platform_sub
+        raise
+
+
+def _handle_first_checkout_completed(session):
+    """Create the platform subscription only after the first payment."""
+    metadata = session.get("metadata") or {}
+    user_id = metadata.get("user_id")
+    club_id = metadata.get("club_id")
+    subscription_id = session.get("subscription")
+    if not user_id or not club_id or not subscription_id:
+        logger.error(
+            "[PLATFORM SUB] first checkout missing ids session=%s",
+            session.get("id"),
+        )
+        return True
+
+    club = Club.all_objects.filter(id=club_id, is_deleted=False).first()
+    if not club or str(club.owner_id) != str(user_id):
+        logger.error(
+            "[PLATFORM SUB] first checkout club mismatch session=%s club=%s user=%s",
+            session.get("id"),
+            club_id,
+            user_id,
+        )
+        return True
+
+    _stripe()
+    platform_sub = _platform_sub_for_user(user_id)
+    with platform_subscription_lock(platform_sub.id):
+        platform_sub.refresh_from_db()
+        if (
+            platform_sub.stripe_subscription_id
+            and platform_sub.stripe_subscription_id != subscription_id
+            and not _subscription_has_ended(platform_sub)
+        ):
+            logger.error(
+                "[PLATFORM SUB] first checkout duplicate local=%s stripe=%s",
+                platform_sub.stripe_subscription_id,
+                subscription_id,
+            )
+            try:
+                stripe.Subscription.delete(subscription_id)
+            except Exception:
+                logger.exception(
+                    "[PLATFORM SUB] failed to cancel duplicate %s",
+                    subscription_id,
+                )
+            return True
+        _checkout_completed_locked({
+            "id": session.get("id"),
+            "subscription": subscription_id,
+            "customer": session.get("customer"),
+            "invoice": session.get("invoice") or "",
+            "metadata": {
+                "type": "platform_first_checkout",
+                "club_id": str(club_id),
+                "user_id": str(user_id),
+                "platform_subscription_id": str(platform_sub.id),
+            },
+        })
+        with transaction.atomic():
+            _reconcile_locked(platform_sub.id)
+    return True
+
+
 def handle_checkout_completed(session):
     metadata = session.get("metadata") or {}
+    if metadata.get("type") == "platform_first_checkout":
+        return _handle_first_checkout_completed(session)
     platform_sub_id = metadata.get("platform_subscription_id")
     if not platform_sub_id:
         return False
@@ -1584,7 +1775,16 @@ def _checkout_completed_locked(session):
 
     subscription_id = session.get("subscription")
     customer_id = session.get("customer")
-    if subscription_id and platform_sub.stripe_subscription_id not in (None, "", subscription_id):
+    replacing_ended = (
+        subscription_id
+        and platform_sub.stripe_subscription_id not in (None, "", subscription_id)
+        and _subscription_has_ended(platform_sub)
+    )
+    if (
+        subscription_id
+        and platform_sub.stripe_subscription_id not in (None, "", subscription_id)
+        and not replacing_ended
+    ):
         logger.error(
             "[PLATFORM SUB] checkout subscription mismatch local=%s stripe=%s",
             platform_sub.stripe_subscription_id,
