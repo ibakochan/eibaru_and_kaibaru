@@ -4,7 +4,6 @@ FAIL_TEST_EMAILS = {
     "slammsa@gmail.com",
     "slammsa5555@gmail.com",
     "slammsa@hotmail.com",
-    "info@kaibaru.jp",
 }
 
 
