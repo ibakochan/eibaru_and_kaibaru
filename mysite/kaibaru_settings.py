@@ -89,11 +89,11 @@ MIDDLEWARE = [
     'django.contrib.sessions.middleware.SessionMiddleware',
     
     'django.middleware.common.CommonMiddleware',
-    'kaibaru.stripe_failure_middleware.StripeFailureMiddleware',
     'kaibaru.club_media.ImageSizeLimitMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'kaibaru.stripe_failure_middleware.StripeFailureMiddleware',
 
     'allauth.account.middleware.AccountMiddleware',
 
