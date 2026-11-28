@@ -464,6 +464,7 @@ def estimate_platform_bill_for_owner(user):
         "total_yen": 0,
         "stripe_application_fee_yen": 0,
         "next_payment_on": None,
+        "clubs": [],
         **empty_cash,
     }
     if not user or not getattr(user, "id", None):
@@ -490,6 +491,7 @@ def estimate_platform_bill_for_owner(user):
             **cash_fees,
             **domain_fees,
             "next_payment_on": next_payment_on,
+            "clubs": [],
             "subscription_yen": domain_yen,
             "total_yen": cash_fees.get("cash_fee_next_yen", 0) + domain_yen,
             "stripe_application_fee_yen": _stripe_take_yen(cash_club_ids, cash_fees),
@@ -532,6 +534,15 @@ def estimate_platform_bill_for_owner(user):
         "total_yen": subscription_yen + cash_fee_next_yen,
         "stripe_application_fee_yen": stripe_fee_yen,
         "next_payment_on": next_payment_on,
+        "clubs": [
+            {
+                "id": club.id,
+                "subdomain": club.subdomain,
+                "custom_domain": (club.custom_domain or "").strip(),
+                "custom_domain_status": club.custom_domain_status or "",
+            }
+            for club in clubs
+        ],
         **cash_fees,
     }
 
