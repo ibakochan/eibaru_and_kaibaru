@@ -33,7 +33,10 @@ from .club_media import (
     scrub_stored_file,
     sync_video_url,
 )
-from .service_platform_subscription import member_deletion_block_reason
+from .service_platform_subscription import (
+    member_deletion_block_reason,
+    platform_billing_change_block_reason,
+)
 
 
 from collections import defaultdict
@@ -1590,6 +1593,13 @@ class JoinRequestViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        billing_block = platform_billing_change_block_reason(club)
+        if billing_block:
+            return Response(
+                {"detail": billing_block},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         if (
             timezone.localdate().day == club.stripe_anchor_date
             and join_requests.filter(already_subscribed_plans__isnull=False).exists()
@@ -1744,6 +1754,13 @@ class MemberViewSet(viewsets.ModelViewSet):
                 {"detail": MEMBERS_REQUIRE_SUBSCRIPTION},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if club:
+            billing_block = platform_billing_change_block_reason(club)
+            if billing_block:
+                return Response(
+                    {"detail": billing_block},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         response = super().create(request, *args, **kwargs)
         if response.status_code == 201 and club is not None:
             member_id = response.data.get("id")
@@ -4737,7 +4754,10 @@ class ClubViewSet(viewsets.ModelViewSet):
         if error:
             return error
         if request.method == "DELETE":
-            clear_domain(club)
+            try:
+                clear_domain(club)
+            except CustomDomainError as exc:
+                return Response({"error": exc.message}, status=status.HTTP_400_BAD_REQUEST)
             return Response(self._domain_payload(club, "独自ドメインを解除しました。"))
         try:
             domain = assign_domain(club, request.data.get("domain"))

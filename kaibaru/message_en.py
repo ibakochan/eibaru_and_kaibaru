@@ -191,6 +191,8 @@ MESSAGE_EN = {
     "説明は4000文字以内にしてください。": "Keep the description to 4000 characters.",
     "課金設定が正しくありません。月謝または定期課金を設定してください。": "The billing setup isn't valid. Choose a monthly fee or a recurring charge.",
     "請求日が設定されていません。クラブの課金設定を確認してください。": "No billing day is set. Check the club's billing settings.",
+    "請求日の前後1日は会員を削除できません。別の日にお試しください。": "Members can't be deleted the day before or after the billing date. Try another day.",
+    "請求日の前後1日は変更できません。別の日にお試しください。": "This change isn't available the day before or after the billing date. Try another day.",
     "請求日は1〜28の数字で指定してください": "The billing day has to be from 1 to 28.",
     "購入日を入力してください。": "Enter the purchase date.",
     "送信が続いています。しばらくしてからもう一度お試しください。": "A send is already in progress. Wait a little and try again.",

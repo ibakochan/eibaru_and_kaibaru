@@ -1071,6 +1071,10 @@ def issue_scheduled_custom_domain_certs():
         if not domain_points_here(club.custom_domain):
             summary["waiting"] += 1
             continue
+        from .service_platform_subscription import platform_billing_change_block_reason
+        if platform_billing_change_block_reason(club):
+            summary["waiting"] += 1
+            continue
         try:
             publish_domain(club)
         except CustomDomainError as exc:

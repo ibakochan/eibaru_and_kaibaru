@@ -706,6 +706,21 @@ def member_deletion_block_reason(club):
     return None
 
 
+def platform_billing_change_block_reason(club):
+    """Refuse a bill change while the renewal invoice is being prepared."""
+    link = (
+        PlatformClub.objects
+        .filter(club=club, awaiting_checkout=False)
+        .select_related("platform_subscription")
+        .first()
+    )
+    if not link or not link.platform_subscription.stripe_subscription_id:
+        return None
+    if near_payment(link.platform_subscription):
+        return PAYMENT_WINDOW_BLOCKED
+    return None
+
+
 def _period_end_from_stripe(sub):
     stamp = sub.get("current_period_end")
     if not stamp:

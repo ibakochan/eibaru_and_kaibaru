@@ -12,6 +12,7 @@ from .service_platform_subscription import (
     PlatformBusy,
     apply_quantity_changes,
     clubs_pending_removal_ids,
+    platform_billing_change_block_reason,
     platform_subscription_lock,
     quantity_change_key,
     queue_domain_sync,
@@ -83,6 +84,9 @@ def club_can_save_domain(club):
 
 
 def assign_domain(club, value):
+    billing_block = platform_billing_change_block_reason(club)
+    if billing_block:
+        raise CustomDomainError(billing_block)
     if not club_can_save_domain(club):
         raise CustomDomainError(
             "独自ドメインは、解約予約のない契約中のクラブだけ保存できます。"
@@ -113,6 +117,9 @@ def assign_domain(club, value):
 
 
 def clear_domain(club):
+    billing_block = platform_billing_change_block_reason(club)
+    if billing_block:
+        raise CustomDomainError(billing_block)
     owner_id = club.owner_id
     club.custom_domain = None
     club.custom_domain_status = ""
@@ -346,6 +353,9 @@ def sync_custom_domain_fee(owner_id, club=None, *, include_club_id=None):
 
 def publish_domain(club):
     """Issue a certificate when DNS already points here. Used by the hourly task."""
+    billing_block = platform_billing_change_block_reason(club)
+    if billing_block:
+        raise CustomDomainError(billing_block)
     domain = check_domain(club)
     if club.custom_domain_status == "active":
         if club.scheduled_for_domain_cert:

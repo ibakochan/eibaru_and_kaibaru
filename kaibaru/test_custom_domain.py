@@ -148,7 +148,11 @@ class CheckDomainTests(SimpleTestCase):
             with patch("kaibaru.service_custom_domain.subprocess.run", return_value=completed) as run:
                 with patch("kaibaru.service_custom_domain.sync_custom_domain_fee") as sync:
                     with patch("kaibaru.service_custom_domain.EmailMessage") as message:
-                        publish_domain(club)
+                        with patch(
+                            "kaibaru.service_custom_domain.platform_billing_change_block_reason",
+                            return_value=None,
+                        ):
+                            publish_domain(club)
         run.assert_called_once()
         self.assertEqual(run.call_args.args[0][0:2], ["/usr/bin/sudo", "-n"])
         self.assertNotIn("-S", run.call_args.args[0])

@@ -898,6 +898,10 @@ def create_owner_worker(club, actor, payload, files=None):
         return None, "ログインしてください。"
     if club.owner_id != actor.id:
         return None, "クラブのオーナーだけがワーカーを作成できます。"
+    from .service_platform_subscription import platform_billing_change_block_reason
+    billing_block = platform_billing_change_block_reason(club)
+    if billing_block:
+        return None, billing_block
 
     as_self = _payload_get(payload, "as_self") in (True, 1, "1", "true", "True")
     from .utils import sync_worker_quantity
