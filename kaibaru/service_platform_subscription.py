@@ -569,12 +569,17 @@ def platform_billing_detail_for_owner(user):
             "full_name": member.full_name,
             "club_id": member.club_id,
             "club_subdomain": member.club.subdomain,
+            "club_custom_domain": (member.club.custom_domain or "").strip(),
             "is_worker": bool(member.is_worker),
         }
         for member in members
     ]
     club_rows = [
-        {"id": club.id, "subdomain": club.subdomain}
+        {
+            "id": club.id,
+            "subdomain": club.subdomain,
+            "custom_domain": (club.custom_domain or "").strip(),
+        }
         for club in clubs
     ]
     if use_current:

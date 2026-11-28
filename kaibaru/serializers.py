@@ -1369,6 +1369,11 @@ class PlatformBillingCashInvoiceSerializer(PaymentHistoryInvoiceSerializer):
 
     club_id = serializers.IntegerField(source="club.id", read_only=True)
     club_subdomain = serializers.CharField(source="club.subdomain", read_only=True)
+    club_custom_domain = serializers.CharField(
+        source="club.custom_domain",
+        read_only=True,
+        allow_null=True,
+    )
     payment_method = serializers.CharField(read_only=True)
     kind = serializers.SerializerMethodField()
 
@@ -1376,6 +1381,7 @@ class PlatformBillingCashInvoiceSerializer(PaymentHistoryInvoiceSerializer):
         fields = PaymentHistoryInvoiceSerializer.Meta.fields + [
             "club_id",
             "club_subdomain",
+            "club_custom_domain",
             "payment_method",
             "kind",
         ]
